@@ -1,0 +1,46 @@
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Build, package, and runtime output
+build/
+dist/
+*.egg-info/
+.cache/
+cache/
+tmp/
+temp/
+*.log
+
+# Frontend dependency and build output
+node_modules/
+.next/
+.nuxt/
+.svelte-kit/
+out/
+
+# IDE and OS-local files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Preserved input package. It contains credentials and must remain wholly untracked.
+/doubao_glm_api_package/
