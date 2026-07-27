@@ -53,6 +53,7 @@ Handoff sequence:
 | `8-S0` closeout | Requirement copy and final governance alignment | Group 8 | S0 policy checks, then Group 8 recheck | S0 closeout commit only | Authorized by the current user prompt; closes after verified commit |
 | `1-S1` | Data model, Schema, renderer API, core package, example | Group 1 | Group 7-equivalent contract tests, then Group 8 recheck | Group 8 after verification | Verified 2026-07-27; closes with the Stage 1 integration commit |
 | `1-S2` | Timeline, layer/transform evaluation, keyframes, command history | Group 1 | Stage 1 regression plus fixed-time/command tests, then Group 8 recheck | Group 8 after verification | Verified 2026-07-27; closes with the Stage 2 integration commit |
+| `1-S3` | Effect Graph, resources/cache, WebGL composition, masks, Alpha, effect stack | Group 1 | Contract regressions, Golden Frame, GPU/resource release, and vertical-preview smoke, then Group 8 recheck | Group 8 after verification | Verified 2026-07-27; closes with the Stage 3 integration commit |
 | Later rows | Defined by each current-stage prompt | Prompt-designated group | Group 7 | Group 8 | Pending prior PASS plus the user's matching prompt |
 
 No integration commit may include another stage's files. No reset, checkout, clean, batch deletion, or force-add is allowed.
@@ -130,6 +131,8 @@ Two source definitions are already known and are not blockers:
 Stage 1 public contract freeze: packages and engine `0.1.0`; Project Schema `1.0.0`; Effect Definition Schema `1.0.0`; Renderer Adapter API `1.0.0`; JSON Schema ID `https://schemas.codemotion.dev/contracts/v1/contracts.schema.json`. The authoritative scope and change-control record is `docs/api/stage-1.md`.
 
 Stage 2 stability freeze: root/engine/core/Schema `0.2.0`; timeline and scene-graph `0.1.0`; Project Schema `1.1.0`; command interface at core `0.2.0`; Effect Definition Schema and Renderer Adapter API remain `1.0.0`. The authoritative scope and fixed-time/command record is `docs/api/stage-2.md`.
+
+Stage 3 stability freeze: root/engine/core/Schema `0.3.0`; Project Schema `1.2.0`; Renderer Adapter API `1.1.0`; renderer-api package `0.2.0`; expression, effect-graph, renderer-webgl, resource-manager, and cache packages `0.1.0`; Effect Definition Schema remains `1.0.0`. The authoritative core and WebGL records are `docs/api/stage-3.md` and `docs/api/stage-3-webgl.md`.
 
 ## 27.8 S0 exit gate
 

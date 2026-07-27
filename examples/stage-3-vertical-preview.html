@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VERTICAL_PREVIEW_RUNNING</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "@codemotion/core": "/packages/core/dist/index.js",
+        "@codemotion/renderer-api": "/packages/renderer-api/dist/index.js"
+      }
+    }
+  </script>
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #0b0d10; }
+    body { display: grid; min-height: 100vh; place-items: center; }
+    canvas { width: min(270px, 90vw); aspect-ratio: 9 / 16; box-shadow: 0 12px 40px #0008; }
+    #webgl { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="webgl" width="270" height="480"></canvas>
+  <canvas id="preview" width="270" height="480"></canvas>
+  <script type="module">
+    import {
+      WEBGL_PIPELINE_VALIDATION_EFFECT,
+      WebGLRendererAdapter
+    } from "/packages/renderer-webgl/dist/index.js";
+
+    const width = 270;
+    const height = 480;
+    const webglCanvas = document.querySelector("#webgl");
+    const previewCanvas = document.querySelector("#preview");
+    const gl = webglCanvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true });
+
+    try {
+      if (gl === null) throw new Error("WebGL2 unavailable.");
+      const adapter = new WebGLRendererAdapter({ contextFactory: () => gl });
+      const initialization = { width, height, colorSpace: "srgb", quality: "preview" };
+      const frame = {
+        time: 0,
+        deltaTime: 1 / 30,
+        frame: 0,
+        fps: 30,
+        width,
+        height,
+        seed: 42,
+        quality: "preview",
+        colorSpace: "srgb"
+      };
+      const descriptor = { width, height, format: "rgba8", colorSpace: "srgb", samples: 1, usage: "input" };
+      const backdropPixels = new Uint8Array(width * height * 4);
+      const sourcePixels = new Uint8Array(width * height * 4);
+      const maskPixels = new Uint8Array(width * height);
+
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const pixel = y * width + x;
+          const offset = pixel * 4;
+          const vertical = y / (height - 1);
+          backdropPixels[offset] = Math.round(12 + 20 * vertical);
+          backdropPixels[offset + 1] = Math.round(18 + 34 * vertical);
+          backdropPixels[offset + 2] = Math.round(30 + 54 * vertical);
+          backdropPixels[offset + 3] = 255;
+
+          const nx = (x - width * 0.5) / (width * 0.36);
+          const ny = (y - height * 0.43) / (height * 0.21);
+          const radius = Math.sqrt(nx * nx + ny * ny);
+          const coverage = Math.max(0, Math.min(1, (1.05 - radius) * 8));
+          sourcePixels[offset] = 255;
+          sourcePixels[offset + 1] = Math.round(96 + 112 * vertical);
+          sourcePixels[offset + 2] = 56;
+          sourcePixels[offset + 3] = Math.round(230 * coverage);
+          maskPixels[pixel] = Math.round(255 * coverage);
+        }
+      }
+
+      adapter.initialize(initialization);
+      adapter.beginFrame(frame);
+      const backdrop = adapter.createTexture(descriptor);
+      adapter.uploadTexture(backdrop, backdropPixels, "straight");
+      const source = adapter.createTexture(descriptor);
+      adapter.uploadTexture(source, sourcePixels, "straight");
+      const mask = adapter.createTexture({ ...descriptor, format: "alpha8", usage: "mask" });
+      adapter.uploadTexture(mask, maskPixels, "straight");
+      const masked = adapter.applyMaskStack(source, [
+        { texture: mask, mode: "add", opacity: 1 },
+        { texture: mask, mode: "intersect", opacity: 0.92 }
+      ]);
+      const effected = adapter.applyEffectStack(masked, [WEBGL_PIPELINE_VALIDATION_EFFECT]);
+      if (effected.failures.length > 0) throw effected.failures[0].error;
+      const output = adapter.composite([backdrop, effected.output], { blendMode: "screen", opacity: 0.9 }, frame);
+      const pixels = adapter.readTexturePixels(output);
+      adapter.endFrame(frame);
+
+      let checksum = 2166136261;
+      for (const value of pixels) checksum = Math.imul(checksum ^ value, 16777619) >>> 0;
+      if (checksum === 0 || pixels.length !== width * height * 4) throw new Error("Preview output is invalid.");
+
+      const display = new Uint8ClampedArray(pixels.length);
+      const rowBytes = width * 4;
+      for (let y = 0; y < height; y += 1) {
+        display.set(pixels.subarray(y * rowBytes, (y + 1) * rowBytes), (height - y - 1) * rowBytes);
+      }
+      const context = previewCanvas.getContext("2d");
+      if (context === null) throw new Error("Preview canvas unavailable.");
+      context.putImageData(new ImageData(display, width, height), 0, 0);
+      adapter.dispose();
+      document.body.dataset.previewWidth = String(width);
+      document.body.dataset.previewHeight = String(height);
+      document.body.dataset.previewChecksum = checksum.toString(16).padStart(8, "0");
+      document.title = `VERTICAL_PREVIEW_PASS:${width}x${height}:${document.body.dataset.previewChecksum}`;
+    } catch (error) {
+      document.title = `VERTICAL_PREVIEW_FAIL:${error instanceof Error ? error.message : String(error)}`;
+    }
+  </script>
+</body>
+</html>

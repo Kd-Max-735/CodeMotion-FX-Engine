@@ -25,6 +25,7 @@ dist/
 *.egg-info/
 .cache/
 cache/
+!/packages/cache/
 tmp/
 temp/
 *.log

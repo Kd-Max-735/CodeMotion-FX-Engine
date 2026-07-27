@@ -63,9 +63,24 @@ export interface RenderPreset {
   settings: JsonObject;
 }
 
+export type ExpressionAstNode =
+  | { type: "literal"; value: JsonValue }
+  | { type: "variable"; name: string }
+  | { type: "reference"; programId: string }
+  | { type: "unary"; operator: "-" | "+" | "!"; argument: ExpressionAstNode }
+  | {
+      type: "binary";
+      operator: "+" | "-" | "*" | "/" | "%" | "**" | "<" | "<=" | ">" | ">=" | "===" | "!==" | "&&" | "||";
+      left: ExpressionAstNode;
+      right: ExpressionAstNode;
+    }
+  | { type: "conditional"; test: ExpressionAstNode; consequent: ExpressionAstNode; alternate: ExpressionAstNode }
+  | { type: "call"; name: string; arguments: ExpressionAstNode[] };
+
 export interface ExpressionDefinition {
   language: "cmfx-expression";
   source: string;
+  ast?: ExpressionAstNode;
   fallback?: JsonValue;
 }
 
@@ -288,6 +303,47 @@ export interface TimelineMarker {
   color?: string;
 }
 
+export type EffectGraphValueType =
+  | "texture"
+  | "color"
+  | "number"
+  | "vector2"
+  | "vector3"
+  | "mask"
+  | "metadata";
+
+export type AlphaMode = "none" | "straight" | "premultiplied";
+
+export interface EffectGraphPortContract extends JsonObject {
+  valueType: EffectGraphValueType;
+  width?: number;
+  height?: number;
+  alphaMode?: AlphaMode;
+  colorSpace?: ColorSpace;
+}
+
+export interface EffectGraphNodeDefinition extends JsonObject {
+  id: string;
+  kind: "input" | "texture" | "color" | "math" | "mask" | "effect" | "composite" | "output";
+  inputs: Record<string, EffectGraphPortContract>;
+  outputs: Record<string, EffectGraphPortContract>;
+  config: JsonObject;
+}
+
+export interface EffectGraphEdgeDefinition extends JsonObject {
+  fromNode: string;
+  fromPort: string;
+  toNode: string;
+  toPort: string;
+}
+
+export interface EffectGraphDefinition extends JsonObject {
+  version: "1.0.0";
+  nodes: EffectGraphNodeDefinition[];
+  edges: EffectGraphEdgeDefinition[];
+  outputNodeId: string;
+}
+
 export interface CompositionDefinition {
   id: string;
   name: string;
@@ -298,6 +354,7 @@ export interface CompositionDefinition {
   layers: LayerDefinition[];
   markers?: TimelineMarker[];
   effects?: EffectInstance[];
+  effectGraph?: EffectGraphDefinition;
 }
 
 export type Composition = CompositionDefinition;

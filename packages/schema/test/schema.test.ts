@@ -5,6 +5,7 @@ import {
   EngineError,
   ERROR_CODES,
   PROJECT_SCHEMA_VERSION,
+  type EffectGraphDefinition,
   type JsonObject,
   type MotionProject
 } from "@codemotion/core";
@@ -126,9 +127,50 @@ describe("project serialization", () => {
     expect(migrated.metadata).toEqual(current.metadata);
     expect(migrated.compositions).toEqual(current.compositions);
   });
+
+  it("migrates the Stage 2 schema to Stage 3 without rewriting data", async () => {
+    const current = await exampleProject();
+    const stageTwo = { ...(current as unknown as JsonObject), schemaVersion: "1.1.0" };
+    const migrated = loadProject(stageTwo);
+    expect(migrated.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(migrated.compositions).toEqual(current.compositions);
+    expect(migrated.metadata).toEqual(current.metadata);
+  });
 });
 
 describe("versioned contract schemas", () => {
+  it("validates the versioned Effect Graph contract and Composition field", async () => {
+    const graph: EffectGraphDefinition = {
+      version: "1.0.0",
+      outputNodeId: "output",
+      nodes: [
+        { id: "input", kind: "input", inputs: {}, outputs: { image: { valueType: "texture", width: 1, height: 1 } }, config: {} },
+        { id: "output", kind: "output", inputs: { source: { valueType: "texture", width: 1, height: 1 } }, outputs: {}, config: {} }
+      ],
+      edges: [{ fromNode: "input", fromPort: "image", toNode: "output", toPort: "source" }]
+    };
+    expect(validateContract("EffectGraphDefinition", graph)).toMatchObject({ valid: true });
+    expect(validateContract("EffectGraphDefinition", { ...graph, version: "0.9.0" })).toMatchObject({ valid: false });
+
+    const project = await exampleProject();
+    const composition = project.compositions[0];
+    if (composition === undefined) throw new Error("Example composition missing.");
+    expect(validateContract("CompositionDefinition", { ...composition, effectGraph: graph })).toMatchObject({ valid: true });
+    expect(validateContract("Animatable", {
+      mode: "expression",
+      expression: {
+        language: "cmfx-expression",
+        source: "clamp(value, 0, 1)",
+        ast: {
+          type: "call",
+          name: "clamp",
+          arguments: [{ type: "variable", name: "value" }, { type: "literal", value: 0 }, { type: "literal", value: 1 }]
+        },
+        fallback: 0
+      }
+    })).toMatchObject({ valid: true });
+  });
+
   it("validates every layer discriminator", async () => {
     const project = await exampleProject();
     const base = project.compositions[0]?.layers[0];

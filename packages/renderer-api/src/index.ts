@@ -46,6 +46,35 @@ export interface RendererCapabilities {
   supportedBlendModes: readonly string[];
 }
 
+export interface RendererCapabilityRequirements {
+  readonly width: number;
+  readonly height: number;
+  readonly requiresAlpha?: boolean;
+  readonly requiresFloatTextures?: boolean;
+  readonly colorSpace: ColorSpace;
+  readonly blendModes?: readonly string[];
+}
+
+export interface RendererCapabilityReport {
+  readonly adapterId: string;
+  readonly backend: RenderBackend;
+  readonly supported: boolean;
+  readonly missing: readonly string[];
+}
+
+export interface RendererSelectionOptions {
+  readonly backendOrder: readonly RenderBackend[];
+  readonly mode: "preview" | "final";
+  readonly allowDegraded?: boolean;
+  readonly approveFinalDegradation?: boolean;
+}
+
+export interface RendererSelection {
+  readonly adapter: RendererAdapter;
+  readonly report: RendererCapabilityReport;
+  readonly degraded: boolean;
+}
+
 export interface RendererInitialization {
   width: number;
   height: number;
@@ -143,6 +172,84 @@ export function assertRendererCompatibility(adapter: RendererAdapter): void {
       }
     );
   }
+}
+
+export function detectRendererCapabilities(
+  adapter: RendererAdapter,
+  requirements: RendererCapabilityRequirements
+): RendererCapabilityReport {
+  assertRendererCompatibility(adapter);
+  if (!Number.isInteger(requirements.width) || requirements.width < 1
+    || !Number.isInteger(requirements.height) || requirements.height < 1) {
+    throw new RangeError("Renderer dimensions must be positive integers.");
+  }
+  const missing: string[] = [];
+  if (requirements.width > adapter.capabilities.maxTextureSize
+    || requirements.height > adapter.capabilities.maxTextureSize) missing.push("maxTextureSize");
+  if (requirements.requiresAlpha === true && !adapter.capabilities.supportsAlpha) missing.push("alpha");
+  if (requirements.requiresFloatTextures === true && !adapter.capabilities.supportsFloatTextures) missing.push("floatTextures");
+  if (!adapter.capabilities.supportedColorSpaces.includes(requirements.colorSpace)) {
+    missing.push(`colorSpace:${requirements.colorSpace}`);
+  }
+  for (const blendMode of requirements.blendModes ?? []) {
+    if (!adapter.capabilities.supportedBlendModes.includes(blendMode)) missing.push(`blendMode:${blendMode}`);
+  }
+  return {
+    adapterId: adapter.id,
+    backend: adapter.backend,
+    supported: missing.length === 0,
+    missing: Object.freeze(missing)
+  };
+}
+
+export function selectRendererAdapter(
+  adapters: readonly RendererAdapter[],
+  requirements: RendererCapabilityRequirements,
+  options: RendererSelectionOptions
+): RendererSelection {
+  const backendRank = new Map(options.backendOrder.map((backend, index) => [backend, index]));
+  const candidates = adapters.map((adapter, index) => {
+    let compatible = true;
+    let report: RendererCapabilityReport;
+    try {
+      report = detectRendererCapabilities(adapter, requirements);
+    } catch (cause) {
+      if (!(cause instanceof EngineError) || cause.code !== ERROR_CODES.RENDERER_INCOMPATIBLE) throw cause;
+      compatible = false;
+      report = {
+        adapterId: adapter.id,
+        backend: adapter.backend,
+        supported: false,
+        missing: Object.freeze([`apiVersion:${adapter.apiVersion}`])
+      };
+    }
+    return { adapter, index, compatible, rank: backendRank.get(adapter.backend) ?? Number.MAX_SAFE_INTEGER, report };
+  }).sort((left, right) => left.rank - right.rank || left.index - right.index);
+  const supported = candidates.find((candidate) => candidate.report.supported);
+  if (supported !== undefined) return { adapter: supported.adapter, report: supported.report, degraded: false };
+
+  const degradationAllowed = options.allowDegraded === true
+    && (options.mode === "preview" || options.approveFinalDegradation === true);
+  if (degradationAllowed) {
+    const fallback = candidates.filter((candidate) => candidate.compatible).sort((left, right) =>
+      left.report.missing.length - right.report.missing.length || left.rank - right.rank || left.index - right.index
+    )[0];
+    if (fallback !== undefined) return { adapter: fallback.adapter, report: fallback.report, degraded: true };
+  }
+  throw new EngineError(
+    ERROR_CODES.RENDERER_CAPABILITY_UNAVAILABLE,
+    "No renderer satisfies the required capabilities.",
+    {
+      details: {
+        mode: options.mode,
+        candidates: candidates.map((candidate) => ({
+          adapterId: candidate.adapter.id,
+          backend: candidate.adapter.backend,
+          missing: [...candidate.report.missing]
+        }))
+      }
+    }
+  );
 }
 
 export { RENDERER_API_VERSION };

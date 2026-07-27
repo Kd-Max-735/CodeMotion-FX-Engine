@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.codemotion.dev/contracts/v1.1/contracts.schema.json",
-  "title": "CodeMotion FX Stage 1 Contracts",
+  "$id": "https://schemas.codemotion.dev/contracts/v1.2/contracts.schema.json",
+  "title": "CodeMotion FX Contracts 1.2",
   "$defs": {
     "JsonValue": {
       "oneOf": [
@@ -48,12 +48,77 @@
       },
       "additionalProperties": false
     },
+    "ExpressionAstNode": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": { "type": { "const": "literal" }, "value": { "$ref": "#/$defs/JsonValue" } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "name"],
+          "properties": { "type": { "const": "variable" }, "name": { "type": "string", "minLength": 1 } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "programId"],
+          "properties": { "type": { "const": "reference" }, "programId": { "type": "string", "minLength": 1 } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "operator", "argument"],
+          "properties": {
+            "type": { "const": "unary" },
+            "operator": { "enum": ["-", "+", "!"] },
+            "argument": { "$ref": "#/$defs/ExpressionAstNode" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "operator", "left", "right"],
+          "properties": {
+            "type": { "const": "binary" },
+            "operator": { "enum": ["+", "-", "*", "/", "%", "**", "<", "<=", ">", ">=", "===", "!==", "&&", "||"] },
+            "left": { "$ref": "#/$defs/ExpressionAstNode" },
+            "right": { "$ref": "#/$defs/ExpressionAstNode" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "test", "consequent", "alternate"],
+          "properties": {
+            "type": { "const": "conditional" },
+            "test": { "$ref": "#/$defs/ExpressionAstNode" },
+            "consequent": { "$ref": "#/$defs/ExpressionAstNode" },
+            "alternate": { "$ref": "#/$defs/ExpressionAstNode" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "name", "arguments"],
+          "properties": {
+            "type": { "const": "call" },
+            "name": { "type": "string", "minLength": 1 },
+            "arguments": { "type": "array", "items": { "$ref": "#/$defs/ExpressionAstNode" } }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "ExpressionDefinition": {
       "type": "object",
       "required": ["language", "source"],
       "properties": {
         "language": { "const": "cmfx-expression" },
         "source": { "type": "string", "minLength": 1 },
+        "ast": { "$ref": "#/$defs/ExpressionAstNode" },
         "fallback": { "$ref": "#/$defs/JsonValue" }
       },
       "additionalProperties": false
@@ -390,6 +455,52 @@
       },
       "additionalProperties": false
     },
+    "EffectGraphPortContract": {
+      "type": "object",
+      "required": ["valueType"],
+      "properties": {
+        "valueType": { "enum": ["texture", "color", "number", "vector2", "vector3", "mask", "metadata"] },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "alphaMode": { "enum": ["none", "straight", "premultiplied"] },
+        "colorSpace": { "enum": ["srgb", "display-p3", "linear-srgb"] }
+      },
+      "additionalProperties": false
+    },
+    "EffectGraphNodeDefinition": {
+      "type": "object",
+      "required": ["id", "kind", "inputs", "outputs", "config"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["input", "texture", "color", "math", "mask", "effect", "composite", "output"] },
+        "inputs": { "type": "object", "additionalProperties": { "$ref": "#/$defs/EffectGraphPortContract" } },
+        "outputs": { "type": "object", "additionalProperties": { "$ref": "#/$defs/EffectGraphPortContract" } },
+        "config": { "$ref": "#/$defs/JsonObject" }
+      },
+      "additionalProperties": false
+    },
+    "EffectGraphEdgeDefinition": {
+      "type": "object",
+      "required": ["fromNode", "fromPort", "toNode", "toPort"],
+      "properties": {
+        "fromNode": { "type": "string", "minLength": 1 },
+        "fromPort": { "type": "string", "minLength": 1 },
+        "toNode": { "type": "string", "minLength": 1 },
+        "toPort": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "EffectGraphDefinition": {
+      "type": "object",
+      "required": ["version", "nodes", "edges", "outputNodeId"],
+      "properties": {
+        "version": { "const": "1.0.0" },
+        "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/EffectGraphNodeDefinition" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/EffectGraphEdgeDefinition" } },
+        "outputNodeId": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
     "CompositionDefinition": {
       "type": "object",
       "required": ["id", "name", "width", "height", "duration", "layers"],
@@ -402,7 +513,8 @@
         "fps": { "type": "number", "exclusiveMinimum": 0 },
         "layers": { "type": "array", "items": { "$ref": "#/$defs/LayerDefinition" } },
         "markers": { "type": "array", "items": { "$ref": "#/$defs/TimelineMarker" } },
-        "effects": { "type": "array", "items": { "$ref": "#/$defs/EffectInstance" } }
+        "effects": { "type": "array", "items": { "$ref": "#/$defs/EffectInstance" } },
+        "effectGraph": { "$ref": "#/$defs/EffectGraphDefinition" }
       },
       "additionalProperties": false
     },
@@ -525,7 +637,7 @@
       "type": "object",
       "required": ["schemaVersion", "engineVersion", "id", "name", "width", "height", "fps", "duration", "background", "colorSpace", "seed", "assets", "compositions", "fonts", "audioTracks", "renderPresets", "metadata"],
       "properties": {
-        "schemaVersion": { "const": "1.1.0" },
+        "schemaVersion": { "const": "1.2.0" },
         "engineVersion": { "$ref": "#/$defs/SemVer" },
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },

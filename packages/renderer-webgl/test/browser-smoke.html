@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>RUNNING</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "@codemotion/core": "/packages/core/dist/index.js",
+        "@codemotion/renderer-api": "/packages/renderer-api/dist/index.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="canvas" width="2" height="2"></canvas>
+  <script type="module">
+    import {
+      WEBGL_PIPELINE_VALIDATION_EFFECT,
+      WebGLRendererAdapter
+    } from "/packages/renderer-webgl/dist/index.js";
+
+    const canvas = document.querySelector("#canvas");
+    const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true });
+    const initialization = { width: 2, height: 2, colorSpace: "srgb", quality: "preview" };
+    const frame = {
+      time: 0, deltaTime: 1 / 30, frame: 0, fps: 30,
+      width: 2, height: 2, seed: 42, quality: "preview", colorSpace: "srgb"
+    };
+    const rgbaDescriptor = { width: 2, height: 2, format: "rgba8", colorSpace: "srgb", samples: 1, usage: "input" };
+    const check = (phase) => {
+      const code = gl.getError();
+      if (code !== gl.NO_ERROR) throw new Error(`${phase} reported WebGL error ${code}.`);
+    };
+
+    try {
+      const adapter = new WebGLRendererAdapter({ contextFactory: () => gl });
+      adapter.initialize(initialization);
+      check("initialize");
+      adapter.beginFrame(frame);
+      const backdrop = adapter.createTexture(rgbaDescriptor);
+      adapter.uploadTexture(backdrop, new Uint8Array([
+        255, 0, 0, 255, 0, 255, 0, 255,
+        0, 0, 255, 255, 255, 255, 255, 0
+      ]), "straight");
+      const source = adapter.createTexture(rgbaDescriptor);
+      adapter.uploadTexture(source, new Uint8Array([
+        255, 255, 255, 192, 255, 128, 0, 192,
+        0, 255, 255, 192, 255, 0, 255, 192
+      ]), "straight");
+      check("uploadColorTextures");
+      const mask = adapter.createTexture({
+        width: 2, height: 2, format: "alpha8", colorSpace: "srgb", samples: 1, usage: "mask"
+      });
+      check("createMaskTexture");
+      adapter.uploadTexture(mask, new Uint8Array([255, 128, 0, 64]), "straight");
+      check("uploadTexture");
+      const masked = adapter.applyMask(source, mask, { mode: "add", opacity: 0.8 });
+      check("applyMask");
+      const effected = adapter.applyEffectStack(masked, [WEBGL_PIPELINE_VALIDATION_EFFECT]);
+      if (effected.failures.length !== 0) throw effected.failures[0].error;
+      check("applyEffectStack");
+      const output = adapter.composite([backdrop, effected.output], { blendMode: "screen", opacity: 0.75 }, frame);
+      check("composite");
+      const actual = [...adapter.readTexturePixels(output)];
+      const expected = [255, 133, 179, 255, 62, 255, 0, 255, 0, 0, 255, 255, 15, 0, 29, 29];
+      if (actual.some((value, index) => Math.abs(value - expected[index]) > 2)) {
+        throw new Error(`Golden Frame mismatch: ${JSON.stringify(actual)}`);
+      }
+      adapter.endFrame(frame);
+      adapter.dispose();
+      document.title = "WEBGL_SMOKE_PASS";
+    } catch (error) {
+      document.title = `WEBGL_SMOKE_FAIL:${error instanceof Error ? error.message : String(error)}`;
+    }
+  </script>
+</body>
+</html>

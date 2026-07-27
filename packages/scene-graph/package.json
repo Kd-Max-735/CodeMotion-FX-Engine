@@ -18,7 +18,7 @@
     "dist/**/*.d.ts.map"
   ],
   "dependencies": {
-    "@codemotion/core": "0.2.0",
+    "@codemotion/core": "0.3.0",
     "@codemotion/timeline": "0.1.0"
   }
 }

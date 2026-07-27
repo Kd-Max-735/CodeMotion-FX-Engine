@@ -3,6 +3,7 @@ import type {
   Animatable,
   CompositionDefinition,
   EffectDefinition,
+  EffectGraphDefinition,
   EffectInstance,
   JsonObject,
   Keyframe,
@@ -11,7 +12,7 @@ import type {
 } from "@codemotion/core";
 import contractSchemaJson from "./contracts.schema.json" with { type: "json" };
 
-export const CONTRACT_SCHEMA_ID = "https://schemas.codemotion.dev/contracts/v1.1/contracts.schema.json";
+export const CONTRACT_SCHEMA_ID = "https://schemas.codemotion.dev/contracts/v1.2/contracts.schema.json";
 
 export const CONTRACT_SCHEMA_IDS = Object.freeze({
   MotionProject: `${CONTRACT_SCHEMA_ID}#/$defs/MotionProject`,
@@ -20,6 +21,7 @@ export const CONTRACT_SCHEMA_IDS = Object.freeze({
   Animatable: `${CONTRACT_SCHEMA_ID}#/$defs/Animatable`,
   Keyframe: `${CONTRACT_SCHEMA_ID}#/$defs/Keyframe`,
   EffectInstance: `${CONTRACT_SCHEMA_ID}#/$defs/EffectInstance`,
+  EffectGraphDefinition: `${CONTRACT_SCHEMA_ID}#/$defs/EffectGraphDefinition`,
   EffectDefinition: `${CONTRACT_SCHEMA_ID}#/$defs/EffectDefinition`
 });
 
@@ -32,6 +34,7 @@ export interface ContractTypeMap {
   Animatable: Animatable;
   Keyframe: Keyframe;
   EffectInstance: EffectInstance;
+  EffectGraphDefinition: EffectGraphDefinition;
   EffectDefinition: EffectDefinition;
 }
 

@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "1.1.0",
-  "engineVersion": "0.2.0",
+  "schemaVersion": "1.2.0",
+  "engineVersion": "0.3.0",
   "id": "project.minimal",
   "name": "Minimal Stage 1 Project",
   "width": 1920,

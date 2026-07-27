@@ -33,6 +33,13 @@ export interface SaveProjectOptions {
 export const BUILT_IN_PROJECT_MIGRATIONS: readonly ProjectMigration[] = Object.freeze([
   {
     fromVersion: "1.0.0",
+    toVersion: "1.1.0",
+    migrate(project): JsonObject {
+      return { ...project, schemaVersion: "1.1.0" };
+    }
+  },
+  {
+    fromVersion: "1.1.0",
     toVersion: PROJECT_SCHEMA_VERSION,
     migrate(project): JsonObject {
       return { ...project, schemaVersion: PROJECT_SCHEMA_VERSION };

@@ -2,9 +2,14 @@
   "files": [],
   "references": [
     { "path": "./packages/core" },
+    { "path": "./packages/expression" },
+    { "path": "./packages/effect-graph" },
     { "path": "./packages/timeline" },
     { "path": "./packages/scene-graph" },
     { "path": "./packages/renderer-api" },
+    { "path": "./packages/renderer-webgl" },
+    { "path": "./packages/resource-manager" },
+    { "path": "./packages/cache" },
     { "path": "./packages/schema" }
   ]
 }
