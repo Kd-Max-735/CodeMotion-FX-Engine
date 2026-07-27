@@ -51,7 +51,7 @@ Handoff sequence:
 | Window | Scope | Sole writer | Verification | Integration | Authorization state |
 | --- | --- | --- | --- | --- | --- |
 | `8-S0` closeout | Requirement copy and final governance alignment | Group 8 | S0 policy checks, then Group 8 recheck | S0 closeout commit only | Authorized by the current user prompt; closes after verified commit |
-| `1-S1` | Defined by the user's `1-S1` prompt | Group 1 | Group 7, then Group 8 | Group 8 after verification | Pending the user's `1-S1` message; no extra Group 8 opening action |
+| `1-S1` | Data model, Schema, renderer API, core package, example | Group 1 | Group 7-equivalent contract tests, then Group 8 recheck | Group 8 after verification | Verified 2026-07-27; closes with the Stage 1 integration commit |
 | Later rows | Defined by each current-stage prompt | Prompt-designated group | Group 7 | Group 8 | Pending prior PASS plus the user's matching prompt |
 
 No integration commit may include another stage's files. No reset, checkout, clean, batch deletion, or force-add is allowed.
@@ -125,6 +125,8 @@ Two source definitions are already known and are not blockers:
 | 8 | Particle, audio, procedural; 80 effects | Performance and deterministic cache tests pass |
 | 9 | 3D, physics, post-processing; 120 effects | 3D/simulation quality and fallback tests pass |
 | 10 | Performance, compatibility, stability | Release-candidate verification passes |
+
+Stage 1 public contract freeze: packages and engine `0.1.0`; Project Schema `1.0.0`; Effect Definition Schema `1.0.0`; Renderer Adapter API `1.0.0`; JSON Schema ID `https://schemas.codemotion.dev/contracts/v1/contracts.schema.json`. The authoritative scope and change-control record is `docs/api/stage-1.md`.
 
 ## 27.8 S0 exit gate
 

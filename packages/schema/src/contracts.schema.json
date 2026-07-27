@@ -1,0 +1,550 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.codemotion.dev/contracts/v1/contracts.schema.json",
+  "title": "CodeMotion FX Stage 1 Contracts",
+  "$defs": {
+    "JsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/JsonValue" } },
+        { "$ref": "#/$defs/JsonObject" }
+      ]
+    },
+    "JsonObject": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/JsonValue" }
+    },
+    "SemVer": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "Vector2": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+      "additionalProperties": false
+    },
+    "Vector3": {
+      "type": "object",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "EasingDefinition": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["linear", "easeIn", "easeOut", "easeInOut", "cubicBezier", "spring", "bounce", "elastic", "back", "steps", "customCurve"]
+        },
+        "params": { "type": "array", "items": { "type": "number" } }
+      },
+      "additionalProperties": false
+    },
+    "ExpressionDefinition": {
+      "type": "object",
+      "required": ["language", "source"],
+      "properties": {
+        "language": { "const": "cmfx-expression" },
+        "source": { "type": "string", "minLength": 1 },
+        "fallback": { "$ref": "#/$defs/JsonValue" }
+      },
+      "additionalProperties": false
+    },
+    "DataBindingDefinition": {
+      "type": "object",
+      "required": ["source", "path"],
+      "properties": {
+        "source": { "enum": ["json", "csv", "form", "audio", "time", "scene", "variable"] },
+        "path": { "type": "string" },
+        "fallback": { "$ref": "#/$defs/JsonValue" }
+      },
+      "additionalProperties": false
+    },
+    "Keyframe": {
+      "type": "object",
+      "required": ["time", "value"],
+      "properties": {
+        "time": { "type": "number", "minimum": 0 },
+        "value": { "$ref": "#/$defs/JsonValue" },
+        "easing": { "$ref": "#/$defs/EasingDefinition" },
+        "interpolation": { "enum": ["linear", "hold", "bezier", "spring", "spline"] },
+        "inTangent": { "type": "array", "items": { "type": "number" } },
+        "outTangent": { "type": "array", "items": { "type": "number" } }
+      },
+      "additionalProperties": false
+    },
+    "KeyframeNumber": {
+      "allOf": [
+        { "$ref": "#/$defs/Keyframe" },
+        { "type": "object", "properties": { "value": { "type": "number" } } }
+      ]
+    },
+    "KeyframeString": {
+      "allOf": [
+        { "$ref": "#/$defs/Keyframe" },
+        { "type": "object", "properties": { "value": { "type": "string" } } }
+      ]
+    },
+    "KeyframeVector2": {
+      "allOf": [
+        { "$ref": "#/$defs/Keyframe" },
+        { "type": "object", "properties": { "value": { "$ref": "#/$defs/Vector2" } } }
+      ]
+    },
+    "KeyframeVector3": {
+      "allOf": [
+        { "$ref": "#/$defs/Keyframe" },
+        { "type": "object", "properties": { "value": { "$ref": "#/$defs/Vector3" } } }
+      ]
+    },
+    "ExpressionAnimatable": {
+      "type": "object",
+      "required": ["mode", "expression"],
+      "properties": {
+        "mode": { "const": "expression" },
+        "expression": { "$ref": "#/$defs/ExpressionDefinition" }
+      },
+      "additionalProperties": false
+    },
+    "BindingAnimatable": {
+      "type": "object",
+      "required": ["mode", "source"],
+      "properties": {
+        "mode": { "const": "binding" },
+        "source": { "$ref": "#/$defs/DataBindingDefinition" }
+      },
+      "additionalProperties": false
+    },
+    "Animatable": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["mode", "value"],
+          "properties": {
+            "mode": { "const": "constant" },
+            "value": { "$ref": "#/$defs/JsonValue" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["mode", "keyframes"],
+          "properties": {
+            "mode": { "const": "keyframes" },
+            "keyframes": { "type": "array", "items": { "$ref": "#/$defs/Keyframe" } }
+          },
+          "additionalProperties": false
+        },
+        { "$ref": "#/$defs/ExpressionAnimatable" },
+        { "$ref": "#/$defs/BindingAnimatable" }
+      ]
+    },
+    "AnimatableNumber": {
+      "oneOf": [
+        { "type": "object", "required": ["mode", "value"], "properties": { "mode": { "const": "constant" }, "value": { "type": "number" } }, "additionalProperties": false },
+        { "type": "object", "required": ["mode", "keyframes"], "properties": { "mode": { "const": "keyframes" }, "keyframes": { "type": "array", "items": { "$ref": "#/$defs/KeyframeNumber" } } }, "additionalProperties": false },
+        { "$ref": "#/$defs/ExpressionAnimatable" },
+        { "$ref": "#/$defs/BindingAnimatable" }
+      ]
+    },
+    "AnimatableString": {
+      "oneOf": [
+        { "type": "object", "required": ["mode", "value"], "properties": { "mode": { "const": "constant" }, "value": { "type": "string" } }, "additionalProperties": false },
+        { "type": "object", "required": ["mode", "keyframes"], "properties": { "mode": { "const": "keyframes" }, "keyframes": { "type": "array", "items": { "$ref": "#/$defs/KeyframeString" } } }, "additionalProperties": false },
+        { "$ref": "#/$defs/ExpressionAnimatable" },
+        { "$ref": "#/$defs/BindingAnimatable" }
+      ]
+    },
+    "AnimatableVector2": {
+      "oneOf": [
+        { "type": "object", "required": ["mode", "value"], "properties": { "mode": { "const": "constant" }, "value": { "$ref": "#/$defs/Vector2" } }, "additionalProperties": false },
+        { "type": "object", "required": ["mode", "keyframes"], "properties": { "mode": { "const": "keyframes" }, "keyframes": { "type": "array", "items": { "$ref": "#/$defs/KeyframeVector2" } } }, "additionalProperties": false },
+        { "$ref": "#/$defs/ExpressionAnimatable" },
+        { "$ref": "#/$defs/BindingAnimatable" }
+      ]
+    },
+    "AnimatableVector3": {
+      "oneOf": [
+        { "type": "object", "required": ["mode", "value"], "properties": { "mode": { "const": "constant" }, "value": { "$ref": "#/$defs/Vector3" } }, "additionalProperties": false },
+        { "type": "object", "required": ["mode", "keyframes"], "properties": { "mode": { "const": "keyframes" }, "keyframes": { "type": "array", "items": { "$ref": "#/$defs/KeyframeVector3" } } }, "additionalProperties": false },
+        { "$ref": "#/$defs/ExpressionAnimatable" },
+        { "$ref": "#/$defs/BindingAnimatable" }
+      ]
+    },
+    "TransformDefinition": {
+      "type": "object",
+      "required": ["anchorPoint", "position", "scale", "rotation"],
+      "properties": {
+        "anchorPoint": { "$ref": "#/$defs/AnimatableVector3" },
+        "position": { "$ref": "#/$defs/AnimatableVector3" },
+        "scale": { "$ref": "#/$defs/AnimatableVector3" },
+        "rotation": { "$ref": "#/$defs/AnimatableVector3" },
+        "skew": { "$ref": "#/$defs/AnimatableVector2" }
+      },
+      "additionalProperties": false
+    },
+    "MaskDefinition": {
+      "type": "object",
+      "required": ["id", "name", "enabled", "mode", "inverted", "path", "opacity", "feather"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "mode": { "enum": ["add", "subtract", "intersect", "none"] },
+        "inverted": { "type": "boolean" },
+        "path": { "$ref": "#/$defs/Animatable" },
+        "opacity": { "$ref": "#/$defs/AnimatableNumber" },
+        "feather": { "$ref": "#/$defs/AnimatableVector2" }
+      },
+      "additionalProperties": false
+    },
+    "EffectInstance": {
+      "type": "object",
+      "required": ["id", "effectId", "version", "enabled", "mix", "params"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "effectId": { "type": "string", "pattern": "^fx\\.[a-z0-9-]+\\.[A-Za-z0-9-]+$" },
+        "version": { "$ref": "#/$defs/SemVer" },
+        "enabled": { "type": "boolean" },
+        "startTime": { "type": "number", "minimum": 0 },
+        "endTime": { "type": "number", "minimum": 0 },
+        "mix": { "$ref": "#/$defs/AnimatableNumber" },
+        "maskId": { "type": "string", "minLength": 1 },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [{ "$ref": "#/$defs/Animatable" }, { "$ref": "#/$defs/JsonValue" }]
+          }
+        },
+        "renderQuality": { "enum": ["draft", "preview", "final"] },
+        "cachePolicy": { "enum": ["none", "frame", "range", "static"] }
+      },
+      "additionalProperties": false
+    },
+    "AssetReference": {
+      "type": "object",
+      "required": ["assetId"],
+      "properties": { "assetId": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "LayerCommon": {
+      "type": "object",
+      "required": ["id", "name", "visible", "locked", "solo", "startTime", "endTime", "inPoint", "outPoint", "zIndex", "transform", "opacity", "blendMode", "masks", "effects"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "visible": { "type": "boolean" },
+        "locked": { "type": "boolean" },
+        "solo": { "type": "boolean" },
+        "startTime": { "type": "number", "minimum": 0 },
+        "endTime": { "type": "number", "minimum": 0 },
+        "inPoint": { "type": "number", "minimum": 0 },
+        "outPoint": { "type": "number", "minimum": 0 },
+        "parentId": { "type": "string", "minLength": 1 },
+        "zIndex": { "type": "integer" },
+        "transform": { "$ref": "#/$defs/TransformDefinition" },
+        "opacity": { "$ref": "#/$defs/AnimatableNumber" },
+        "blendMode": {
+          "enum": ["normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity", "add"]
+        },
+        "masks": { "type": "array", "items": { "$ref": "#/$defs/MaskDefinition" } },
+        "effects": { "type": "array", "items": { "$ref": "#/$defs/EffectInstance" } },
+        "source": { "$ref": "#/$defs/AssetReference" }
+      }
+    },
+    "TextLayer": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/LayerCommon" },
+        {
+          "type": "object",
+          "required": ["type", "properties"],
+          "properties": {
+            "type": { "const": "text" },
+            "properties": {
+              "type": "object",
+              "required": ["text", "fontFamily", "fontSize"],
+              "properties": {
+                "text": { "type": "string" },
+                "fontFamily": { "type": "string", "minLength": 1 },
+                "fontSize": { "type": "number", "exclusiveMinimum": 0 }
+              },
+              "additionalProperties": { "$ref": "#/$defs/JsonValue" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ShapeLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "shape" }, "properties": { "type": "object", "required": ["shapes"], "properties": { "shapes": { "type": "array", "items": { "$ref": "#/$defs/JsonObject" } } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "ImageLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties", "source"], "properties": { "type": { "const": "image" }, "source": { "$ref": "#/$defs/AssetReference" }, "properties": { "type": "object", "required": ["fit"], "properties": { "fit": { "enum": ["cover", "contain", "fill", "none"] } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "VideoLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties", "source"], "properties": { "type": { "const": "video" }, "source": { "$ref": "#/$defs/AssetReference" }, "properties": { "type": "object", "required": ["loop", "muted"], "properties": { "loop": { "type": "boolean" }, "muted": { "type": "boolean" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "AudioLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties", "source"], "properties": { "type": { "const": "audio" }, "source": { "$ref": "#/$defs/AssetReference" }, "properties": { "type": "object", "required": ["volume"], "properties": { "volume": { "$ref": "#/$defs/AnimatableNumber" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "SvgLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "svg" }, "properties": { "type": "object", "properties": { "svg": { "type": "string" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "CanvasLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "canvas" }, "properties": { "type": "object", "required": ["commands"], "properties": { "commands": { "type": "array", "items": { "$ref": "#/$defs/JsonObject" } } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "ParticleLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "particle" }, "properties": { "type": "object", "required": ["emitter"], "properties": { "emitter": { "$ref": "#/$defs/JsonObject" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "Model3DLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties", "source"], "properties": { "type": { "const": "model3d" }, "source": { "$ref": "#/$defs/AssetReference" }, "properties": { "type": "object", "properties": { "sceneNode": { "type": "string" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "CameraLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "camera" }, "properties": { "type": "object", "required": ["projection", "zoom"], "properties": { "projection": { "enum": ["perspective", "orthographic"] }, "zoom": { "$ref": "#/$defs/AnimatableNumber" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "LightLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "light" }, "properties": { "type": "object", "required": ["lightType", "intensity", "color"], "properties": { "lightType": { "enum": ["ambient", "directional", "point", "spot"] }, "intensity": { "$ref": "#/$defs/AnimatableNumber" }, "color": { "$ref": "#/$defs/AnimatableString" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "AdjustmentLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "adjustment" }, "properties": { "$ref": "#/$defs/JsonObject" } } }],
+      "unevaluatedProperties": false
+    },
+    "NullLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "null" }, "properties": { "$ref": "#/$defs/JsonObject" } } }],
+      "unevaluatedProperties": false
+    },
+    "DataLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "data" }, "properties": { "type": "object", "required": ["data"], "properties": { "data": { "$ref": "#/$defs/JsonValue" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "CompositionLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "composition" }, "properties": { "type": "object", "required": ["compositionId"], "properties": { "compositionId": { "type": "string", "minLength": 1 }, "timeOffset": { "type": "number" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "CustomLayer": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "custom" }, "properties": { "type": "object", "required": ["pluginId", "data"], "properties": { "pluginId": { "type": "string", "minLength": 1 }, "data": { "$ref": "#/$defs/JsonObject" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "unevaluatedProperties": false
+    },
+    "LayerDefinition": {
+      "oneOf": [
+        { "$ref": "#/$defs/TextLayer" },
+        { "$ref": "#/$defs/ShapeLayer" },
+        { "$ref": "#/$defs/ImageLayer" },
+        { "$ref": "#/$defs/VideoLayer" },
+        { "$ref": "#/$defs/AudioLayer" },
+        { "$ref": "#/$defs/SvgLayer" },
+        { "$ref": "#/$defs/CanvasLayer" },
+        { "$ref": "#/$defs/ParticleLayer" },
+        { "$ref": "#/$defs/Model3DLayer" },
+        { "$ref": "#/$defs/CameraLayer" },
+        { "$ref": "#/$defs/LightLayer" },
+        { "$ref": "#/$defs/AdjustmentLayer" },
+        { "$ref": "#/$defs/NullLayer" },
+        { "$ref": "#/$defs/DataLayer" },
+        { "$ref": "#/$defs/CompositionLayer" },
+        { "$ref": "#/$defs/CustomLayer" }
+      ]
+    },
+    "TimelineMarker": {
+      "type": "object",
+      "required": ["id", "time", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "time": { "type": "number", "minimum": 0 },
+        "name": { "type": "string" },
+        "color": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "CompositionDefinition": {
+      "type": "object",
+      "required": ["id", "name", "width", "height", "duration", "layers"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "duration": { "type": "number", "exclusiveMinimum": 0 },
+        "fps": { "type": "number", "exclusiveMinimum": 0 },
+        "layers": { "type": "array", "items": { "$ref": "#/$defs/LayerDefinition" } },
+        "markers": { "type": "array", "items": { "$ref": "#/$defs/TimelineMarker" } },
+        "effects": { "type": "array", "items": { "$ref": "#/$defs/EffectInstance" } }
+      },
+      "additionalProperties": false
+    },
+    "BackgroundDefinition": {
+      "oneOf": [
+        { "type": "object", "required": ["type"], "properties": { "type": { "const": "transparent" } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "color"], "properties": { "type": { "const": "color" }, "color": { "type": "string", "minLength": 1 } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "assetId", "fit"], "properties": { "type": { "const": "asset" }, "assetId": { "type": "string", "minLength": 1 }, "fit": { "enum": ["cover", "contain", "fill"] } }, "additionalProperties": false }
+      ]
+    },
+    "AssetDefinition": {
+      "type": "object",
+      "required": ["id", "type", "uri", "metadata"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["image", "video", "audio", "svg", "model3d", "font", "data", "other"] },
+        "uri": { "type": "string", "minLength": 1 },
+        "hash": { "type": "string" },
+        "metadata": { "$ref": "#/$defs/JsonObject" }
+      },
+      "additionalProperties": false
+    },
+    "FontDefinition": {
+      "type": "object",
+      "required": ["id", "family"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "family": { "type": "string", "minLength": 1 },
+        "assetId": { "type": "string", "minLength": 1 },
+        "style": { "type": "string" },
+        "weight": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      },
+      "additionalProperties": false
+    },
+    "AudioTrackDefinition": {
+      "type": "object",
+      "required": ["id", "assetId", "startTime", "endTime", "volume"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "assetId": { "type": "string", "minLength": 1 },
+        "startTime": { "type": "number", "minimum": 0 },
+        "endTime": { "type": "number", "minimum": 0 },
+        "volume": { "$ref": "#/$defs/AnimatableNumber" }
+      },
+      "additionalProperties": false
+    },
+    "RenderPreset": {
+      "type": "object",
+      "required": ["id", "name", "format", "quality", "settings"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "format": { "type": "string", "minLength": 1 },
+        "quality": { "enum": ["draft", "preview", "final"] },
+        "settings": { "$ref": "#/$defs/JsonObject" }
+      },
+      "additionalProperties": false
+    },
+    "QualityLevelDefinition": {
+      "type": "object",
+      "required": ["quality", "settings"],
+      "properties": {
+        "quality": { "enum": ["draft", "preview", "final"] },
+        "settings": { "$ref": "#/$defs/JsonObject" }
+      },
+      "additionalProperties": false
+    },
+    "ValidationRule": {
+      "type": "object",
+      "required": ["ruleId", "message", "severity", "config"],
+      "properties": {
+        "ruleId": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" },
+        "severity": { "enum": ["warning", "error"] },
+        "config": { "$ref": "#/$defs/JsonObject" }
+      },
+      "additionalProperties": false
+    },
+    "EffectMigrationDescriptor": {
+      "type": "object",
+      "required": ["fromVersion", "toVersion"],
+      "properties": {
+        "fromVersion": { "$ref": "#/$defs/SemVer" },
+        "toVersion": { "$ref": "#/$defs/SemVer" }
+      },
+      "additionalProperties": false
+    },
+    "EffectDefinition": {
+      "type": "object",
+      "required": ["schemaVersion", "effectId", "version", "displayName", "category", "description", "tags", "inputTypes", "outputType", "parameterSchema", "uiSchema", "defaultPreset", "renderBackends", "preferredBackend", "deterministic", "supportsAlpha", "supportsMask", "supportsKeyframes", "supportsExpressions", "performanceClass", "qualityLevels", "validationRules", "migrations"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "effectId": { "type": "string", "pattern": "^fx\\.[a-z0-9-]+\\.[A-Za-z0-9-]+$" },
+        "version": { "$ref": "#/$defs/SemVer" },
+        "displayName": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "inputTypes": { "type": "array", "items": { "type": "string" } },
+        "outputType": { "type": "string", "minLength": 1 },
+        "parameterSchema": { "$ref": "https://json-schema.org/draft/2020-12/schema" },
+        "uiSchema": { "$ref": "#/$defs/JsonObject" },
+        "defaultPreset": { "$ref": "#/$defs/JsonObject" },
+        "renderBackends": { "type": "array", "items": { "enum": ["dom", "svg", "canvas2d", "webgl", "webgpu", "three", "server"] }, "minItems": 1, "uniqueItems": true },
+        "preferredBackend": { "enum": ["dom", "svg", "canvas2d", "webgl", "webgpu", "three", "server"] },
+        "fallbackBackend": { "enum": ["dom", "svg", "canvas2d", "webgl", "webgpu", "three", "server"] },
+        "deterministic": { "type": "boolean" },
+        "supportsAlpha": { "type": "boolean" },
+        "supportsMask": { "type": "boolean" },
+        "supportsKeyframes": { "type": "boolean" },
+        "supportsExpressions": { "type": "boolean" },
+        "performanceClass": { "enum": ["light", "medium", "heavy", "extreme"] },
+        "qualityLevels": { "type": "array", "items": { "$ref": "#/$defs/QualityLevelDefinition" } },
+        "validationRules": { "type": "array", "items": { "$ref": "#/$defs/ValidationRule" } },
+        "migrations": { "type": "array", "items": { "$ref": "#/$defs/EffectMigrationDescriptor" } }
+      },
+      "additionalProperties": false
+    },
+    "MotionProject": {
+      "type": "object",
+      "required": ["schemaVersion", "engineVersion", "id", "name", "width", "height", "fps", "duration", "background", "colorSpace", "seed", "assets", "compositions", "fonts", "audioTracks", "renderPresets", "metadata"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "engineVersion": { "$ref": "#/$defs/SemVer" },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps": { "type": "number", "exclusiveMinimum": 0 },
+        "duration": { "type": "number", "exclusiveMinimum": 0 },
+        "background": { "$ref": "#/$defs/BackgroundDefinition" },
+        "colorSpace": { "enum": ["srgb", "display-p3", "linear-srgb"] },
+        "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "assets": { "type": "array", "items": { "$ref": "#/$defs/AssetDefinition" } },
+        "compositions": { "type": "array", "items": { "$ref": "#/$defs/CompositionDefinition" }, "minItems": 1 },
+        "fonts": { "type": "array", "items": { "$ref": "#/$defs/FontDefinition" } },
+        "audioTracks": { "type": "array", "items": { "$ref": "#/$defs/AudioTrackDefinition" } },
+        "renderPresets": { "type": "array", "items": { "$ref": "#/$defs/RenderPreset" } },
+        "metadata": { "$ref": "#/$defs/JsonObject" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$ref": "#/$defs/MotionProject"
+}

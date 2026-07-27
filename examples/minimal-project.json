@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0.0",
+  "engineVersion": "0.1.0",
+  "id": "project.minimal",
+  "name": "Minimal Stage 1 Project",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "duration": 5,
+  "background": {
+    "type": "color",
+    "color": "#101218"
+  },
+  "colorSpace": "srgb",
+  "seed": 20260727,
+  "assets": [],
+  "compositions": [
+    {
+      "id": "composition.main",
+      "name": "Main",
+      "width": 1920,
+      "height": 1080,
+      "duration": 5,
+      "fps": 30,
+      "layers": [
+        {
+          "id": "layer.title",
+          "type": "text",
+          "name": "Title",
+          "visible": true,
+          "locked": false,
+          "solo": false,
+          "startTime": 0,
+          "endTime": 5,
+          "inPoint": 0,
+          "outPoint": 5,
+          "zIndex": 0,
+          "transform": {
+            "anchorPoint": { "mode": "constant", "value": { "x": 0, "y": 0, "z": 0 } },
+            "position": { "mode": "constant", "value": { "x": 960, "y": 540, "z": 0 } },
+            "scale": { "mode": "constant", "value": { "x": 100, "y": 100, "z": 100 } },
+            "rotation": { "mode": "constant", "value": { "x": 0, "y": 0, "z": 0 } }
+          },
+          "opacity": {
+            "mode": "keyframes",
+            "keyframes": [
+              { "time": 0, "value": 0, "interpolation": "linear" },
+              { "time": 1, "value": 1, "easing": { "type": "easeOut" } }
+            ]
+          },
+          "blendMode": "normal",
+          "masks": [],
+          "effects": [],
+          "properties": {
+            "text": "CodeMotion FX",
+            "fontFamily": "sans-serif",
+            "fontSize": 96
+          }
+        }
+      ],
+      "markers": [],
+      "effects": []
+    }
+  ],
+  "fonts": [],
+  "audioTracks": [],
+  "renderPresets": [],
+  "metadata": {
+    "example": true
+  }
+}

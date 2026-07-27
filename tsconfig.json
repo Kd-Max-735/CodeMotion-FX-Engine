@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/renderer-api" },
+    { "path": "./packages/schema" }
+  ]
+}
