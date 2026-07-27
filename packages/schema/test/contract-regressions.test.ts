@@ -222,6 +222,25 @@ describe("typed Animatable schema alignment", () => {
     for (const layer of typedLayerCases) {
       expect(validateContract("LayerDefinition", layer)).toMatchObject({ valid: false });
     }
+
+    expect(validateContract("LayerDefinition", {
+      ...base,
+      type: "composition",
+      properties: {
+        compositionId: "composition.child",
+        timeRemap: { mode: "keyframes", keyframes: [{ time: 0, value: 0 }, { time: 1, value: 2 }] },
+        timeLoop: "ping-pong"
+      }
+    })).toMatchObject({ valid: true });
+    expect(validateContract("LayerDefinition", {
+      ...base,
+      type: "composition",
+      properties: {
+        compositionId: "composition.child",
+        timeRemap: { mode: "constant", value: "invalid" },
+        timeLoop: "invalid"
+      }
+    })).toMatchObject({ valid: false });
   });
 });
 

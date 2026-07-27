@@ -30,6 +30,16 @@ export interface SaveProjectOptions {
   logger?: Logger;
 }
 
+export const BUILT_IN_PROJECT_MIGRATIONS: readonly ProjectMigration[] = Object.freeze([
+  {
+    fromVersion: "1.0.0",
+    toVersion: PROJECT_SCHEMA_VERSION,
+    migrate(project): JsonObject {
+      return { ...project, schemaVersion: PROJECT_SCHEMA_VERSION };
+    }
+  }
+]);
+
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -56,7 +66,7 @@ function readVersion(project: JsonObject): string {
 
 export function migrateProject(
   input: JsonObject,
-  migrations: readonly ProjectMigration[] = []
+  migrations: readonly ProjectMigration[] = BUILT_IN_PROJECT_MIGRATIONS
 ): JsonObject {
   let project = input;
   let version = readVersion(project);
@@ -147,7 +157,10 @@ export function loadProject(input: string | unknown, options: LoadProjectOptions
     throw new EngineError(ERROR_CODES.SCHEMA_INVALID, "Project input must be a JSON object.");
   }
 
-  const migrated = migrateProject(parsed, options.migrations);
+  const migrations = options.migrations === undefined
+    ? BUILT_IN_PROJECT_MIGRATIONS
+    : [...options.migrations, ...BUILT_IN_PROJECT_MIGRATIONS];
+  const migrated = migrateProject(parsed, migrations);
   const result = validateContract("MotionProject", migrated);
   if (!result.valid) {
     logger.log("error", ERROR_CODES.SCHEMA_INVALID, "Project schema validation failed.", validationDetails(result.issues));

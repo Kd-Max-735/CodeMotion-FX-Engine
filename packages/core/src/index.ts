@@ -1,3 +1,4 @@
+export * from "./commands.js";
 export * from "./errors.js";
 export * from "./logger.js";
 export * from "./seed.js";

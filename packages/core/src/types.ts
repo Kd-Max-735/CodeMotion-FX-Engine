@@ -236,7 +236,12 @@ export type LightLayerProperties = JsonObject & {
 export type AdjustmentLayerProperties = JsonObject;
 export type NullLayerProperties = JsonObject;
 export type DataLayerProperties = JsonObject & { data: JsonValue };
-export type CompositionLayerProperties = JsonObject & { compositionId: string; timeOffset?: number };
+export type CompositionLayerProperties = JsonObject & {
+  compositionId: string;
+  timeOffset?: number;
+  timeRemap?: Animatable<number>;
+  timeLoop?: "none" | "repeat" | "ping-pong";
+};
 export type CustomLayerProperties = JsonObject & { pluginId: string; data: JsonObject };
 
 export interface TextLayer extends LayerDefinitionBase<"text", TextLayerProperties> {}

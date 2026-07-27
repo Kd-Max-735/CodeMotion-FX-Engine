@@ -1,6 +1,6 @@
 {
-  "name": "@codemotion/schema",
-  "version": "0.2.0",
+  "name": "@codemotion/timeline",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -9,18 +9,15 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./contracts.schema.json": "./dist/contracts.schema.json"
+    }
   },
   "files": [
     "dist/**/*.js",
     "dist/**/*.js.map",
     "dist/**/*.d.ts",
-    "dist/**/*.d.ts.map",
-    "dist/**/*.json"
+    "dist/**/*.d.ts.map"
   ],
   "dependencies": {
-    "@codemotion/core": "0.2.0",
-    "ajv": "^8.17.1"
+    "@codemotion/core": "0.2.0"
   }
 }

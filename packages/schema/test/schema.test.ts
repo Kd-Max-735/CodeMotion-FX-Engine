@@ -114,6 +114,18 @@ describe("project serialization", () => {
       expect.objectContaining({ code: ERROR_CODES.UNSUPPORTED_SCHEMA_VERSION })
     );
   });
+
+  it("migrates the frozen Stage 1 project schema without rewriting data", async () => {
+    const current = await exampleProject();
+    const stageOne = {
+      ...(current as unknown as JsonObject),
+      schemaVersion: "1.0.0"
+    };
+    const migrated = loadProject(stageOne);
+    expect(migrated.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(migrated.metadata).toEqual(current.metadata);
+    expect(migrated.compositions).toEqual(current.compositions);
+  });
 });
 
 describe("versioned contract schemas", () => {

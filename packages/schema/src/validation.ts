@@ -11,7 +11,7 @@ import type {
 } from "@codemotion/core";
 import contractSchemaJson from "./contracts.schema.json" with { type: "json" };
 
-export const CONTRACT_SCHEMA_ID = "https://schemas.codemotion.dev/contracts/v1/contracts.schema.json";
+export const CONTRACT_SCHEMA_ID = "https://schemas.codemotion.dev/contracts/v1.1/contracts.schema.json";
 
 export const CONTRACT_SCHEMA_IDS = Object.freeze({
   MotionProject: `${CONTRACT_SCHEMA_ID}#/$defs/MotionProject`,

@@ -2,6 +2,8 @@
   "files": [],
   "references": [
     { "path": "./packages/core" },
+    { "path": "./packages/timeline" },
+    { "path": "./packages/scene-graph" },
     { "path": "./packages/renderer-api" },
     { "path": "./packages/schema" }
   ]

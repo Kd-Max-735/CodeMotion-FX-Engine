@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.codemotion.dev/contracts/v1/contracts.schema.json",
+  "$id": "https://schemas.codemotion.dev/contracts/v1.1/contracts.schema.json",
   "title": "CodeMotion FX Stage 1 Contracts",
   "$defs": {
     "JsonValue": {
@@ -351,7 +351,7 @@
     },
     "CompositionLayer": {
       "type": "object",
-      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "composition" }, "properties": { "type": "object", "required": ["compositionId"], "properties": { "compositionId": { "type": "string", "minLength": 1 }, "timeOffset": { "type": "number" } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
+      "allOf": [{ "$ref": "#/$defs/LayerCommon" }, { "type": "object", "required": ["type", "properties"], "properties": { "type": { "const": "composition" }, "properties": { "type": "object", "required": ["compositionId"], "properties": { "compositionId": { "type": "string", "minLength": 1 }, "timeOffset": { "type": "number" }, "timeRemap": { "$ref": "#/$defs/AnimatableNumber" }, "timeLoop": { "enum": ["none", "repeat", "ping-pong"] } }, "additionalProperties": { "$ref": "#/$defs/JsonValue" } } } }],
       "unevaluatedProperties": false
     },
     "CustomLayer": {
@@ -525,7 +525,7 @@
       "type": "object",
       "required": ["schemaVersion", "engineVersion", "id", "name", "width", "height", "fps", "duration", "background", "colorSpace", "seed", "assets", "compositions", "fonts", "audioTracks", "renderPresets", "metadata"],
       "properties": {
-        "schemaVersion": { "const": "1.0.0" },
+        "schemaVersion": { "const": "1.1.0" },
         "engineVersion": { "$ref": "#/$defs/SemVer" },
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },

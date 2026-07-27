@@ -10,3 +10,5 @@ const source = await readFile("examples/minimal-project.json", "utf8");
 const project = loadProject(source);
 const canonicalJson = saveProject(project);
 ```
+
+After building the workspaces, `node examples/stage-2-playback.mjs` evaluates frames 0, 15, and 30 through the UI-independent Stage 2 scene graph.

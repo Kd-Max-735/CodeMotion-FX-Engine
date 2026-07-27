@@ -1,5 +1,5 @@
-export const ENGINE_VERSION = "0.1.0" as const;
-export const PROJECT_SCHEMA_VERSION = "1.0.0" as const;
+export const ENGINE_VERSION = "0.2.0" as const;
+export const PROJECT_SCHEMA_VERSION = "1.1.0" as const;
 export const EFFECT_DEFINITION_SCHEMA_VERSION = "1.0.0" as const;
 export const RENDERER_API_VERSION = "1.0.0" as const;
 
