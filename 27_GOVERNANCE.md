@@ -2,7 +2,7 @@
 
 ## 27.1 Sources and authority
 
-The product source is `AI代码动画与AE类特效引擎_任务开发需求说明书(1).md`, SHA-256 `87766d9c7ca059414419aa178e882e82d765dda174668b4d7eb07f09ffd5836e`. It was read in full on 2026-07-27.
+The product source is tracked at `docs/requirements/AI代码动画与AE类特效引擎_任务开发需求说明书(1).md`, SHA-256 `87766d9c7ca059414419aa178e882e82d765dda174668b4d7eb07f09ffd5836e`. It was read in full on 2026-07-27.
 
 Chapter 27 is the execution authority and its numbered milestones remain in order. Chapter 34 is only a concluding summary. The concrete conflict is:
 
@@ -23,11 +23,23 @@ Chapter 27 is the execution authority and its numbered milestones remain in orde
 | Aggregate package | 41 files, 7 directories; wholly ignored and untracked |
 | Package manifest SHA-256 | `a613ccbcc2991af39c702b419a54dc48feacaae1d41c6bb1b73764f7a2e43b65` |
 
-If a future read-only remote query shows any history or incompatible refs, stop as BLOCKED. Do not pull, merge, push, force-push, or rewrite the remote without a later explicit release instruction.
+The successful 2026-07-27 empty-remote query is retained as local evidence. A later connection reset is only network state and does not block `1-S1`. Until another query succeeds, do not pull, merge, push, force-push, or rewrite remote history. If a successful future query shows history or incompatible refs, stop as BLOCKED before any remote integration.
 
-## 27.3 Serial write and handoff protocol
+## 27.3 Toolchain integration decision
 
-The total execution table is the only write authorization ledger. Exactly one row may be `OPEN`; all other rows are read-only. Opening a row requires the prior integration gate to pass and the user to send the next segment.
+These are integration decisions for this from-zero project, not mandatory wording from the product requirement:
+
+| Concern | Decision |
+| --- | --- |
+| Workspace/package management | npm workspaces |
+| Language policy | TypeScript strict mode |
+| Unit tests | Vitest |
+| Later browser and visual tests | Playwright |
+| UI framework and bundler | React/Vite decision deferred until before Chapter 27 Stage 4 |
+
+## 27.4 Serial write and handoff protocol
+
+The total execution table is the authorization source. A stage obtains the only write permission when both conditions hold: the required prior PASS has been recorded, and the user sends that current-stage prompt to the corresponding group window. The user's message is the authorization event; Group 8 does not need to edit a row to `OPEN` or run a second gate-opening step. All other stages remain read-only.
 
 Handoff sequence:
 
@@ -36,14 +48,17 @@ Handoff sequence:
 3. Group 8 rechecks status and the complete diff, integrates only that row, then checks status and HEAD again.
 4. The repository becomes read-only until the user sends the next segment.
 
-| Window | Scope | Writer | Verification | Integration | State |
+| Window | Scope | Sole writer | Verification | Integration | Authorization state |
 | --- | --- | --- | --- | --- | --- |
-| `8-S0` | New repository baseline and governance | Group 8 | Group 7-equivalent S0 policy checks, then Group 8 recheck | Initial local commit only | OPEN until the S0 commit is verified |
-| Later rows | Defined by the user's next segment | Exactly one assigned development group | Group 7 | Group 8 | CLOSED |
+| `8-S0` closeout | Requirement copy and final governance alignment | Group 8 | S0 policy checks, then Group 8 recheck | S0 closeout commit only | Authorized by the current user prompt; closes after verified commit |
+| `1-S1` | Defined by the user's `1-S1` prompt | Group 1 | Group 7, then Group 8 | Group 8 after verification | Pending the user's `1-S1` message; no extra Group 8 opening action |
+| Later rows | Defined by each current-stage prompt | Prompt-designated group | Group 7 | Group 8 | Pending prior PASS plus the user's matching prompt |
 
 No integration commit may include another stage's files. No reset, checkout, clean, batch deletion, or force-add is allowed.
 
-## 27.4 Group ownership
+After `[G8-S0 PASS]`, the repository is read-only until the user sends `1-S1`. That message directly grants the `1-S1` window its sole write permission.
+
+## 27.5 Group ownership
 
 Group roles are the actual accountable identities; human names are not required.
 
@@ -71,9 +86,9 @@ Current category ownership:
 | resources | Group 1 / Group 5 | Group 1 owns runtime resource contracts; Group 5 owns persistence/object storage; exact seam at `8-S4` |
 | cache | Group 1 / Group 5 | Group 1 owns runtime keys/interfaces; Group 5 owns persistent/distributed operation; exact seam at `8-S4` |
 | public Schema/API | Group 1 | Cross-group changes require Group 1 approval and Group 7 verification |
-| AI provider package | Group 6 after security clearance | Entire current package remains ignored and unused until credential rotation and externalization |
+| AI provider package | Group 6 after `6-S7` security clearance | Entire current package remains ignored and unused until credential rotation and externalization |
 
-## 27.5 P0 release scope and named effects
+## 27.6 P0 release scope and named effects
 
 `P0` is the version phase in Chapter 26.1, not an effect-ID prefix. The earlier fabricated `P01-P40` register is invalid and removed.
 
@@ -96,7 +111,7 @@ Two source definitions are already known and are not blockers:
 | `T08` | `fx.text.textExtrude3D` | `depth`, `bevel`, `material`, `light` | Definition recorded; Group 2/3 boundary deferred to `8-S4` |
 | `P05` | `fx.post.depthOfField` | `focusDistance`, `aperture`, `maxBlur` | Definition recorded; Group 2/3 and compositor boundary deferred to `8-S4` |
 
-## 27.6 Chapter 27 milestone gates
+## 27.7 Chapter 27 milestone gates
 
 | Stage | Required delivery | Gate |
 | ---: | --- | --- |
@@ -111,6 +126,6 @@ Two source definitions are already known and are not blockers:
 | 9 | 3D, physics, post-processing; 120 effects | 3D/simulation quality and fallback tests pass |
 | 10 | Performance, compatibility, stability | Release-candidate verification passes |
 
-## 27.7 S0 exit gate
+## 27.8 S0 exit gate
 
-`G8-S0` passes only after: the repository and empty remote are verified; the package remains whole, ignored, untracked, and unused; there are no tracked deletions; serial rules and Groups 1-8 are recorded; the false P01-P40 table is absent; T08/P05 and the Chapter 27/34 decision are recorded; only S0 governance files are committed locally; and post-commit status is clean. Stage 1 remains closed until the user sends its segment.
+`G8-S0` passes only after: the repository and recorded empty-remote evidence are verified; the authoritative requirement copy has the expected SHA-256; the package remains whole, ignored, untracked, and unused; there are no tracked deletions; serial/message-authorization rules, toolchain decisions, and Groups 1-8 are recorded; the false P01-P40 table is absent; T08/P05 and the Chapter 27/34 decision are recorded; only S0-safe files are committed locally; and post-commit status is clean. A later remote connection reset does not overturn the recorded evidence. Stage 1 begins only when the user sends `1-S1`, with no additional Group 8 opening action.

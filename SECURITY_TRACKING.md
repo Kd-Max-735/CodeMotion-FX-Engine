@@ -4,7 +4,7 @@ Audit date: 2026-07-27
 
 Values were never printed. The aggregate API package was read only and remains unmodified.
 
-The entire `doubao_glm_api_package/` directory is ignored, untracked, and prohibited from force-add. It may not be used by the engine until all provider credentials are rotated and externalized. This security hold does not block Stage 1 core development while the package remains untracked and unused.
+The entire `doubao_glm_api_package/` directory is ignored, untracked, and prohibited from force-add. It may not be used by the engine until all provider credentials are rotated and externalized. Rotation and externalization are the `6-S7` gate before real AI integration; they do not block `1-S1` while the package remains untracked and unused.
 
 ## Inventory
 
@@ -43,6 +43,6 @@ These files are evidence within the wholly ignored package. The paths are record
 | `doubao_glm_api_package/root_scripts/Doubao-Seedream-4.0.py` | OSS ID/Secret at lines 30-31 | Rotate; externalize; verify |
 | `doubao_glm_api_package/root_scripts/Doubao_WSSP_1.0_1.py` | OSS ID/Secret at lines 20-21 | Rotate; externalize; verify |
 
-## AI integration release criteria
+## `6-S7` AI integration release criteria
 
 Before any AI integration: provider-side rotation is confirmed for every credential; replacements come from an approved external secret source; missing configuration fails explicitly; the full package scan returns no credential-shaped literal; Group 7 verifies the sanitized package; and Group 8 decides whether a separately reviewed package may replace the ignored input. The current package remains preserved and ignored unless the user explicitly authorizes a later package transition.
