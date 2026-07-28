@@ -1,20 +1,16 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "composite": true,
-    "jsx": "react-jsx",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts"],
   "references": [
     { "path": "../core" },
-    { "path": "../exporter" },
-    { "path": "../renderer-api" },
+    { "path": "../effects-2d" },
     { "path": "../renderer-webgl" },
-    { "path": "../schema" },
+    { "path": "../resource-manager" },
     { "path": "../timeline" }
   ]
 }

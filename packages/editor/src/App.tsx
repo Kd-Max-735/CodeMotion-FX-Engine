@@ -45,6 +45,7 @@ import type { JsonValue, LayerDefinition, MotionProject, Vector3 } from "@codemo
 import { EFFECT_DRAG_MIME, LAB_PIPELINE_EFFECT_ID, isLabPipelineEffect } from "./lab-effect.js";
 import { findLayer, LAYER_PROPERTY_SCHEMA, locateProjectError, mainLayers, pipelineEffect, type PropertyFieldSchema } from "./model.js";
 import { CorePreviewRenderer, type PreviewStats } from "./preview-renderer.js";
+import { RenderCenter } from "./RenderCenter.js";
 import { EditorStore } from "./store.js";
 
 interface AppProps { store: EditorStore }
@@ -72,6 +73,7 @@ export function App({ store }: AppProps) {
       {snapshot.view === "workbench" && <Workbench store={store} />}
       {snapshot.view === "editor" && <Editor store={store} />}
       {snapshot.view === "lab" && <EffectLab store={store} />}
+      {snapshot.view === "render-center" && <RenderCenter store={store} />}
     </div>
   );
 }
@@ -143,7 +145,7 @@ function Workbench({ store }: AppProps) {
         </section>
         <div className="workbench-lower">
           <section className="workspace-section templates"><div className="section-heading"><div><span className="eyebrow">TEMPLATES</span><h2>模板市场</h2></div></div><div className="template-row"><button onClick={() => store.newProject("数据发布", 1920, 1080, 30)}><Activity /><span><b>数据发布</b><small>16:9 · 8 秒</small></span></button><button onClick={() => store.newProject("竖屏标题", 1080, 1920, 30)}><Sparkles /><span><b>竖屏标题</b><small>9:16 · 8 秒</small></span></button><button onClick={() => store.setView("lab")}><FlaskConical /><span><b>特效实验室</b><small>WebGL 管线</small></span></button></div></section>
-          <aside className="render-queue"><div className="section-heading"><div><span className="eyebrow">RENDER QUEUE</span><h2>渲染任务</h2></div></div><div className="queue-empty"><ShieldCheck size={21} /><span><b>队列就绪</b><small>导出队列将在阶段 6 接通</small></span></div></aside>
+          <aside className="render-queue"><div className="section-heading"><div><span className="eyebrow">RENDER QUEUE</span><h2>渲染任务</h2></div></div><button className="queue-empty" onClick={() => store.setView("render-center")}><ShieldCheck size={21} /><span><b>打开渲染中心</b><small>本地真实 exporter / FFmpeg</small></span></button></aside>
         </div>
       </div>
     </main>
@@ -185,7 +187,7 @@ function Editor({ store }: AppProps) {
         <div className="toolbar-group"><IconButton label="撤销" disabled={!store.canUndo} onClick={() => store.undo()}><Undo2 size={17} /></IconButton><IconButton label="重做" disabled={!store.canRedo} onClick={() => store.redo()}><Redo2 size={17} /></IconButton></div>
         <div className="transport"><IconButton label={snapshot.playing ? "暂停" : "播放"} active={snapshot.playing} onClick={() => store.setPlaying(!snapshot.playing)}>{snapshot.playing ? <Pause size={17} /> : <Play size={17} />}</IconButton><b>{formatTime(snapshot.currentTime, project.fps)}</b></div>
         <div className="toolbar-meta"><span>PREVIEW</span><span>{project.width} × {project.height}</span><span>{project.fps} FPS</span></div>
-        <div className="toolbar-group"><IconButton label="特效实验室" onClick={() => store.setView("lab")}><FlaskConical size={17} /></IconButton><button className="export-button" onClick={downloadProject}><Download size={16} />工程</button></div>
+        <div className="toolbar-group"><IconButton label="特效实验室" onClick={() => store.setView("lab")}><FlaskConical size={17} /></IconButton><button className="secondary-command render-button" onClick={() => store.setView("render-center")}><CirclePlay size={16} />渲染</button><button className="export-button" onClick={downloadProject}><Download size={16} />工程</button></div>
       </header>
       {snapshot.error && <div className="error-strip" role="alert"><Zap size={16} /><button onClick={() => snapshot.error?.layerId && store.selectLayer(snapshot.error.layerId)}><b>{snapshot.error.message}</b><span>{[snapshot.error.layerId, snapshot.error.effectId, snapshot.error.parameter].filter(Boolean).join(" / ") || snapshot.error.path}</span></button><IconButton label="关闭错误" onClick={() => store.clearError()}><X size={15} /></IconButton></div>}
       <div className="editor-body">

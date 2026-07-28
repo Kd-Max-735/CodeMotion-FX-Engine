@@ -139,6 +139,8 @@ Stage 4 stability freeze: editor `0.1.0` on the unchanged Stage 3 public contrac
 
 Stage 5 stability freeze: effects-2d and effects-3d `1.0.0`; the ordered 40-entry P0 registry digest is `f827b6cf684fa6963e00ce33d4dd90efbd6b03ba6505c3d0149058bd53d73a3c`. Stage 1-4 public contracts remain unchanged. The authoritative registry and Group 8 verification record is `docs/api/stage-5.md`.
 
+Stage 6 stability freeze: exporter `0.1.0`; Stage 1-5 public Core, Project Schema, Effect Definition Schema, Renderer Adapter API, and P0 registry remain unchanged. The server-side fixed-frame project renderer, media integrity boundary, FFmpeg export matrix, and render-center verification record is `docs/api/stage-6.md`.
+
 ## 27.8 S0 exit gate
 
 `G8-S0` passed only after: the repository and recorded empty-remote evidence were verified; the authoritative requirement copy had the expected SHA-256; the package was whole, ignored, untracked, and unused at that gate; there were no tracked deletions; serial/message-authorization rules, toolchain decisions, and Groups 1-8 were recorded; the false P01-P40 table was absent; T08/P05 and the Chapter 27/34 decision were recorded; only S0-safe files were committed locally; and post-commit status was clean. The user's later pre-Stage-6 removal of the untracked package does not invalidate that historical evidence. The package must now remain absent and must not be restored, rebuilt, or referenced. A later remote connection reset does not overturn the recorded evidence. Stage 1 began when the user sent `1-S1`, with no additional Group 8 opening action.
