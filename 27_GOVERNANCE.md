@@ -15,13 +15,13 @@ Chapter 27 is the execution authority and its numbered milestones remain in orde
 | Item | Current state |
 | --- | --- |
 | Project origin | From zero in `D:\CodeMotion FX Engine v1` |
-| Allowed initial inputs | Current `doubao_glm_api_package/`, the requirement document, and new governance/engineering files |
+| Allowed initial inputs | The requirement document and new governance/engineering files; the historical untracked `doubao_glm_api_package/` input was never used and was removed by the user before Stage 6 |
 | Forbidden baseline | `D:\CodeMotion FX Engine`, its 58 files, and every old commit; no access or import is permitted |
 | Git layout | One working directory, no additional worktrees |
 | Integration branch | `integration` |
 | Remote | `origin` = `https://github.com/Kd-Max-735/CodeMotion-FX-Engine.git`; read-only query found no heads or tags on 2026-07-27 |
-| Aggregate package | 41 files, 7 directories; wholly ignored and untracked |
-| Package manifest SHA-256 | `a613ccbcc2991af39c702b419a54dc48feacaae1d41c6bb1b73764f7a2e43b65` |
+| Aggregate package | User-removed before Stage 6; absent with zero tracked files; restoration, reconstruction, or runtime reference is prohibited |
+| Historical package manifest SHA-256 | `a613ccbcc2991af39c702b419a54dc48feacaae1d41c6bb1b73764f7a2e43b65`; audit evidence only, never a recovery source |
 
 The successful 2026-07-27 empty-remote query is retained as local evidence. A later connection reset is only network state and does not block `1-S1`. Until another query succeeds, do not pull, merge, push, force-push, or rewrite remote history. If a successful future query shows history or incompatible refs, stop as BLOCKED before any remote integration.
 
@@ -89,7 +89,7 @@ Current category ownership:
 | resources | Group 1 / Group 5 | Group 1 owns runtime resource contracts; Group 5 owns persistence/object storage; exact seam at `8-S4` |
 | cache | Group 1 / Group 5 | Group 1 owns runtime keys/interfaces; Group 5 owns persistent/distributed operation; exact seam at `8-S4` |
 | public Schema/API | Group 1 | Cross-group changes require Group 1 approval and Group 7 verification |
-| AI provider package | Group 6 after `6-S7` security clearance | Entire current package remains ignored and unused until credential rotation and externalization |
+| V1 model Provider | Group 6 after `6-S7` security clearance | Server-side Volcengine Ark only, using `doubao-seed-2-0-lite-260428`; the removed aggregate package must not be restored, rebuilt, or referenced |
 
 ## 27.6 P0 release scope and named effects
 
@@ -141,4 +141,4 @@ Stage 5 stability freeze: effects-2d and effects-3d `1.0.0`; the ordered 40-entr
 
 ## 27.8 S0 exit gate
 
-`G8-S0` passes only after: the repository and recorded empty-remote evidence are verified; the authoritative requirement copy has the expected SHA-256; the package remains whole, ignored, untracked, and unused; there are no tracked deletions; serial/message-authorization rules, toolchain decisions, and Groups 1-8 are recorded; the false P01-P40 table is absent; T08/P05 and the Chapter 27/34 decision are recorded; only S0-safe files are committed locally; and post-commit status is clean. A later remote connection reset does not overturn the recorded evidence. Stage 1 begins only when the user sends `1-S1`, with no additional Group 8 opening action.
+`G8-S0` passed only after: the repository and recorded empty-remote evidence were verified; the authoritative requirement copy had the expected SHA-256; the package was whole, ignored, untracked, and unused at that gate; there were no tracked deletions; serial/message-authorization rules, toolchain decisions, and Groups 1-8 were recorded; the false P01-P40 table was absent; T08/P05 and the Chapter 27/34 decision were recorded; only S0-safe files were committed locally; and post-commit status was clean. The user's later pre-Stage-6 removal of the untracked package does not invalidate that historical evidence. The package must now remain absent and must not be restored, rebuilt, or referenced. A later remote connection reset does not overturn the recorded evidence. Stage 1 began when the user sent `1-S1`, with no additional Group 8 opening action.
