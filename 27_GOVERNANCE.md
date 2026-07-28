@@ -137,6 +137,8 @@ Stage 3 stability freeze: root/engine/core/Schema `0.3.0`; Project Schema `1.2.0
 
 Stage 4 stability freeze: editor `0.1.0` on the unchanged Stage 3 public contracts. The editor scope and verification record is `docs/api/stage-4.md`; the executable Stage 5 input catalog and final ownership boundaries are frozen in `docs/P0_EFFECT_CATALOG.md`.
 
+Stage 5 stability freeze: effects-2d and effects-3d `1.0.0`; the ordered 40-entry P0 registry digest is `f827b6cf684fa6963e00ce33d4dd90efbd6b03ba6505c3d0149058bd53d73a3c`. Stage 1-4 public contracts remain unchanged. The authoritative registry and Group 8 verification record is `docs/api/stage-5.md`.
+
 ## 27.8 S0 exit gate
 
 `G8-S0` passes only after: the repository and recorded empty-remote evidence are verified; the authoritative requirement copy has the expected SHA-256; the package remains whole, ignored, untracked, and unused; there are no tracked deletions; serial/message-authorization rules, toolchain decisions, and Groups 1-8 are recorded; the false P01-P40 table is absent; T08/P05 and the Chapter 27/34 decision are recorded; only S0-safe files are committed locally; and post-commit status is clean. A later remote connection reset does not overturn the recorded evidence. Stage 1 begins only when the user sends `1-S1`, with no additional Group 8 opening action.

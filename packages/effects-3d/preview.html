@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>CodeMotion T08 Text Extrude 3D Preview</title>
+  <style>
+    :root { color-scheme: dark; font: 14px/1.4 system-ui, sans-serif; background: #09101f; color: #e9f2ff; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
+    article { padding: 18px; border: 1px solid #29456a; border-radius: 14px; background: #101c32; }
+    canvas { width: 640px; max-width: 82vw; image-rendering: pixelated; border-radius: 8px; background: #050913; }
+    h1 { margin: 12px 0 4px; font-size: 18px; }
+    p { margin: 0 0 10px; color: #9bb0ce; }
+    label { display: flex; gap: 10px; align-items: center; }
+    input { flex: 1; }
+  </style>
+</head>
+<body id="T08">
+  <article>
+    <canvas width="160" height="90" aria-label="T08 deterministic extruded 3D text preview"></canvas>
+    <h1>Text Extrude 3D</h1>
+    <p>fx.text.textExtrude3D · WebGL2 / deterministic CPU preview</p>
+    <label>Progress <input type="range" min="0" max="1" step="0.25" value="0.5"><output>50%</output></label>
+  </article>
+  <script type="module">
+    import { TEXT_EXTRUDE_3D, makeTextExtrudePreviewInput } from "./dist/index.js";
+    const canvas = document.querySelector("canvas");
+    const slider = document.querySelector("input");
+    const output = document.querySelector("output");
+    const source = makeTextExtrudePreviewInput(canvas.width, canvas.height);
+    function render() {
+      const progress = Number(slider.value);
+      output.value = `${Math.round(progress * 100)}%`;
+      const surface = TEXT_EXTRUDE_3D.renderPixels(source, { ...TEXT_EXTRUDE_3D.defaultPreset, progress }, {
+        progress, seed: 20260728, quality: "preview"
+      });
+      const context = canvas.getContext("2d");
+      const image = context.createImageData(canvas.width, canvas.height);
+      image.data.set(surface.data);
+      context.putImageData(image, 0, 0);
+      let fingerprint = 0x811c9dc5;
+      for (const byte of image.data) {
+        fingerprint ^= byte;
+        fingerprint = Math.imul(fingerprint, 0x01000193);
+      }
+      document.body.dataset.rendered = "true";
+      document.body.dataset.fingerprint = (fingerprint >>> 0).toString(16).padStart(8, "0");
+    }
+    slider.addEventListener("input", render);
+    render();
+  </script>
+</body>
+</html>

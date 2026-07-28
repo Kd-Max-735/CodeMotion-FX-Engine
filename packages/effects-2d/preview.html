@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>CodeMotion Group 2 P0 Effect Previews</title>
+  <style>
+    :root { color-scheme: dark; font: 14px/1.4 system-ui, sans-serif; background: #0b1020; color: #e8efff; }
+    body { margin: 0; padding: 24px; }
+    header { position: sticky; top: 0; z-index: 2; padding: 12px 0; background: #0b1020ee; backdrop-filter: blur(10px); }
+    label { display: flex; gap: 12px; align-items: center; max-width: 620px; }
+    input { flex: 1; }
+    main { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+    article { padding: 12px; border: 1px solid #263552; border-radius: 10px; background: #111a2f; }
+    h2 { margin: 8px 0 2px; font-size: 14px; }
+    p { margin: 0; color: #93a6c8; font-size: 12px; }
+    canvas { width: 160px; height: 90px; max-width: 100%; image-rendering: auto; border-radius: 6px; background: #070a12; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>P0 aggregate catalog (40)</h1>
+    <label>Golden progress <input id="progress" type="range" min="0" max="1" step="0.25" value="0.5"><output>50%</output></label>
+  </header>
+  <main id="grid"></main>
+  <script type="module">
+    import { P0_EFFECTS, makePreviewInput, makeTextExtrudePreviewInput } from "./dist/index.js";
+    const width = 160;
+    const height = 90;
+    const source = makePreviewInput(width, height);
+    const textExtrudeSource = makeTextExtrudePreviewInput(width, height);
+    const secondary = makePreviewInput(width, height, true);
+    const grid = document.querySelector("#grid");
+    const slider = document.querySelector("#progress");
+    const output = document.querySelector("output");
+    const cards = P0_EFFECTS.map((effect) => {
+      const article = document.createElement("article");
+      article.id = effect.sourceId;
+      article.innerHTML = `<canvas width="${width}" height="${height}" aria-label="${effect.preview.alt}"></canvas><h2>${effect.sourceId} · ${effect.displayName}</h2><p>${effect.effectId} · ${effect.performanceClass}</p>`;
+      grid.append(article);
+      return { effect, canvas: article.querySelector("canvas") };
+    });
+    function render() {
+      const progress = Number(slider.value);
+      output.value = `${Math.round(progress * 100)}%`;
+      for (const { effect, canvas } of cards) {
+        const effectSource = effect.sourceId === "T08" ? textExtrudeSource : source;
+        const surface = effect.renderPixels(effectSource, { ...effect.defaultPreset, progress }, {
+          progress,
+          seed: 20260728,
+          quality: "preview",
+          secondary
+        });
+        const context = canvas.getContext("2d");
+        const image = context.createImageData(width, height);
+        image.data.set(surface.data);
+        context.putImageData(image, 0, 0);
+      }
+    }
+    slider.addEventListener("input", render);
+    render();
+    if (location.hash) document.querySelector(location.hash.split("-")[0])?.scrollIntoView();
+  </script>
+</body>
+</html>

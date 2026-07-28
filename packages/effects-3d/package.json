@@ -1,0 +1,30 @@
+{
+  "name": "@codemotion/effects-3d",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "README.md",
+    "CHANGELOG.md",
+    "preview.html"
+  ],
+  "scripts": {
+    "benchmark": "node ./benchmark.mjs"
+  },
+  "dependencies": {
+    "@codemotion/core": "0.3.0",
+    "@codemotion/renderer-api": "0.2.0"
+  }
+}

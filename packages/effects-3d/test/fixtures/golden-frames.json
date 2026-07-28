@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "effectId": "fx.text.textExtrude3D",
+  "width": 64,
+  "height": 36,
+  "seed": 20260728,
+  "quality": "final",
+  "frames": {
+    "0": "f91d3367",
+    "0.25": "1989a8d1",
+    "0.5": "74197f86",
+    "0.75": "b0c30ea1",
+    "1": "1941d4dc"
+  }
+}
