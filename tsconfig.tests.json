@@ -8,6 +8,7 @@
   },
   "include": [
     "packages/*/test/**/*.ts",
+    "packages/*/test/**/*.tsx",
     "vitest.config.ts"
   ]
 }

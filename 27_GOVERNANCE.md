@@ -54,6 +54,7 @@ Handoff sequence:
 | `1-S1` | Data model, Schema, renderer API, core package, example | Group 1 | Group 7-equivalent contract tests, then Group 8 recheck | Group 8 after verification | Verified 2026-07-27; closes with the Stage 1 integration commit |
 | `1-S2` | Timeline, layer/transform evaluation, keyframes, command history | Group 1 | Stage 1 regression plus fixed-time/command tests, then Group 8 recheck | Group 8 after verification | Verified 2026-07-27; closes with the Stage 2 integration commit |
 | `1-S3` | Effect Graph, resources/cache, WebGL composition, masks, Alpha, effect stack | Group 1 | Contract regressions, Golden Frame, GPU/resource release, and vertical-preview smoke, then Group 8 recheck | Group 8 after verification | Verified 2026-07-27; closes with the Stage 3 integration commit |
+| `1-S4` | React/Vite editor foundation, real core preview, autosave/recovery | Group 4 | Core round-trip, browser recovery, production build, desktop/mobile visual checks, then Group 8 recheck | Group 8 after verification | Verified 2026-07-28; closes with the Stage 4 integration commit |
 | Later rows | Defined by each current-stage prompt | Prompt-designated group | Group 7 | Group 8 | Pending prior PASS plus the user's matching prompt |
 
 No integration commit may include another stage's files. No reset, checkout, clean, batch deletion, or force-add is allowed.
@@ -98,20 +99,20 @@ Chapter 26.1 defines five directions, eight effects each:
 
 | Direction | Count | Concrete IDs |
 | --- | ---: | --- |
-| Basic motion | 8 | Deferred to `8-S4` |
-| Text | 8 | Deferred to `8-S4` |
-| Vector and stroke | 8 | Deferred to `8-S4` |
-| Light and post-processing | 8 | Deferred to `8-S4` |
-| Transition and composition | 8 | Deferred to `8-S4` |
+| Basic motion | 8 | M01-M08 in `docs/P0_EFFECT_CATALOG.md` |
+| Text | 8 | T01-T08 in `docs/P0_EFFECT_CATALOG.md` |
+| Vector and stroke | 8 | V01-V04 and D01-D04 in `docs/P0_EFFECT_CATALOG.md` |
+| Light and post-processing | 8 | L01-L04 and P01-P04 in `docs/P0_EFFECT_CATALOG.md` |
+| Transition and composition | 8 | C01-C04 and H01-H04 in `docs/P0_EFFECT_CATALOG.md` |
 
-The 40 real effect IDs and final cross-group fine boundaries must be decided at `8-S4`, before `2-S5`. No ID list is inferred in S0.
+The 40 real effect IDs and cross-group boundaries were frozen at `8-S4` in `docs/P0_EFFECT_CATALOG.md`, before `2-S5`. The selection is traceable to the authoritative source tables and does not treat P0 as an ID prefix.
 
 Two source definitions are already known and are not blockers:
 
 | Catalog ID | Effect ID | Parameters | S0 ownership state |
 | --- | --- | --- | --- |
-| `T08` | `fx.text.textExtrude3D` | `depth`, `bevel`, `material`, `light` | Definition recorded; Group 2/3 boundary deferred to `8-S4` |
-| `P05` | `fx.post.depthOfField` | `focusDistance`, `aperture`, `maxBlur` | Definition recorded; Group 2/3 and compositor boundary deferred to `8-S4` |
+| `T08` | `fx.text.textExtrude3D` | `depth`, `bevel`, `material`, `light` | P0 item; Group 3 implements the minimum 3D text path, Group 2 integrates catalog/presets, Group 1 owns contracts |
+| `P05` | `fx.post.depthOfField` | `focusDistance`, `aperture`, `maxBlur` | Not selected for P0 40; Group 3 owns depth/camera behavior, Group 2 owns catalog/fallback, Group 1 owns compositor/depth contracts |
 
 ## 27.7 Chapter 27 milestone gates
 
@@ -133,6 +134,8 @@ Stage 1 public contract freeze: packages and engine `0.1.0`; Project Schema `1.0
 Stage 2 stability freeze: root/engine/core/Schema `0.2.0`; timeline and scene-graph `0.1.0`; Project Schema `1.1.0`; command interface at core `0.2.0`; Effect Definition Schema and Renderer Adapter API remain `1.0.0`. The authoritative scope and fixed-time/command record is `docs/api/stage-2.md`.
 
 Stage 3 stability freeze: root/engine/core/Schema `0.3.0`; Project Schema `1.2.0`; Renderer Adapter API `1.1.0`; renderer-api package `0.2.0`; expression, effect-graph, renderer-webgl, resource-manager, and cache packages `0.1.0`; Effect Definition Schema remains `1.0.0`. The authoritative core and WebGL records are `docs/api/stage-3.md` and `docs/api/stage-3-webgl.md`.
+
+Stage 4 stability freeze: editor `0.1.0` on the unchanged Stage 3 public contracts. The editor scope and verification record is `docs/api/stage-4.md`; the executable Stage 5 input catalog and final ownership boundaries are frozen in `docs/P0_EFFECT_CATALOG.md`.
 
 ## 27.8 S0 exit gate
 

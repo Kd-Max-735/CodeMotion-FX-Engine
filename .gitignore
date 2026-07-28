@@ -22,6 +22,7 @@ htmlcov/
 # Build, package, and runtime output
 build/
 dist/
+dist-app/
 *.egg-info/
 .cache/
 cache/
@@ -32,6 +33,7 @@ temp/
 
 # Frontend dependency and build output
 node_modules/
+packages/editor/tmp/
 .next/
 .nuxt/
 .svelte-kit/

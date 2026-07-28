@@ -10,6 +10,7 @@
     { "path": "./packages/renderer-webgl" },
     { "path": "./packages/resource-manager" },
     { "path": "./packages/cache" },
-    { "path": "./packages/schema" }
+    { "path": "./packages/schema" },
+    { "path": "./packages/editor" }
   ]
 }
