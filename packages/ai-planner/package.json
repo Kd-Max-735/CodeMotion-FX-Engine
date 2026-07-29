@@ -1,0 +1,30 @@
+{
+  "name": "@codemotion/ai-planner",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "qa:live": "node ./test/live-gate.mjs"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map"
+  ],
+  "dependencies": {
+    "@codemotion/core": "0.3.0",
+    "@codemotion/effects-2d": "1.0.0",
+    "@codemotion/exporter": "0.1.0",
+    "@codemotion/schema": "0.3.0",
+    "ajv": "^8.17.1"
+  }
+}

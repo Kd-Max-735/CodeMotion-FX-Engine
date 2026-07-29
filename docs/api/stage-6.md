@@ -54,8 +54,13 @@ API keys, model calls, browser-to-model connections, nor uploads exist in this p
 
 `verifyStoredMediaAsset` is the sole reusable server-side integrity boundary. It checks
 the frozen asset URI and hash forms, root containment, symlink rejection, regular-file
-status, URI/hash agreement, and a streamed disk SHA-256 before returning an
-`ImportedMedia`. Cancellation and every failure use path-free messages. The render task
+status, URI/hash agreement, the declared `asset.metadata.bytes`, and a streamed disk
+SHA-256 before returning `VerifiedStoredMedia`. Project metadata is an untrusted
+declaration: `metadata.bytes` must be a finite, non-negative safe integer exactly equal
+to the same verification pass's `stat.size`. The returned read-only `trustedBytes`,
+derived only from that `stat`, is the sole byte value server-side consumers may use for
+security limits; the verifier does not rewrite project metadata. Cancellation and every
+failure use path-free messages. The render task
 service calls it before queue insertion and immediately before FFmpeg input; it never
 updates the project hash or renames tampered content.
 
@@ -101,8 +106,8 @@ The build is configured with `--enable-gpl`, `--enable-version3`,
 in this build; VP9 and Opus use external libvpx/libopus. Product distribution must
 perform its own FFmpeg build, source-offer/compliance, and patent/license review.
 
-Verification: `npm run typecheck` passed. The full repository suite passed 17 test
-files and 397 tests. The suite includes actual FFprobe inspection rather than
+Verification: `npm run typecheck` passed. The full repository suite passed 18 test
+files and 405 tests. The suite includes actual FFprobe inspection rather than
 extension-only assertions.
 
 ## Group 4 editor integration

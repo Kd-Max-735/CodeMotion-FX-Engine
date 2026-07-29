@@ -9,7 +9,7 @@ import type {
 } from "@codemotion/core";
 import { LAB_PIPELINE_EFFECT_ID } from "./lab-effect.js";
 
-export type WorkspaceView = "workbench" | "editor" | "lab" | "render-center";
+export type WorkspaceView = "workbench" | "editor" | "lab" | "render-center" | "ai-planner";
 
 export interface EditorDocument {
   project: MotionProject;

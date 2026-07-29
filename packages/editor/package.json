@@ -16,9 +16,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "qa:visual": "node test/visual-smoke.mjs",
-    "qa:render": "node test/render-center-smoke.mjs"
+    "qa:render": "node test/render-center-smoke.mjs",
+    "qa:ai-live": "node test/ai-planner-live-smoke.mjs"
   },
   "dependencies": {
+    "@codemotion/ai-planner": "0.3.0",
     "@codemotion/core": "0.3.0",
     "@codemotion/exporter": "0.1.0",
     "@codemotion/renderer-api": "0.2.0",

@@ -14,6 +14,7 @@
     { "path": "./packages/effects-2d" },
     { "path": "./packages/effects-3d" },
     { "path": "./packages/exporter" },
+    { "path": "./packages/ai-planner" },
     { "path": "./packages/editor" }
   ]
 }

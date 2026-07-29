@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { MotionProject } from "@codemotion/core";
 import {
   addAssetToProject,
@@ -313,6 +313,82 @@ describe("media input contract", () => {
     });
     expect(verified.storedPath).toBe(imported.storedPath);
     expect(verified.descriptor.cacheKey).toBe(imported.asset.hash?.slice("sha256:".length));
+    expect(verified.trustedBytes).toBe((await stat(imported.storedPath)).size);
+  });
+
+  it("rejects an unchanged 11 MB image declared as 130 bytes without side effects", async () => {
+    const exactBytes = 11_534_447;
+    const largeImagePath = resolve(input, "declared-small.png");
+    const source = await readFile(imagePath);
+    const largeImage = Buffer.alloc(exactBytes);
+    source.copy(largeImage);
+    await writeFile(largeImagePath, largeImage);
+    const verifyStorage = resolve(root, "verify-declared-small");
+    const imported = await importMedia({
+      sourcePath: largeImagePath,
+      claimedMime: "image/png",
+      allowedRoots: [input],
+      storageDirectory: verifyStorage
+    });
+    expect((await stat(imported.storedPath)).size).toBe(exactBytes);
+    const forged = structuredClone(imported.asset);
+    forged.metadata.bytes = 130;
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const absentOutput = resolve(root, `forged-bytes-output-${randomUUID()}`);
+    const result = verifyStoredMediaAsset({ asset: forged, storageDirectory: verifyStorage });
+    await expect(result).rejects.toThrow(/byte declaration/);
+    await expect(result).rejects.not.toThrow(new RegExp(verifyStorage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    await expect(stat(absentOutput)).rejects.toMatchObject({ code: "ENOENT" });
+    fetchSpy.mockRestore();
+  }, 30_000);
+
+  it("rejects every invalid byte declaration for image, audio, and video", async () => {
+    const cases = [
+      ["missing", undefined],
+      ["string", "130"],
+      ["nan", Number.NaN],
+      ["negative", -1],
+      ["fraction", 1.5],
+      ["too-small", 0],
+      ["too-large", Number.MAX_SAFE_INTEGER]
+    ] as const;
+    const fixtures = [
+      [imagePath, "image/png"],
+      [audioPath, "audio/wav"],
+      [videoPath, "video/mp4"]
+    ] as const;
+    for (const [sourcePath, claimedMime] of fixtures) {
+      const verifyStorage = resolve(root, `verify-byte-matrix-${claimedMime.replace("/", "-")}`);
+      const imported = await importMedia({
+        sourcePath, claimedMime, allowedRoots: [input], storageDirectory: verifyStorage
+      });
+      for (const [name, declaration] of cases) {
+        const forged = structuredClone(imported.asset);
+        if (declaration === undefined) delete forged.metadata.bytes;
+        else forged.metadata.bytes = declaration;
+        await expect(verifyStoredMediaAsset({
+          asset: forged,
+          storageDirectory: verifyStorage
+        }), `${claimedMime} ${name}`).rejects.toThrow(/byte declaration/);
+      }
+    }
+  }, 30_000);
+
+  it("does not treat a valid URI and disk hash as a substitute for byte verification", async () => {
+    const verifyStorage = resolve(root, "verify-hash-is-not-size");
+    const imported = await importMedia({
+      sourcePath: audioPath,
+      claimedMime: "audio/wav",
+      allowedRoots: [input],
+      storageDirectory: verifyStorage
+    });
+    const forged = structuredClone(imported.asset);
+    forged.metadata.bytes = (await stat(imported.storedPath)).size + 1;
+    await expect(verifyStoredMediaAsset({
+      asset: forged,
+      storageDirectory: verifyStorage
+    })).rejects.toThrow("Stored media byte declaration does not match the verified file size.");
   });
 
   it.each([

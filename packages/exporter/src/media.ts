@@ -53,6 +53,10 @@ export interface ImportedMedia {
   readonly arkEligibility: ArkTransferEligibility;
 }
 
+export interface VerifiedStoredMedia extends ImportedMedia {
+  readonly trustedBytes: number;
+}
+
 export interface StoredMediaVerificationOptions {
   readonly asset: AssetDefinition;
   readonly storageDirectory: string;
@@ -236,7 +240,7 @@ export async function importMedia(options: MediaImportOptions): Promise<Imported
   };
 }
 
-export async function verifyStoredMediaAsset(options: StoredMediaVerificationOptions): Promise<ImportedMedia> {
+export async function verifyStoredMediaAsset(options: StoredMediaVerificationOptions): Promise<VerifiedStoredMedia> {
   if (isAborted(options.signal)) throw new Error("Stored media verification was cancelled.");
   const uriMatch = /^media:\/\/([a-f0-9]{64})(\.[a-z0-9]+)$/i.exec(options.asset.uri);
   const hashMatch = /^sha256:([a-f0-9]{64})$/i.exec(options.asset.hash ?? "");
@@ -262,6 +266,7 @@ export async function verifyStoredMediaAsset(options: StoredMediaVerificationOpt
     }
     const storedInfo = await stat(storedPath);
     if (!storedInfo.isFile()) throw new Error("regular-file");
+    if (!Number.isSafeInteger(storedInfo.size) || storedInfo.size < 0) throw new Error("file-size");
     storedBytes = storedInfo.size;
   } catch {
     throw new Error("Stored media is missing, outside its storage root, or not a regular file.");
@@ -276,6 +281,15 @@ export async function verifyStoredMediaAsset(options: StoredMediaVerificationOpt
   }
   if (diskHash !== uriHash) throw new Error("Stored media content hash does not match its immutable address.");
 
+  const declaredBytes = options.asset.metadata.bytes;
+  if (typeof declaredBytes !== "number" || !Number.isFinite(declaredBytes)
+    || !Number.isSafeInteger(declaredBytes) || declaredBytes < 0) {
+    throw new Error("Stored media byte declaration is invalid.");
+  }
+  if (declaredBytes !== storedBytes) {
+    throw new Error("Stored media byte declaration does not match the verified file size.");
+  }
+
   const duration = typeof options.asset.metadata.duration === "number" ? options.asset.metadata.duration : 0;
   const eligibility = arkEligibility(format.kind, storedBytes, duration);
   return {
@@ -287,7 +301,8 @@ export async function verifyStoredMediaAsset(options: StoredMediaVerificationOpt
       cacheKey: diskHash,
       metadata: options.asset.metadata
     },
-    arkEligibility: eligibility
+    arkEligibility: eligibility,
+    trustedBytes: storedBytes
   };
 }
 

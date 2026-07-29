@@ -46,6 +46,7 @@ import { EFFECT_DRAG_MIME, LAB_PIPELINE_EFFECT_ID, isLabPipelineEffect } from ".
 import { findLayer, LAYER_PROPERTY_SCHEMA, locateProjectError, mainLayers, pipelineEffect, type PropertyFieldSchema } from "./model.js";
 import { CorePreviewRenderer, type PreviewStats } from "./preview-renderer.js";
 import { RenderCenter } from "./RenderCenter.js";
+import { AiPlanner } from "./AiPlanner.js";
 import { EditorStore } from "./store.js";
 
 interface AppProps { store: EditorStore }
@@ -74,6 +75,7 @@ export function App({ store }: AppProps) {
       {snapshot.view === "editor" && <Editor store={store} />}
       {snapshot.view === "lab" && <EffectLab store={store} />}
       {snapshot.view === "render-center" && <RenderCenter store={store} />}
+      {snapshot.view === "ai-planner" && <AiPlanner store={store} />}
     </div>
   );
 }
@@ -131,7 +133,7 @@ function Workbench({ store }: AppProps) {
             {preset === "自定义" && <div className="custom-size"><input aria-label="自定义宽度" type="number" value={customWidth} onChange={(event) => setCustomWidth(Number(event.target.value))} /><span>×</span><input aria-label="自定义高度" type="number" value={customHeight} onChange={(event) => setCustomHeight(Number(event.target.value))} /></div>}
             <button className="primary-command" onClick={() => store.newProject(name || "未命名项目", width, height, fps)}><Plus size={17} />新建工程</button>
           </div>
-          <div className="ai-draft-bar"><Sparkles size={17} /><input aria-label="AI 动画描述" placeholder="描述想要的动画" disabled /><button disabled title="AI 服务将在阶段 7 接入">AI 未连接</button></div>
+          <div className="ai-draft-bar"><Sparkles size={17} /><span>文本、图片、音频与视频规划</span><button onClick={() => store.setView("ai-planner")}>打开 AI 规划</button></div>
         </section>
         <section className="workspace-section">
           <div className="section-heading"><div><span className="eyebrow">RECENT</span><h2>最近项目</h2></div></div>
@@ -187,7 +189,7 @@ function Editor({ store }: AppProps) {
         <div className="toolbar-group"><IconButton label="撤销" disabled={!store.canUndo} onClick={() => store.undo()}><Undo2 size={17} /></IconButton><IconButton label="重做" disabled={!store.canRedo} onClick={() => store.redo()}><Redo2 size={17} /></IconButton></div>
         <div className="transport"><IconButton label={snapshot.playing ? "暂停" : "播放"} active={snapshot.playing} onClick={() => store.setPlaying(!snapshot.playing)}>{snapshot.playing ? <Pause size={17} /> : <Play size={17} />}</IconButton><b>{formatTime(snapshot.currentTime, project.fps)}</b></div>
         <div className="toolbar-meta"><span>PREVIEW</span><span>{project.width} × {project.height}</span><span>{project.fps} FPS</span></div>
-        <div className="toolbar-group"><IconButton label="特效实验室" onClick={() => store.setView("lab")}><FlaskConical size={17} /></IconButton><button className="secondary-command render-button" onClick={() => store.setView("render-center")}><CirclePlay size={16} />渲染</button><button className="export-button" onClick={downloadProject}><Download size={16} />工程</button></div>
+        <div className="toolbar-group"><IconButton label="AI 动画规划" onClick={() => store.setView("ai-planner")}><Sparkles size={17} /></IconButton><IconButton label="特效实验室" onClick={() => store.setView("lab")}><FlaskConical size={17} /></IconButton><button className="secondary-command render-button" onClick={() => store.setView("render-center")}><CirclePlay size={16} />渲染</button><button className="export-button" onClick={downloadProject}><Download size={16} />工程</button></div>
       </header>
       {snapshot.error && <div className="error-strip" role="alert"><Zap size={16} /><button onClick={() => snapshot.error?.layerId && store.selectLayer(snapshot.error.layerId)}><b>{snapshot.error.message}</b><span>{[snapshot.error.layerId, snapshot.error.effectId, snapshot.error.parameter].filter(Boolean).join(" / ") || snapshot.error.path}</span></button><IconButton label="关闭错误" onClick={() => store.clearError()}><X size={15} /></IconButton></div>}
       <div className="editor-body">
