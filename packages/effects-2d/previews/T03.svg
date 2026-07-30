@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90" viewBox="0 0 160 90" role="img" aria-label="Kinetic Typography effect">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="hsl(19 82% 58%)" stop-opacity=".92"/>
+      <stop offset="1" stop-color="hsl(102 88% 48%)" stop-opacity=".36"/>
+    </linearGradient>
+    <filter id="soft"><feGaussianBlur stdDeviation="1"/></filter>
+  </defs>
+  <rect width="160" height="90" rx="8" fill="#08101f"/>
+  <path d="M8 66 C44 8 116 84 152 22" fill="none" stroke="url(#g)" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="44" cy="28" r="34" fill="url(#g)" filter="url(#soft)" opacity=".62"/>
+  <rect x="82" y="16" width="58" height="44" rx="7" fill="none" stroke="hsl(102 90% 72%)" stroke-opacity=".72"/>
+  <text x="10" y="82" fill="#f3f7ff" font-family="system-ui,sans-serif" font-size="10" font-weight="700">T03</text>
+</svg>

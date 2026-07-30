@@ -8,6 +8,7 @@ import {
   DOCUMENT_EXPORT_PRESETS,
   ExportFrameError,
   createMediaFrameProducer,
+  createProjectFrameProducer,
   decodeAudioPreview,
   exportFixedFrames,
   importMedia,
@@ -98,7 +99,7 @@ describe("fixed frame export", () => {
       }
     } satisfies Partial<ExportFrameError>);
     expect(requests.map(({ frame, time, deltaTime }) => ({ frame, time, deltaTime }))).toEqual([
-      { frame: 0, time: 0, deltaTime: 1 / 24 },
+      { frame: 0, time: 0, deltaTime: 0 },
       { frame: 1, time: 1 / 24, deltaTime: 1 / 24 },
       { frame: 2, time: 2 / 24, deltaTime: 1 / 24 }
     ]);
@@ -260,10 +261,75 @@ describe("media input contract", () => {
     const audio = await importMedia({
       sourcePath: audioPath, claimedMime: "audio/wav", allowedRoots: [input], storageDirectory: storage
     });
+    const video = await importMedia({
+      sourcePath: videoPath, claimedMime: "video/mp4", allowedRoots: [input], storageDirectory: storage
+    });
     const producer = createMediaFrameProducer(image);
     const preview = await producer({ frame: 0, time: 0, deltaTime: 1 / 24, fps: 24, width: 32, height: 24 });
     expect(preview.byteLength).toBe(32 * 24 * 4);
     expect((await decodeAudioPreview(audio)).byteLength).toBeGreaterThan(0);
+    const transform = {
+      anchorPoint: { mode: "constant", value: { x: 0, y: 0, z: 0 } },
+      position: { mode: "constant", value: { x: 0, y: 0, z: 0 } },
+      scale: { mode: "constant", value: { x: 100, y: 100, z: 100 } },
+      rotation: { mode: "constant", value: { x: 0, y: 0, z: 0 } }
+    } as const;
+    const videoProject = {
+      schemaVersion: "1.2.0",
+      engineVersion: "0.3.0",
+      id: "project.video-raster",
+      name: "video raster",
+      width: 32,
+      height: 24,
+      fps: 24,
+      duration: 0.3,
+      background: { type: "transparent" },
+      colorSpace: "srgb",
+      seed: 7,
+      assets: [video.asset],
+      compositions: [{
+        id: "main",
+        name: "main",
+        width: 32,
+        height: 24,
+        duration: 0.3,
+        fps: 24,
+        layers: [{
+          id: "video",
+          type: "video",
+          name: "video",
+          visible: true,
+          locked: false,
+          solo: false,
+          startTime: 0,
+          endTime: 0.3,
+          inPoint: 0,
+          outPoint: 0.3,
+          zIndex: 0,
+          transform,
+          opacity: { mode: "constant", value: 1 },
+          blendMode: "normal",
+          masks: [],
+          effects: [],
+          source: { assetId: video.asset.id },
+          properties: { loop: false, muted: true }
+        }]
+      }],
+      fonts: [],
+      audioTracks: [],
+      renderPresets: [],
+      metadata: { timeContractVersion: "1.1.0" }
+    } as MotionProject;
+    const videoProducer = createProjectFrameProducer(videoProject, new Map([[video.asset.id, video]]));
+    const videoStart = await videoProducer({
+      frame: 0, time: 0, deltaTime: 0, fps: 24, width: 32, height: 24
+    });
+    const videoLater = await videoProducer({
+      frame: 4, time: 4 / 24, deltaTime: 1 / 24, fps: 24, width: 32, height: 24
+    });
+    expect(videoStart.byteLength).toBe(32 * 24 * 4);
+    expect(videoLater.byteLength).toBe(32 * 24 * 4);
+    expect(Array.from(videoLater).some((byte, index) => index % 4 === 3 && byte > 0)).toBe(true);
     const report = await exportFixedFrames({
       preset: testPreset("mp4", 24, 32, 24, false, true),
       duration: 0.1,

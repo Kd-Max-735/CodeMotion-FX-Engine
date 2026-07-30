@@ -1,17 +1,25 @@
-# Stage 5 Group 3 T08 delivery
+# Stage 5R Group 3 T08 delivery
 
-Status: **GROUP 3 T08 IMPLEMENTATION PASS**
+Status: **G3-S5R PASS / S5R BLOCKED ON G2 AND G5 CONSUMERS**
 
 `@codemotion/effects-3d` implements only T08 `fx.text.textExtrude3D` at version
-`1.0.0`. It consumes the frozen Effect Definition `1.0.0` and Renderer Adapter
-`1.1.0`/package `0.2.0` contracts without changing public Core, Schema,
-compositor or renderer APIs.
+`1.0.0`. It consumes G1 time contract `1.1.0`,
+`TemporalEffectRenderContext`, `RegisteredTemporalEffectDefinition`,
+`TextRasterSource`, real glyph coverage and raster provenance without changing
+public Core, Schema, compositor or renderer APIs.
 
-The minimum P0 path includes raster-text extrusion geometry, bevel, three
-materials, three directional-light rigs, bounded perspective/rotation, WebGL2,
-an explicit deterministic Canvas2D/CPU fallback, draft/preview/final quality,
-heavy performance classification, three presets, preview, migration, disposal,
-Alpha/mask behavior and fixed 0/25/50/75/100% Golden Frames.
+Production rendering has no optional time or progress parameter. It accepts the
+official `resolveEffectTimeSample` result directly, validates
+`effectId=fx.text.textExtrude3D`, preserves caller-owned `effectInstanceId`, and
+rejects missing/inconsistent clocks. Generic pixel-only input, empty glyph
+coverage, missing font provenance and unrelated raster pixels fail explicitly.
+
+The P0 path includes indexed Unicode glyph front/back/side geometry, bevel,
+three materials, three directional-light rigs, bounded perspective/rotation,
+real WebGL2 indexed drawing, explicit deterministic Canvas2D/CPU fallback,
+draft/preview/final quality, heavy performance classification, three presets,
+preview, migration, disposal, Alpha/mask behavior and independent CPU/WebGL
+0/25/50/75/100% Golden Frames.
 
 General 3D scene/camera/model/PBR/shadow/physics infrastructure remains Stage 9
 and is intentionally absent.
@@ -24,16 +32,32 @@ npm test
 npm run benchmark -w @codemotion/effects-3d
 ```
 
-Verified on 2026-07-28:
+Verified on 2026-07-29:
 
-- strict build and test typecheck passed;
-- all 15 test files and 280 tests passed, including 10 T08 tests and all
-  Stage 1-5 regressions;
-- T08 satisfies Effect Definition Schema `1.0.0` and the frozen Group 2 seam;
-- five distinct Golden Frame hashes matched at 0/25/50/75/100%;
-- WebGL2 compiled/executed, mask composition ran, and every test GPU texture
-  and framebuffer was released exactly once;
-- transparent, premultiplied Alpha, zero-mask, extreme parameters, fallback,
-  disposal and three-run deterministic checks passed;
-- 64x36 preview benchmark median was 1.214 ms against a 35 ms budget;
-- Edge headless rendered the live preview canvas with fingerprint `981f46fa`.
+- G3 source build and 19/19 T08 tests passed;
+- the 1-by-20 S5R evidence matrix passed 20/20;
+- `FX`, `立体` and `AΩ` use distinct reviewed glyph rasters;
+- arbitrary 0.8/3.2/7.3/11.75-second durations, 24/48/60/120 FPS and translated
+  project clocks preserve equal effect-local samples;
+- all seven parameters have observable output, with three-run determinism,
+  three quality grades, multiple sizes/seeds and extreme-value coverage;
+- five distinct CPU Golden hashes and five distinct Edge WebGL2 Golden hashes
+  matched at 0/25/50/75/100%;
+- sRGB, linear-sRGB, Display-P3, straight/premultiplied Alpha, zero mask,
+  fallback, disposal and balanced GPU texture/framebuffer release passed;
+- 64x36 CPU benchmark median was 1.790 ms against 35 ms;
+- Edge 150 WebGL2/ANGLE SwiftShader indexed-geometry preview median was
+  30.100 ms against 35 ms, resources balanced, 50% fingerprint `438f9c94`.
+
+## Aggregate blockers outside Group 3 authorization
+
+The repository build passes, but Stage 5R remains blocked:
+
+- `npm run typecheck`: G2
+  `packages/effects-2d/test/effects-2d.test.ts:815` still supplies removed
+  `{ progress }` instead of required `EffectTimeSample 1.1.0`.
+- `npm test`: 642/645 passed. Two G2 tests still call the removed generic T08
+  preview/time path, and one G5 exporter test passes a generic pixel surface
+  instead of `TextRasterSource` plus raster provenance.
+
+Group 3 is not authorized to change those consumers.

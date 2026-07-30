@@ -151,12 +151,13 @@ export class AiPlanService {
       });
       const { progress: _progress, ...viewWithoutProgress } = task.view;
       task.view = { ...viewWithoutProgress, phase: "plan", updatedAt: new Date().toISOString() };
-      const planned = planAnimation(result, {
+      const planned = await planAnimation(result, {
         resources: task.resources,
         width: task.settings.width,
         height: task.settings.height,
         fps: task.settings.fps,
-        duration: task.settings.duration
+        duration: task.settings.duration,
+        signal: task.controller.signal
       });
       task.view = {
         ...task.view,

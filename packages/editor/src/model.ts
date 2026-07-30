@@ -62,6 +62,19 @@ export function createStarterProject(
 ): MotionProject {
   const backdrop = baseLayer("layer.backdrop", "背景", 0, "#14181c");
   const accent = baseLayer("layer.accent", "强调图形", 1, "#ff5a3c");
+  backdrop.transform.position = vector(0, 0);
+  backdrop.properties = {
+    shapes: [{ path: `M 0 0 L ${width} 0 L ${width} ${height} L 0 ${height} Z`, fill: "#14181c" }],
+    fill: "#14181c"
+  };
+  accent.properties = {
+    shapes: [{
+      path: `M ${width * 0.32} ${height * 0.32} L ${width * 0.68} ${height * 0.32} L ${width * 0.68} ${height * 0.68} L ${width * 0.32} ${height * 0.68} Z`,
+      fill: "#ff5a3c"
+    }],
+    fill: "#ff5a3c"
+  };
+  accent.blendMode = "add";
   accent.opacity = { mode: "keyframes", keyframes: [
     { time: 0, value: 0.25, interpolation: "linear" },
     { time: 1, value: 0.7, easing: { type: "easeOut" } }
@@ -69,15 +82,15 @@ export function createStarterProject(
   accent.transform.position = {
     mode: "keyframes",
     keyframes: [
-      { time: 0, value: { x: width * 0.35, y: height * 0.5, z: 0 }, interpolation: "linear" },
-      { time: 2, value: { x: width * 0.62, y: height * 0.5, z: 0 }, easing: { type: "easeInOut" } }
+      { time: 0, value: { x: -width * 0.08, y: 0, z: 0 }, interpolation: "linear" },
+      { time: 2, value: { x: width * 0.08, y: 0, z: 0 }, easing: { type: "easeInOut" } }
     ]
   };
   const title = baseLayer("layer.title", "CodeMotion FX", 2, "#f2f4f5");
   title.type = "text";
   title.properties = { text: "CodeMotion FX", fontFamily: "sans-serif", fontSize: 92, color: "#f2f4f5" };
-  title.opacity = constant(0.18);
-
+  title.transform.position = vector(0, 0);
+  title.opacity = constant(0.82);
   return {
     schemaVersion: "1.2.0",
     engineVersion: "0.3.0",
@@ -105,7 +118,7 @@ export function createStarterProject(
     fonts: [],
     audioTracks: [],
     renderPresets: [],
-    metadata: { createdBy: "editor-stage-4" }
+    metadata: { createdBy: "editor-s5r", timeContractVersion: "1.1.0" }
   };
 }
 

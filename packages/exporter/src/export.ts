@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import type { ColorSpace } from "@codemotion/core";
+import { compositePixelSurfaces } from "@codemotion/renderer-webgl";
 import type { ExportPreset } from "./presets.js";
 import { validateExportPreset } from "./presets.js";
 
@@ -43,11 +45,57 @@ export interface ExportOptions {
   readonly duration: number;
   readonly outputPath: string;
   readonly renderFrame: FrameProducer;
+  readonly colorSpace?: ColorSpace;
+  readonly qa?: AggregateExportQaPolicy;
   readonly audioPath?: string;
   readonly ffmpegPath?: string;
   readonly checkpointPath?: string;
   readonly resumeFromFrame?: number;
   readonly signal?: AbortSignal;
+}
+
+export interface AggregateExportQaPolicy {
+  readonly startTime?: number;
+  readonly endTime?: number;
+  readonly requireForeground?: boolean;
+  readonly requireObservableChange?: boolean;
+  readonly isBackgroundFrame: (frame: Uint8Array, request: FrameRequest) => boolean;
+}
+
+export interface AggregateExportQaReport {
+  readonly activeFrames: number;
+  readonly backgroundFrames: number;
+  readonly foregroundFrames: number;
+  readonly distinctFrames: number;
+  readonly passed: boolean;
+}
+
+function flattenFrameAlpha(
+  frame: Uint8Array,
+  request: FrameRequest,
+  colorSpace: ColorSpace
+): Uint8Array {
+  const flattened = compositePixelSurfaces(
+    {
+      width: request.width,
+      height: request.height,
+      data: new Uint8ClampedArray(request.width * request.height * 4),
+      colorSpace,
+      alphaMode: "none"
+    },
+    {
+      width: request.width,
+      height: request.height,
+      data: new Uint8ClampedArray(frame),
+      colorSpace,
+      alphaMode: "straight"
+    },
+    "normal",
+    1,
+    colorSpace,
+    "none"
+  );
+  return new Uint8Array(flattened.data);
 }
 
 export interface ExportReport {
@@ -56,6 +104,7 @@ export interface ExportReport {
   readonly inspections: readonly FrameInspection[];
   readonly encoder: string;
   readonly audioEncoder?: string;
+  readonly qa?: AggregateExportQaReport;
 }
 
 function encoderArgs(preset: ExportPreset, output: string, startFrame: number, audioPath?: string): string[] {
@@ -123,6 +172,10 @@ export async function exportFixedFrames(options: ExportOptions): Promise<ExportR
   const abort = (): void => { child.kill(); };
   options.signal?.addEventListener("abort", abort, { once: true });
   const inspections: FrameInspection[] = [];
+  const qaHashes = new Set<string>();
+  let qaActiveFrames = 0;
+  let qaBackgroundFrames = 0;
+  let qaForegroundFrames = 0;
   const frameCount = Math.ceil(options.duration * preset.settings.fps);
   let current = start;
   try {
@@ -131,7 +184,7 @@ export async function exportFixedFrames(options: ExportOptions): Promise<ExportR
       const request: FrameRequest = {
         frame: current,
         time: current / preset.settings.fps,
-        deltaTime: 1 / preset.settings.fps,
+        deltaTime: current === 0 ? 0 : 1 / preset.settings.fps,
         fps: preset.settings.fps,
         width: preset.settings.width,
         height: preset.settings.height
@@ -139,6 +192,17 @@ export async function exportFixedFrames(options: ExportOptions): Promise<ExportR
       let frame: Uint8Array;
       try {
         frame = await options.renderFrame(request, options.signal);
+        if (options.qa !== undefined
+          && request.time >= (options.qa.startTime ?? 0)
+          && request.time < (options.qa.endTime ?? options.duration)) {
+          qaActiveFrames += 1;
+          qaHashes.add(createHash("sha256").update(frame).digest("hex"));
+          if (options.qa.isBackgroundFrame(frame, request)) qaBackgroundFrames += 1;
+          else qaForegroundFrames += 1;
+        }
+        if (!preset.settings.alpha) {
+          frame = flattenFrameAlpha(frame, request, options.colorSpace ?? "srgb");
+        }
       } catch (cause) {
         throw new ExportFrameError({
           stage: "render", frame: current, time: request.time,
@@ -165,6 +229,22 @@ export async function exportFixedFrames(options: ExportOptions): Promise<ExportR
         }, { cause });
       }
     }
+    if (options.qa !== undefined) {
+      const requireForeground = options.qa.requireForeground ?? true;
+      const requireObservableChange = options.qa.requireObservableChange ?? true;
+      const qaPassed = qaActiveFrames > 0
+        && (!requireForeground || qaForegroundFrames > 0)
+        && (!requireObservableChange || qaHashes.size > 1);
+      if (!qaPassed) {
+        throw new ExportFrameError({
+          stage: "inspect",
+          frame: Math.max(start, current - 1),
+          time: Math.max(start, current - 1) / preset.settings.fps,
+          recoverFromFrame: preset.format === "png-sequence" ? Math.max(start, current - 1) : 0,
+          message: `Aggregate QA rejected the active interval: ${qaForegroundFrames}/${qaActiveFrames} foreground frames and ${qaHashes.size} distinct frames.`
+        });
+      }
+    }
     child.stdin.end();
     const code = await closed;
     if (code !== 0) throw new ExportFrameError({
@@ -184,6 +264,15 @@ export async function exportFixedFrames(options: ExportOptions): Promise<ExportR
     frameCount,
     inspections,
     encoder: preset.settings.videoCodec ?? (preset.format === "png-sequence" ? "png" : preset.format === "gif" ? "gif" : "libx264"),
+    ...(options.qa === undefined ? {} : {
+      qa: {
+        activeFrames: qaActiveFrames,
+        backgroundFrames: qaBackgroundFrames,
+        foregroundFrames: qaForegroundFrames,
+        distinctFrames: qaHashes.size,
+        passed: true
+      }
+    }),
     ...(preset.settings.audio && preset.settings.audioCodec !== undefined ? { audioEncoder: preset.settings.audioCodec } : {})
   };
 }

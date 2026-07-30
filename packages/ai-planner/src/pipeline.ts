@@ -3,6 +3,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import {
   ENGINE_VERSION,
   PROJECT_SCHEMA_VERSION,
+  TIME_CONTRACT_VERSION,
   type Animatable,
   type AssetDefinition,
   type EffectInstance,
@@ -12,7 +13,14 @@ import {
   type MotionProject,
   type TransformDefinition
 } from "@codemotion/core";
-import { GROUP_2_P0_EFFECTS, type P0EffectDefinition, type PixelSurface } from "@codemotion/effects-2d";
+import { GROUP_2_P0_EFFECTS, type P0EffectDefinition } from "@codemotion/effects-2d";
+import {
+  createProjectFrameProducer,
+  decodeMediaFrame,
+  verifyStoredMediaAsset,
+  type ImportedMedia
+} from "@codemotion/exporter";
+import type { CoverageBuffer, LayerRasterSource } from "@codemotion/renderer-api";
 import { validateContract } from "@codemotion/schema";
 import type {
   LocalResourceInput,
@@ -20,10 +28,11 @@ import type {
   TimeRange,
   UnderstandingResult
 } from "./provider.js";
+import { coverageAsset, textRasterSource, vectorRasterSource } from "./raster-sources.js";
 
 export interface StoryboardLayer extends JsonObject {
   id: string;
-  type: "text" | "image" | "video";
+  type: "text" | "svg" | "image" | "video";
   localAssetId?: string;
   description: string;
 }
@@ -61,6 +70,9 @@ export interface StaticIssue {
 export interface LowResolutionPreview {
   readonly width: 160;
   readonly height: 90;
+  readonly projectId: string;
+  readonly timeContractVersion: typeof TIME_CONTRACT_VERSION;
+  readonly frameNumbers: readonly number[];
   readonly frameTimes: readonly number[];
   readonly frameHashes: readonly string[];
   readonly quality: "draft";
@@ -82,15 +94,28 @@ export interface PlanningOptions {
   readonly fps?: number;
   readonly duration?: number;
   readonly maxHeavyEffects?: number;
+  readonly text?: string;
+  readonly transform?: TransformDefinition;
+  readonly effectIds?: readonly string[];
+  readonly effectParams?: Readonly<Record<string, JsonObject>>;
+  readonly previewFrameLimit?: number;
+  readonly ffmpegPath?: string;
+  readonly signal?: AbortSignal;
 }
 
 const constant = <T extends JsonValue>(value: T): Animatable<T> => ({ mode: "constant", value });
 
-function transform(): TransformDefinition {
+function defaultTransform(duration: number, width: number): TransformDefinition {
   return {
-    anchorPoint: constant({ x: 0.5, y: 0.5, z: 0 }),
-    position: constant({ x: 0, y: 0, z: 0 }),
-    scale: constant({ x: 1, y: 1, z: 1 }),
+    anchorPoint: constant({ x: 0, y: 0, z: 0 }),
+    position: {
+      mode: "keyframes",
+      keyframes: [
+        { time: 0, value: { x: 0, y: 0, z: 0 }, interpolation: "linear" },
+        { time: duration, value: { x: width * 0.03, y: 0, z: 0 }, interpolation: "linear" }
+      ]
+    },
+    scale: constant({ x: 100, y: 100, z: 100 }),
     rotation: constant({ x: 0, y: 0, z: 0 })
   };
 }
@@ -127,6 +152,42 @@ export function retrieveP0Effects(
     .map((entry) => entry.effect);
 }
 
+function effectCanRender(
+  effect: P0EffectDefinition,
+  resources: readonly LocalResourceInput[]
+): boolean {
+  const visualResources = resources.filter((item) => item.modality === "image" || item.modality === "video");
+  if (effect.category === "light" || effect.category === "post") return visualResources.length > 0;
+  if (effect.category === "transition" || effect.category === "composite") {
+    return visualResources.length > 0;
+  }
+  return true;
+}
+
+function selectEffects(
+  understanding: NormalizedUnderstanding,
+  resources: readonly LocalResourceInput[],
+  requestedIds: readonly string[] | undefined
+): readonly P0EffectDefinition[] {
+  const byId = new Map(GROUP_2_P0_EFFECTS.map((effect) => [effect.effectId, effect]));
+  if (requestedIds !== undefined) {
+    if (requestedIds.length === 0) throw new RangeError("Planning effectIds must not be empty.");
+    return requestedIds.map((effectId) => {
+      const effect = byId.get(effectId);
+      if (effect === undefined) throw new RangeError(`Unknown planning effect ${effectId}.`);
+      if (!effectCanRender(effect, resources)) {
+        throw new RangeError(`Effect ${effectId} requires visual media that was not supplied.`);
+      }
+      return effect;
+    });
+  }
+  const compatible = retrieveP0Effects(understanding, GROUP_2_P0_EFFECTS.length)
+    .filter((effect) => effectCanRender(effect, resources))
+    .slice(0, 3);
+  if (compatible.length === 0) throw new Error("No P0 effect is compatible with the planned layers.");
+  return compatible;
+}
+
 function safeDuration(understanding: NormalizedUnderstanding, resources: readonly LocalResourceInput[], requested?: number): number {
   if (requested !== undefined) return Math.min(60, Math.max(0.5, requested));
   const mediaDuration = Math.max(0, ...resources.map((item) => {
@@ -137,7 +198,12 @@ function safeDuration(understanding: NormalizedUnderstanding, resources: readonl
   return Math.min(60, Math.max(3, mediaDuration, videoEnd));
 }
 
-function storyboardLayers(resources: readonly LocalResourceInput[], understanding: NormalizedUnderstanding): StoryboardLayer[] {
+function storyboardLayers(
+  resources: readonly LocalResourceInput[],
+  understanding: NormalizedUnderstanding,
+  effects: readonly P0EffectDefinition[],
+  options: PlanningOptions
+): StoryboardLayer[] {
   const layers: StoryboardLayer[] = [];
   for (const resource of resources) {
     if (resource.modality === "audio") continue;
@@ -150,10 +216,34 @@ function storyboardLayers(resources: readonly LocalResourceInput[], understandin
         : (understanding.video.find((item) => item.localAssetId === resource.localAssetId)?.shots[0]?.event ?? "Reference video")
     });
   }
-  if (layers.length === 0) {
-    layers.push({ id: "layer_title", type: "text", description: understanding.text.requirements[0] ?? "Generated title" });
+  const text = options.text ?? understanding.text.requirements[0] ?? "";
+  if (text.length > 0 || layers.length === 0) {
+    layers.push({ id: "layer_title", type: "text", description: text || "Generated title" });
+  }
+  if (effects.some((effect) => effect.category === "vector" || effect.category === "draw")) {
+    layers.push({ id: "layer_vector", type: "svg", description: `Vector content for ${text || "planned scene"}` });
   }
   return layers;
+}
+
+function targetLayer(
+  effect: P0EffectDefinition,
+  layers: readonly StoryboardLayer[]
+): StoryboardLayer {
+  const matching = effect.category === "text"
+    ? layers.find((layer) => layer.type === "text")
+    : effect.category === "vector" || effect.category === "draw"
+      ? layers.find((layer) => layer.type === "svg")
+      : effect.category === "light" || effect.category === "post"
+        ? layers.find((layer) => layer.type === "image" || layer.type === "video")
+        : effect.category === "transition" || effect.category === "composite"
+          ? layers.find((layer) => layer.type === "image" || layer.type === "video")
+          : layers.find((layer) => layer.type === "image" || layer.type === "video")
+            ?? layers.find((layer) => layer.type === "text" || layer.type === "svg");
+  if (matching === undefined) {
+    throw new Error(`No compatible target layer exists for ${effect.effectId}.`);
+  }
+  return matching;
 }
 
 function makeStoryboard(
@@ -163,7 +253,7 @@ function makeStoryboard(
   options: PlanningOptions
 ): Storyboard {
   const duration = safeDuration(understanding, resources, options.duration);
-  const layers = storyboardLayers(resources, understanding);
+  const layers = storyboardLayers(resources, understanding, effects, options);
   const videoRanges = understanding.video.flatMap((video) => video.shots.map((shot) => ({
     range: shot.range,
     description: `${shot.event}: ${shot.action}`.trim()
@@ -174,17 +264,22 @@ function makeStoryboard(
   }]).map((shot, index): StoryboardShot => {
     const start = Math.max(0, Math.min(duration, shot.range.start));
     const end = Math.max(start, Math.min(duration, shot.range.end));
-    const effect = effects[index % effects.length]!;
+    const shotEffects = options.effectIds === undefined
+      ? [effects[index % effects.length]!]
+      : effects;
     return {
       id: `shot_${index + 1}`,
       range: { start, end },
       description: shot.description,
       layers,
-      effects: [{
+      effects: shotEffects.map((effect) => ({
         effectId: effect.effectId,
-        targetLayerId: layers[0]!.id,
-        params: { ...effect.defaultPreset }
-      }]
+        targetLayerId: targetLayer(effect, layers).id,
+        params: {
+          ...effect.defaultPreset,
+          ...(options.effectParams?.[effect.effectId] ?? {})
+        }
+      }))
     };
   });
   return {
@@ -198,11 +293,13 @@ function makeStoryboard(
   };
 }
 
-function effectInstance(effect: StoryboardEffect, range: TimeRange, index: number): EffectInstance {
+function effectInstance(effect: StoryboardEffect, range: TimeRange, identity: string): EffectInstance {
+  const definition = GROUP_2_P0_EFFECTS.find((candidate) => candidate.effectId === effect.effectId);
+  if (definition === undefined) throw new RangeError(`Unknown planned effect ${effect.effectId}.`);
   return {
-    id: `effect_${index + 1}`,
+    id: `effect_${identity}`,
     effectId: effect.effectId,
-    version: "1.0.0",
+    version: definition.version,
     enabled: true,
     startTime: range.start,
     endTime: range.end,
@@ -213,7 +310,14 @@ function effectInstance(effect: StoryboardEffect, range: TimeRange, index: numbe
   };
 }
 
-function baseLayer(id: string, name: string, duration: number, effects: EffectInstance[]) {
+function baseLayer(
+  id: string,
+  name: string,
+  duration: number,
+  effects: EffectInstance[],
+  zIndex: number,
+  layerTransform: TransformDefinition
+) {
   return {
     id,
     name,
@@ -224,8 +328,8 @@ function baseLayer(id: string, name: string, duration: number, effects: EffectIn
     endTime: duration,
     inPoint: 0,
     outPoint: duration,
-    zIndex: 0,
-    transform: transform(),
+    zIndex,
+    transform: layerTransform,
     opacity: constant(1),
     blendMode: "normal" as const,
     masks: [],
@@ -233,33 +337,89 @@ function baseLayer(id: string, name: string, duration: number, effects: EffectIn
   };
 }
 
-function toLayer(layer: StoryboardLayer, asset: AssetDefinition | undefined, storyboard: Storyboard): LayerDefinition {
-  const effects = storyboard.shots.flatMap((shot, index) => shot.effects
-    .filter((item) => item.targetLayerId === layer.id)
-    .map((item) => effectInstance(item, shot.range, index)));
-  const base = baseLayer(layer.id, layer.description.slice(0, 120), storyboard.duration, effects);
+function generatedVectorPath(value: string): string {
+  const digest = createHash("sha256").update(value).digest();
+  const point = (index: number, floor: number, span: number) =>
+    (floor + digest[index]! / 255 * span).toFixed(4);
+  return `M${point(0, 0.06, 0.18)},${point(1, 0.5, 0.3)} `
+    + `C${point(2, 0.18, 0.18)},${point(3, 0.05, 0.25)} `
+    + `${point(4, 0.56, 0.18)},${point(5, 0.08, 0.24)} `
+    + `${point(6, 0.78, 0.16)},${point(7, 0.5, 0.3)} `
+    + `L${point(8, 0.58, 0.22)},${point(9, 0.76, 0.16)} `
+    + `L${point(10, 0.18, 0.18)},${point(11, 0.76, 0.16)} Z`;
+}
+
+function toLayer(
+  layer: StoryboardLayer,
+  asset: AssetDefinition | undefined,
+  storyboard: Storyboard,
+  options: PlanningOptions,
+  zIndex: number
+): LayerDefinition {
+  const mediaDuration = asset?.metadata.duration;
+  const layerDuration = layer.type === "video"
+    && typeof mediaDuration === "number"
+    && Number.isFinite(mediaDuration)
+    && mediaDuration > 0
+    ? Math.min(storyboard.duration, mediaDuration)
+    : storyboard.duration;
+  const effects = storyboard.shots.flatMap((shot, shotIndex) => shot.effects
+    .filter((item) => item.targetLayerId === layer.id && shot.range.start < layerDuration)
+    .map((item, effectIndex) => effectInstance(
+      item,
+      { start: shot.range.start, end: Math.min(shot.range.end, layerDuration) },
+      `${shotIndex + 1}_${effectIndex + 1}_${layer.id}`
+    )));
+  const base = baseLayer(
+    layer.id,
+    layer.description.slice(0, 120),
+    layerDuration,
+    effects,
+    zIndex,
+    options.transform ?? defaultTransform(storyboard.duration, storyboard.width)
+  );
   if (layer.type === "image" && asset) {
     return { ...base, type: "image", source: { assetId: asset.id }, properties: { fit: "contain" } };
   }
   if (layer.type === "video" && asset) {
     return { ...base, type: "video", source: { assetId: asset.id }, properties: { loop: false, muted: false } };
   }
+  if (layer.type === "svg") {
+    return {
+      ...base,
+      type: "svg",
+      properties: {
+        svg: generatedVectorPath(options.text ?? (storyboard.requirements.join("\n") || layer.description))
+      }
+    };
+  }
   return {
     ...base,
     type: "text",
     properties: {
-      text: storyboard.requirements[0] ?? layer.description,
-      fontFamily: "sans-serif",
+      text: options.text ?? storyboard.requirements[0] ?? layer.description,
+      fontFamily: "Codemotion Planner Unicode Bitmap",
       fontSize: 64
     }
   };
 }
 
-function toDsl(storyboard: Storyboard, resources: readonly LocalResourceInput[], result: UnderstandingResult): MotionProject {
+function toDsl(
+  storyboard: Storyboard,
+  resources: readonly LocalResourceInput[],
+  result: UnderstandingResult,
+  options: PlanningOptions
+): MotionProject {
   const assets = resources.map((resource) => resource.asset);
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
-  const layers = storyboard.shots[0]!.layers.map((layer) =>
-    toLayer(layer, layer.localAssetId === undefined ? undefined : assetById.get(layer.localAssetId), storyboard)
+  const layers = storyboard.shots[0]!.layers.map((layer, index) =>
+    toLayer(
+      layer,
+      layer.localAssetId === undefined ? undefined : assetById.get(layer.localAssetId),
+      storyboard,
+      options,
+      index
+    )
   );
   const audioTracks = resources.filter((resource) => resource.modality === "audio").map((resource, index) => ({
     id: `audio_${index + 1}`,
@@ -290,10 +450,16 @@ function toDsl(storyboard: Storyboard, resources: readonly LocalResourceInput[],
       fps: storyboard.fps,
       layers
     }],
-    fonts: [],
+    fonts: [{
+      id: "font.ai-planner.unicode-bitmap",
+      family: "Codemotion Planner Unicode Bitmap",
+      style: "normal",
+      weight: 500
+    }],
     audioTracks,
     renderPresets: [],
     metadata: {
+      timeContractVersion: TIME_CONTRACT_VERSION,
       ai: {
         provider: result.trace.provider,
         modelId: result.trace.modelId,
@@ -307,6 +473,37 @@ function toDsl(storyboard: Storyboard, resources: readonly LocalResourceInput[],
   };
 }
 
+function isAnimatableValue(value: unknown): value is Animatable {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && "mode" in value
+    && ((value as { mode?: unknown }).mode === "constant"
+      || (value as { mode?: unknown }).mode === "keyframes"
+      || (value as { mode?: unknown }).mode === "expression"
+      || (value as { mode?: unknown }).mode === "binding");
+}
+
+function parameterSnapshots(params: EffectInstance["params"]): readonly JsonObject[] {
+  const base: JsonObject = {};
+  const keyed = new Map<string, JsonValue[]>();
+  for (const [name, value] of Object.entries(params)) {
+    if (!isAnimatableValue(value)) {
+      base[name] = value;
+    } else if (value.mode === "constant") {
+      base[name] = value.value;
+    } else if (value.mode === "keyframes") {
+      const values = value.keyframes.map((keyframe) => keyframe.value);
+      if (values.length > 0) {
+        base[name] = values[0]!;
+        keyed.set(name, values);
+      }
+    }
+  }
+  return [
+    base,
+    ...[...keyed].flatMap(([name, values]) => values.map((value) => ({ ...base, [name]: value })))
+  ];
+}
+
 export function validatePlannedDsl(project: MotionProject, maxHeavyEffects = 3): readonly StaticIssue[] {
   const issues: StaticIssue[] = [];
   const schema = validateContract("MotionProject", project);
@@ -318,6 +515,9 @@ export function validatePlannedDsl(project: MotionProject, maxHeavyEffects = 3):
   const assets = new Set(project.assets.map((asset) => asset.id));
   const effects = new Map(GROUP_2_P0_EFFECTS.map((effect) => [effect.effectId, effect]));
   let heavy = 0;
+  if (project.metadata.timeContractVersion !== TIME_CONTRACT_VERSION) {
+    issues.push({ code: "time-contract", severity: "error", message: `AI projects require time contract ${TIME_CONTRACT_VERSION}.` });
+  }
   for (const composition of project.compositions) {
     if (composition.duration <= 0 || composition.duration > project.duration) {
       issues.push({ code: "duration", severity: "error", message: "Composition duration is outside project duration." });
@@ -350,7 +550,10 @@ export function validatePlannedDsl(project: MotionProject, maxHeavyEffects = 3):
           continue;
         }
         const validate = new Ajv2020({ allErrors: true, strict: false }).compile(definition.parameterSchema);
-        if (!validate(instance.params)) {
+        if (instance.version !== definition.version) {
+          issues.push({ code: "effect-version", severity: "error", message: `Effect ${instance.effectId} version is stale.` });
+        }
+        if (parameterSnapshots(instance.params).some((params) => !validate(params))) {
           issues.push({ code: "parameter", severity: "error", message: `Effect ${instance.effectId} parameters are invalid.` });
         }
         if (definition.performanceClass === "heavy" || definition.performanceClass === "extreme") heavy += 1;
@@ -369,42 +572,160 @@ export function validatePlannedDsl(project: MotionProject, maxHeavyEffects = 3):
   return issues;
 }
 
-function previewSource(): PixelSurface {
+function plannedRasterSources(project: MotionProject): ReadonlyMap<string, LayerRasterSource> {
   const width = 160;
   const height = 90;
-  const data = new Uint8ClampedArray(width * height * 4);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const offset = (y * width + x) * 4;
-      data[offset] = Math.round(255 * x / (width - 1));
-      data[offset + 1] = Math.round(255 * y / (height - 1));
-      data[offset + 2] = 96;
-      data[offset + 3] = 255;
+  const sources = new Map<string, LayerRasterSource>();
+  for (const composition of project.compositions) {
+    for (const layer of composition.layers) {
+      if (layer.type === "text") {
+        sources.set(layer.id, textRasterSource(
+          layer.properties.text,
+          layer.properties.fontFamily,
+          layer.properties.fontSize,
+          width,
+          height,
+          composition.width,
+          composition.height
+        ));
+      } else if (layer.type === "svg" && typeof layer.properties.svg === "string") {
+        sources.set(layer.id, vectorRasterSource(layer.properties.svg));
+      }
     }
   }
-  return { width, height, data, colorSpace: "srgb", alphaMode: "straight" };
+  return sources;
 }
 
-function lowResolutionPreview(storyboard: Storyboard, effects: readonly P0EffectDefinition[]): LowResolutionPreview {
-  const frameTimes = [...new Set(storyboard.shots.flatMap((shot) => [
-    shot.range.start,
-    (shot.range.start + shot.range.end) / 2
-  ]))].slice(0, 8);
-  const source = previewSource();
-  const frameHashes = frameTimes.map((time, index) => {
-    const effect = effects[index % effects.length]!;
-    const progress = storyboard.duration === 0 ? 0 : time / storyboard.duration;
-    const output = effect.renderPixels(source, effect.defaultPreset, { progress, seed: 7, quality: "draft" });
-    return `sha256:${createHash("sha256").update(output.data).digest("hex")}`;
+function collectResourceIdentities(value: unknown, output: Set<string>): void {
+  if (typeof value === "string") {
+    if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(value) && !value.startsWith("context://")) output.add(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) collectResourceIdentities(entry, output);
+    return;
+  }
+  if (typeof value === "object" && value !== null) {
+    for (const entry of Object.values(value)) collectResourceIdentities(entry, output);
+  }
+}
+
+function plannedCoverageAssets(project: MotionProject): ReadonlyMap<string, CoverageBuffer> {
+  const identities = new Set<string>();
+  for (const effect of project.compositions.flatMap((composition) =>
+    composition.layers.flatMap((layer) => layer.effects))) {
+    collectResourceIdentities(effect.params, identities);
+  }
+  return new Map([...identities].map((identity) => [identity, coverageAsset(identity)]));
+}
+
+async function verifiedVisualMedia(
+  resources: readonly LocalResourceInput[],
+  signal: AbortSignal | undefined
+): Promise<ReadonlyMap<string, ImportedMedia>> {
+  const visual = resources.filter((resource) =>
+    resource.modality === "image" || resource.modality === "video");
+  const imported = await Promise.all(visual.map((resource) => verifyStoredMediaAsset({
+    asset: resource.asset,
+    storageDirectory: resource.storageDirectory,
+    ...(signal === undefined ? {} : { signal })
+  })));
+  return new Map(imported.map((entry) => [entry.asset.id, entry]));
+}
+
+function previewFrameNumbers(duration: number, fps: number, requestedLimit: number | undefined): readonly number[] {
+  const limit = requestedLimit ?? 8;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 120) {
+    throw new RangeError("previewFrameLimit must be an integer in [1, 120].");
+  }
+  const total = Math.max(1, Math.ceil(duration * fps));
+  const count = Math.min(total, limit);
+  if (count === 1) return [0];
+  return [...new Set(Array.from({ length: count }, (_unused, index) =>
+    Math.round(index * (total - 1) / (count - 1))))];
+}
+
+async function lowResolutionPreview(
+  project: MotionProject,
+  resources: readonly LocalResourceInput[],
+  options: PlanningOptions
+): Promise<LowResolutionPreview> {
+  const width = 160;
+  const height = 90;
+  const frameNumbers = previewFrameNumbers(project.duration, project.fps, options.previewFrameLimit);
+  const media = await verifiedVisualMedia(resources, options.signal);
+  const staticSources = plannedRasterSources(project);
+  const producer = createProjectFrameProducer(project, media, {
+    timeContractVersion: TIME_CONTRACT_VERSION,
+    resolveRasterSource: async ({ layer, request, layerTime }) => {
+      const staticSource = staticSources.get(layer.id);
+      if (staticSource !== undefined) return staticSource;
+      if ((layer.type !== "image" && layer.type !== "video") || layer.source === undefined) {
+        throw new Error(`Layer ${layer.id} has no planned raster source.`);
+      }
+      const imported = media.get(layer.source.assetId);
+      if (imported === undefined || imported.asset.hash === undefined) {
+        throw new Error(`Layer ${layer.id} references unverified visual media.`);
+      }
+      const frameTime = layer.type === "image" ? 0 : layerTime.sourceTime;
+      const pixels = await decodeMediaFrame(imported, { ...request, time: frameTime }, {
+        ...(options.ffmpegPath === undefined ? {} : { ffmpegPath: options.ffmpegPath }),
+        ...(options.signal === undefined ? {} : { signal: options.signal })
+      });
+      const metadataColorSpace = imported.asset.metadata.colorSpace;
+      const colorSpace = metadataColorSpace === "display-p3" || metadataColorSpace === "linear-srgb"
+        ? metadataColorSpace : "srgb";
+      return {
+        kind: layer.type,
+        assetId: imported.asset.id,
+        assetHash: imported.asset.hash,
+        frameTime,
+        pixels: {
+          width: request.width,
+          height: request.height,
+          data: pixels,
+          colorSpace,
+          alphaMode: "straight",
+          rowOrder: "top-to-bottom"
+        }
+      };
+    },
+    coverageAssets: plannedCoverageAssets(project),
+    rejectBackgroundOnlyFrames: false,
+    ...(options.ffmpegPath === undefined ? {} : { ffmpegPath: options.ffmpegPath })
   });
-  return { width: 160, height: 90, frameTimes, frameHashes, quality: "draft" };
+  const frames = await Promise.all(frameNumbers.map(async (frame) => {
+    options.signal?.throwIfAborted();
+    const pixels = await producer({
+      frame,
+      time: frame / project.fps,
+      deltaTime: frame === 0 ? 0 : 1 / project.fps,
+      fps: project.fps,
+      width,
+      height
+    }, options.signal);
+    return `sha256:${createHash("sha256").update(pixels).digest("hex")}`;
+  }));
+  return {
+    width,
+    height,
+    projectId: project.id,
+    timeContractVersion: TIME_CONTRACT_VERSION,
+    frameNumbers,
+    frameTimes: frameNumbers.map((frame) => frame / project.fps),
+    frameHashes: frames,
+    quality: "draft"
+  };
 }
 
-export function planAnimation(result: UnderstandingResult, options: PlanningOptions = {}): PlannedAnimation {
+export async function planAnimation(
+  result: UnderstandingResult,
+  options: PlanningOptions = {}
+): Promise<PlannedAnimation> {
   const resources = options.resources ?? [];
-  const effects = retrieveP0Effects(result.understanding);
+  const effects = selectEffects(result.understanding, resources, options.effectIds);
   const storyboard = makeStoryboard(result.understanding, effects, resources, options);
-  const dsl = toDsl(storyboard, resources, result);
+  const dsl = toDsl(storyboard, resources, result, options);
   const issues = validatePlannedDsl(dsl, options.maxHeavyEffects);
   if (issues.some((issue) => issue.severity === "error")) {
     throw new Error(`AI planning static validation failed: ${issues.map((issue) => issue.code).join(", ")}`);
@@ -414,7 +735,7 @@ export function planAnimation(result: UnderstandingResult, options: PlanningOpti
     storyboard,
     dsl,
     issues,
-    preview: lowResolutionPreview(storyboard, effects),
+    preview: await lowResolutionPreview(dsl, resources, options),
     trace: result.trace
   };
 }

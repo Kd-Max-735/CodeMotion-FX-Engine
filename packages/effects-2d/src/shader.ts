@@ -1,4 +1,11 @@
-import type { RenderQuality } from "@codemotion/core";
+import {
+  TIME_CONTRACT_VERSION,
+  type EffectTimeSample,
+  type RenderQuality
+} from "@codemotion/core";
+import type { LayerRasterizationInput } from "@codemotion/renderer-api";
+import { createEffectRandom } from "@codemotion/timeline";
+import { flattenVectorPath, parseSvgPathData } from "./inputs.js";
 import type {
   EffectBlueprint,
   ParameterSpec,
@@ -8,7 +15,10 @@ import type {
 export interface CatalogWebGLPass {
   readonly id: string;
   readonly fragmentSource: string;
-  readonly uniforms: Readonly<Record<string, number | readonly [number, number]>>;
+  readonly uniforms: Readonly<Record<
+    string,
+    number | readonly [number, number] | readonly [number, number, number, number]
+  >>;
   readonly catalogContribution: false;
 }
 
@@ -16,9 +26,12 @@ const COMMON = `#version 300 es
 precision highp float;
 uniform sampler2D u_input;
 uniform float u_progress;
+uniform float u_time;
 uniform float u_seed;
 uniform float u_quality;
+uniform float u_encoded;
 uniform vec2 u_texel;
+uniform vec4 u_input_meta;
 uniform float u_p0;
 uniform float u_p1;
 uniform float u_p2;
@@ -34,8 +47,21 @@ float hash(vec2 p) {
 float band(float value, float center, float width) {
   return 1.0 - smoothstep(width, width * 1.8, abs(value - center));
 }
+vec3 toLinear(vec3 value) {
+  if (u_encoded < 0.5) return value;
+  bvec3 low = lessThanEqual(value, vec3(0.04045));
+  return mix(pow((value + 0.055) / 1.055, vec3(2.4)), value / 12.92, low);
+}
+vec3 fromLinear(vec3 value) {
+  value = clamp(value, 0.0, 1.0);
+  if (u_encoded < 0.5) return value;
+  bvec3 low = lessThanEqual(value, vec3(0.0031308));
+  return mix(1.055 * pow(value, vec3(1.0 / 2.4)) - 0.055, value * 12.92, low);
+}
 vec4 sampleAt(vec2 uv) {
-  return texture(u_input, clamp(uv, vec2(0.0), vec2(1.0)));
+  vec4 sampleValue = texture(u_input, clamp(uv, vec2(0.0), vec2(1.0)));
+  vec3 straight = sampleValue.a > 0.0 ? sampleValue.rgb / sampleValue.a : vec3(0.0);
+  return vec4(toLinear(straight), sampleValue.a);
 }
 void main() {
   vec2 uv = v_uv;
@@ -47,15 +73,22 @@ const END = `
   float gradeSteps = mix(96.0, 255.0, u_quality);
   c.rgb = floor(c.rgb * gradeSteps + 0.5) / gradeSteps;
   c = clamp(c, 0.0, 1.0);
-  c.rgb = min(c.rgb, vec3(c.a));
-  if (c.a <= 0.00001) c.rgb = vec3(0.0);
-  outColor = c;
+  vec3 encoded = fromLinear(c.rgb);
+  if (c.a <= 0.00001) encoded = vec3(0.0);
+  outColor = vec4(encoded * c.a, c.a);
 }`;
 
 const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   M01: `
-  float durationProgress = clamp(p / (0.25 + u_p2 * 0.75), 0.0, 1.0);
-  float easedProgress = mix(durationProgress, smoothstep(0.0, 1.0, durationProgress), u_p3);
+  float durationSeconds = 0.01 + u_p2 * 59.99;
+  float durationProgress = clamp(u_time / durationSeconds, 0.0, 1.0);
+  float easedProgress = durationProgress;
+  if (u_p3 < 0.167) easedProgress = durationProgress;
+  else if (u_p3 < 0.5) easedProgress = durationProgress * durationProgress * durationProgress;
+  else if (u_p3 < 0.834) easedProgress = 1.0 - pow(1.0 - durationProgress, 3.0);
+  else easedProgress = durationProgress < 0.5
+    ? 4.0 * pow(durationProgress, 3.0)
+    : 1.0 - pow(-2.0 * durationProgress + 2.0, 3.0) / 2.0;
   c.a *= mix(u_p0, u_p1, easedProgress);`,
   M02: `
   float angle = u_p0 * 6.2831853;
@@ -76,75 +109,100 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   vec2 rotated = pivot + rotation * (uv - pivot);
   c = mix(sampleAt(rotated), sampleAt(rotated + vec2(u_p3 * 0.03, 0.0)), u_p3);`,
   M05: `
-  float bounces = 1.0 + floor(u_p2 * 11.0);
-  float gravity = 0.25 + u_p1 * 3.75;
-  float jump = abs(sin(p * 3.14159 * bounces * gravity)) * u_p0 * 0.45
-    * pow(1.0 - p, 1.0 + u_p3 * 2.0);
+  float height = max(0.001, u_p0 * 2.0);
+  float gravity = 0.1 + u_p1 * 39.9;
+  float bounces = 1.0 + floor(u_p2 * 11.0 + 0.5);
+  float flightSeconds = 2.0 * sqrt(2.0 * height / gravity);
+  float bounceIndex = floor(u_time / flightSeconds);
+  float localTime = mod(u_time, flightSeconds) / flightSeconds;
+  float jump = bounceIndex < bounces
+    ? sin(localTime * 3.14159) * height * pow(u_p3, bounceIndex)
+    : 0.0;
   c = sampleAt(uv + vec2(0.0, jump));`,
   M06: `
-  float period = 0.08 + u_p1 * 0.92;
-  float displacement = u_p0 * 0.25 * sin(p * 6.283 / period) * exp(-u_p2 * 6.0 * p);
+  float period = 0.02 + u_p1 * 3.98;
+  float displacement = u_p0 * 2.0 * sin(u_time * 6.283 / period)
+    * exp(-(u_p2 * 20.0) * u_time);
   vec2 axis = u_p3 < 0.34 ? vec2(1.0, 0.0) : u_p3 < 0.67 ? vec2(0.0, 1.0) : normalize(uv - 0.5 + 0.001);
   c = sampleAt(uv - axis * displacement);`,
   M07: `
-  float amount = sin(p * (1.0 + u_p2 * 10.0) * 6.283 + (u_p3 - 0.5) * 6.283)
-    * u_p1 * 0.18;
+  float amount = sin(u_time * (u_p2 * 20.0) * 6.283 + (-6.283 + u_p3 * 12.566))
+    * u_p1;
   vec2 axis = u_p0 < 0.34 ? vec2(1.0, 0.0) : u_p0 < 0.67 ? vec2(0.0, 1.0) : vec2(1.0);
   c = sampleAt(uv - axis * amount);`,
   M08: `
-  float stepValue = floor(p * (1.0 + u_p1 * 60.0) * 10.0);
-  vec2 jitter = vec2(hash(vec2(stepValue, u_p3 * 997.0)), hash(vec2(u_p3 * 997.0, stepValue))) * 2.0 - 1.0;
-  jitter *= u_p0 * 1.5 * exp(-u_p2 * 4.0 * p);
-  jitter += vec2(u_p1 - 0.2, u_p3) * u_p0 * 0.18;
+  float frequency = u_p1 * 60.0;
+  float seedOffset = mod(u_p3 * 100000.0, 4093.0);
+  float stepValue = floor(u_time * frequency * 10.0);
+  vec2 jitter = vec2(hash(vec2(stepValue, seedOffset)), hash(vec2(seedOffset, stepValue))) * 2.0 - 1.0;
+  jitter *= u_p0 * exp(-(u_p2 * 20.0) * u_time);
   c = sampleAt(uv - jitter);`,
   T01: `
-  vec2 cell = floor(uv * vec2(12.0, 5.0));
-  float index = cell.y * 12.0 + cell.x;
+  float sourceAlpha = c.a;
+  float columns = max(1.0, u_input_meta.x);
+  vec2 cell = floor(uv * vec2(columns, 1.0));
+  float index = cell.x;
   if (u_p2 > 0.5) index = floor(index / 5.0) * 5.0;
-  float reveal = clamp(p * (0.5 + u_p0 * 2.5), 0.0, 1.0);
-  float visible = step(index / 60.0, reveal);
-  float cursor = u_p1 * step(1.0 - u_p3, fract(uv.x * 12.0)) * (1.0 - step(0.06, abs(index / 60.0 - reveal)));
+  float revealedGlyphs = u_time * (0.1 + u_p0 * 119.9);
+  float visible = step(index, revealedGlyphs);
+  float cursor = u_p1 * step(1.0 - u_p3, fract(uv.x * columns))
+    * (1.0 - step(1.0, abs(index - revealedGlyphs)));
   c = mix(vec4(0.0), c, visible);
-  c = mix(c, vec4(1.0), cursor);`,
+  c = mix(c, vec4(vec3(sourceAlpha), sourceAlpha), cursor);`,
   T02: `
-  vec2 cell = floor(uv * vec2(12.0, 5.0));
-  float index = cell.y * 12.0 + cell.x;
-  float groupSize = mix(1.0, 12.0, u_p3);
+  float columns = max(1.0, u_input_meta.x);
+  vec2 cell = floor(uv * vec2(columns, 1.0));
+  float index = cell.x;
+  float groupSize = mix(1.0, columns, u_p3);
   index = floor(index / groupSize) * groupSize;
-  float local = clamp(p * 1.5 - index * u_p0 * 0.025, 0.0, 1.0);
+  float local = clamp((u_time - index * u_p0 * 2.0) / 0.25, 0.0, 1.0);
   vec2 axis = u_p1 < 0.5 ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
   c = sampleAt(uv - axis * (u_p2 - 0.5) * 0.5 * (1.0 - local));
   c.a *= local;`,
   T03: `
-  vec2 cell = floor(uv * vec2(12.0, 5.0));
+  float columns = max(1.0, u_input_meta.x);
+  vec2 cell = floor(uv * vec2(columns, 1.0));
   float phase = mix(cell.x + cell.y, atan(uv.y - 0.5, uv.x - 0.5) * 3.0, u_p0);
   float pulse = 1.0 + sin(phase + p * 6.283 * (1.0 + u_p1 * 3.0))
     * u_p3 * (0.12 + u_p2 * 0.28);
-  vec2 center = (cell + 0.5) / vec2(12.0, 5.0);
+  vec2 center = (cell + 0.5) / vec2(columns, 1.0);
   c = sampleAt(center + (uv - center) / max(0.1, pulse));`,
   T04: `
   float pathY = 0.5 + sin(uv.x * 6.283 * (1.0 + u_p0 * 2.0) + u_p0 * 6.283) * (0.12 + u_p0 * 0.16);
+  if (u_p2 < 0.5) {
+    float tangent = cos(uv.x * 6.283 * (1.0 + u_p0 * 2.0)) * (0.1 + u_p0 * 0.35);
+    vec2 delta = uv - vec2(0.5, pathY);
+    c = sampleAt(vec2(0.5, pathY) + vec2(
+      delta.x * cos(tangent) - delta.y * sin(tangent),
+      delta.x * sin(tangent) + delta.y * cos(tangent)
+    ));
+  }
   float pathProgress = mix(uv.x, uv.x * 0.75 + uv.y * 0.25, u_p2);
   float visible = (1.0 - smoothstep(u_p1 - u_p3 * 0.25, u_p1 + u_p3 * 0.25, pathProgress))
     * band(uv.y, pathY, 0.025 + u_p3 * 0.1);
   c.a *= visible;`,
   T05: `
-  vec2 cell = floor(uv * vec2(12.0, 5.0));
+  float columns = max(1.0, u_input_meta.x);
+  vec2 cell = floor(uv * vec2(columns, 1.0));
   float wobble = sin(cell.x * (1.0 + u_p0 * 3.0) + cell.y + u_p3 * 6.283 * (1.0 + u_p1 * 2.0))
     * (0.01 + u_p2 * 0.045) * sin(u_p3 * 3.14159);
   c = sampleAt(uv + vec2(wobble, -wobble));
   c.rb += vec2(u_p1 * u_p3, u_p0 * (1.0 - u_p3)) * 0.18;`,
   T06: `
-  vec2 cell = floor(uv * vec2(12.0, 5.0));
+  float columns = max(1.0, u_input_meta.x);
+  vec2 cell = floor(uv * vec2(columns, 1.0));
   float threshold = mix(uv.x, hash(cell + u_p0 * 31.0), u_p2);
-  float decode = clamp(u_p3 * (0.5 + u_p1 * 2.5), 0.0, 1.0);
+  float speed = 0.1 + u_p1 * 239.9;
+  float decode = clamp(u_p3, 0.0, 1.0);
   float scrambled = step(decode, threshold);
-  vec3 noiseColor = vec3(hash(cell + floor(p * (2.0 + u_p1 * 80.0))), 0.7 + u_p0 * 0.3, 1.0 - u_p0 * 0.4);
+  vec3 noiseColor = vec3(hash(cell + floor(u_time * speed)), 0.7 + u_p0 * 0.3, 1.0 - u_p0 * 0.4);
   c.rgb = mix(c.rgb, noiseColor, scrambled);
+  c.rgb = mix(c.rgb, c.rgb * vec3(0.82 + u_p0 * 0.18, 1.0, 0.9 + u_p0 * 0.1), 0.35);
   c.a *= 1.0 - scrambled * 0.2;`,
   T07: `
-  vec2 cell = floor(uv * vec2(12.0, 5.0));
-  float index = mix(cell.y * 12.0 + cell.x, floor((cell.y * 12.0 + cell.x) / 5.0) * 5.0, u_p3);
+  float columns = max(1.0, u_input_meta.x);
+  vec2 cell = floor(uv * vec2(columns, 1.0));
+  float index = mix(cell.x, floor(cell.x / 5.0) * 5.0, u_p3);
   float angle = hash(vec2(index, u_seed)) * 6.283 + (u_p1 - 0.5) * 6.283 * p;
   vec2 shift = vec2(cos(angle), sin(angle)) * u_p0 * p * p * 2.5;
   shift *= mix(1.0, 1.35, u_p3);
@@ -183,10 +241,10 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   c = mix(c, vec4(0.96, 0.88, 0.7, 1.0), stroke);`,
   D02: `
   float size = 0.01 + u_p1 * 0.25;
-  float noise = hash(floor(uv / size) + u_p0 * 31.0);
+  float noise = hash(floor(uv / size));
   float coverage = 1.0 - smoothstep(u_p3 - size, u_p3 + size, uv.x + (noise - 0.5) * u_p2);
-  vec3 brushColor = vec3(0.78 + u_p0 * 0.2, 0.65 + u_p0 * 0.18, 0.42 + u_p0 * 0.25);
-  c = mix(c, vec4(brushColor, 1.0), coverage);`,
+  coverage *= c.a;
+  c = mix(c, vec4(0.93, 0.82, 0.62, 1.0), coverage);`,
   D03: `
   float noise = (hash(floor(uv * (10.0 + u_p0 * 60.0))) - 0.5) * u_p1 * 0.3;
   float radius = u_p3 * (0.25 + u_p0 * 0.75);
@@ -208,7 +266,7 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   L02: `
   float angle = (u_p0 - 0.5) * 6.283;
   float coordinate = dot(uv, vec2(cos(angle), sin(angle)));
-  float center = fract(p * (u_p3 * 4.0 - 2.0));
+  float center = fract(u_time * (-10.0 + u_p3 * 20.0));
   float distance = abs(fract(coordinate - center + 0.5) - 0.5);
   float beam = 1.0 - smoothstep(u_p1 * (1.0 - u_p2), u_p1 * (1.0 + u_p2) + 0.002, distance);
   c.rgb += vec3(0.3, 0.75, 1.0) * beam;`,
@@ -313,13 +371,12 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
     + u_p0 * 0.04 + u_p2 * 0.06;
   c.a *= dissolve * (0.7 + u_p0 * 0.3) * (0.85 + u_p2 * 0.15);`,
   H01: `
-  float coverage = c.a + (u_p0 - 0.5) * 0.2;
+  float coverage = c.a;
   coverage = mix(coverage, 1.0 - coverage, u_p3);
   float reveal = smoothstep(u_p1 - u_p2 * 0.25, u_p1 + u_p2 * 0.25, coverage);
   c.a *= reveal;`,
   H02: `
-  vec2 shifted = uv + vec2(u_p0 - 0.5, 0.5 - u_p0) * 0.1;
-  vec4 matte = sampleAt(shifted);
+  vec4 matte = sampleAt(uv);
   float coverage = mix(matte.a, dot(matte.rgb, vec3(0.2126, 0.7152, 0.0722)), u_p1);
   coverage = mix(coverage, 1.0 - coverage, u_p2);
   c.a *= coverage * u_p3;`,
@@ -332,9 +389,10 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   c.rgb = mix(c.rgb, blended, u_p1 * u_p3);
   c.a = mix(c.a, top.a + c.a * (1.0 - top.a), u_p1 * u_p3);`,
   H04: `
-  vec4 mapValue = sampleAt(uv + vec2((u_p0 - 0.5) * 0.08));
+  vec4 mapValue = sampleAt(uv);
   float channel = u_p3 < 0.2 ? mapValue.r : u_p3 < 0.4 ? mapValue.g
     : u_p3 < 0.6 ? mapValue.b : u_p3 < 0.8 ? mapValue.a : dot(mapValue.rgb, vec3(0.2126, 0.7152, 0.0722));
+  channel = floor(clamp(channel, 0.0, 1.0) * 7.0 + 0.5) / 7.0;
   vec2 displacement = vec2((u_p1 - 0.5) * 2.0, (u_p2 - 0.5) * 2.0) * (channel - 0.5);
   c = sampleAt(uv + displacement);`
 });
@@ -349,21 +407,40 @@ function encodeValue(spec: ParameterSpec, value: unknown): readonly number[] {
     return [Math.max(0, option) / Math.max(1, spec.options.length - 1)];
   }
   if (spec.kind === "boolean") return [value === true ? 1 : 0];
-  if (spec.kind === "text") return [hashStringForShader(typeof value === "string" ? value : spec.default)];
+  if (spec.kind === "text") {
+    const text = typeof value === "string" ? value : spec.default;
+    if (spec.name === "path" || spec.name === "fromPath" || spec.name === "toPath") {
+      const points = flattenVectorPath(parseSvgPathData(text));
+      let length = 0;
+      for (let index = 1; index < points.length; index += 1) {
+        length += Math.hypot(
+          points[index]!.x - points[index - 1]!.x,
+          points[index]!.y - points[index - 1]!.y
+        );
+      }
+      return [Math.min(1, length / 4)];
+    }
+    if (spec.name === "beatMap" || spec.name === "scaleMap") {
+      const values = text.split(",").map((entry) => Number(entry.trim()));
+      if (values.length === 0 || values.some((entry) => !Number.isFinite(entry))) {
+        throw new TypeError(`${spec.name} must be a comma-separated finite-number map.`);
+      }
+      const average = values.reduce((sum, entry) => sum + entry, 0) / values.length;
+      return [0.5 + Math.atan(average) / Math.PI];
+    }
+    if (spec.name === "mask" || spec.name === "matteLayer" || spec.name === "map"
+      || spec.name === "brushTexture") {
+      return [0];
+    }
+    const codePoints = [...text].map((entry) => entry.codePointAt(0)! / 0x10ffff);
+    if (codePoints.length === 0) throw new TypeError(`${spec.name} must not be empty.`);
+    return [codePoints.reduce((sum, entry) => sum + entry, 0) / codePoints.length];
+  }
   const vector = Array.isArray(value) && value.length === 2 ? value : spec.default;
   return [0, 1].map((index) => {
     const numeric = typeof vector[index] === "number" ? vector[index] : spec.default[index]!;
     return (numeric - spec.min) / Math.max(Number.EPSILON, spec.max - spec.min);
   });
-}
-
-function hashStringForShader(value: string): number {
-  let state = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    state ^= value.charCodeAt(index);
-    state = Math.imul(state, 0x01000193);
-  }
-  return (state >>> 0) / 0xffffffff;
 }
 
 export function encodeWebGLParameters(
@@ -378,21 +455,62 @@ export function encodeWebGLParameters(
 export function createCatalogWebGLPass(
   blueprint: EffectBlueprint,
   params: Readonly<Record<string, unknown>>,
-  progress: number,
+  timing: EffectTimeSample,
   seed: number,
   quality: RenderQuality,
   width: number,
-  height: number
+  height: number,
+  rasterInput?: LayerRasterizationInput
 ): CatalogWebGLPass {
+  if (timing.effectId !== blueprint.effectId) {
+    throw new TypeError(`WebGL timing effectId must equal ${blueprint.effectId}.`);
+  }
+  if (timing.contractVersion !== TIME_CONTRACT_VERSION
+    || typeof timing.effectInstanceId !== "string"
+    || timing.effectInstanceId.length === 0) {
+    throw new TypeError(`WebGL timing requires EffectTimeSample ${TIME_CONTRACT_VERSION} with effectInstanceId.`);
+  }
   const encoded = encodeWebGLParameters(blueprint, params);
+  const temporalRandom = blueprint.sourceId === "M08"
+    || blueprint.sourceId === "T06"
+    || blueprint.sourceId === "L01";
+  const randomTime = temporalRandom ? timing : {
+    ...timing,
+    effectTime: 0,
+    progress: 0,
+    deltaTime: 0
+  };
+  const randomSeed = createEffectRandom(
+    seed >>> 0,
+    randomTime,
+    `webgl:${blueprint.sourceId}`,
+    temporalRandom ? 60 : 1
+  ).nextUint32();
+  const source = rasterInput?.source;
+  let inputMeta: readonly [number, number, number, number] = [1, 1, 0, 0];
+  if (source?.kind === "text") {
+    inputMeta = [source.glyphs.length, source.text.length, source.font.unitsPerEm / 4096, 1];
+  } else if (source?.kind === "shape" || source?.kind === "svg") {
+    inputMeta = [
+      source.paths.length,
+      source.paths.reduce((count, path) => count + path.commands.length, 0),
+      source.viewport.width,
+      source.viewport.height
+    ];
+  } else if (source?.kind === "image" || source?.kind === "video") {
+    inputMeta = [source.pixels.width, source.pixels.height, source.frameTime, 1];
+  }
   return {
     id: blueprint.effectId,
     fragmentSource: `${COMMON}${BODIES[blueprint.sourceId]}${END}`,
     uniforms: Object.freeze({
-      u_progress: Math.min(1, Math.max(0, progress)),
-      u_seed: seed,
+      u_progress: Math.min(1, Math.max(0, timing.progress)),
+      u_time: Math.max(0, timing.effectTime),
+      u_seed: randomSeed,
       u_quality: quality === "draft" ? 0 : quality === "preview" ? 0.5 : 1,
+      u_encoded: rasterInput?.target.colorSpace === "linear-srgb" ? 0 : 1,
       u_texel: Object.freeze([1 / Math.max(1, width), 1 / Math.max(1, height)] as const),
+      u_input_meta: Object.freeze(inputMeta),
       u_p0: encoded[0]!,
       u_p1: encoded[1]!,
       u_p2: encoded[2]!,

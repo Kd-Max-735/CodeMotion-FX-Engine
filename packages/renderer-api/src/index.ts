@@ -141,8 +141,20 @@ export interface EffectRenderContext extends FrameContext {
   renderer: RendererAdapter;
 }
 
+/**
+ * Versioned public time channel for effects. New effect runtimes consume this
+ * interface; legacy FrameContext.time remains project-global compatibility data.
+ */
+export interface TemporalEffectRenderContext extends EffectRenderContext {
+  readonly timing: import("./raster.js").TemporalEffectContext;
+}
+
 export type EffectRenderFunction = (
   context: EffectRenderContext
+) => Promise<RenderOutput> | RenderOutput;
+
+export type TemporalEffectRenderFunction = (
+  context: TemporalEffectRenderContext
 ) => Promise<RenderOutput> | RenderOutput;
 
 export interface EffectMigrationHandler {
@@ -156,6 +168,11 @@ export interface RegisteredEffectDefinition extends EffectDefinition {
   readonly migrationHandlers: readonly EffectMigrationHandler[];
   dispose(): Promise<void> | void;
 }
+
+export type RegisteredTemporalEffectDefinition =
+  Omit<RegisteredEffectDefinition, "render"> & {
+    readonly render: TemporalEffectRenderFunction;
+  };
 
 export function assertRendererCompatibility(adapter: RendererAdapter): void {
   if (adapter.apiVersion !== RENDERER_API_VERSION) {
@@ -253,3 +270,5 @@ export function selectRendererAdapter(
 }
 
 export { RENDERER_API_VERSION };
+export * from "./conformance.js";
+export * from "./raster.js";

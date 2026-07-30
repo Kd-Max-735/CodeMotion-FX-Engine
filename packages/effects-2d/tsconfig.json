@@ -9,6 +9,7 @@
   "references": [
     { "path": "../core" },
     { "path": "../effects-3d" },
-    { "path": "../renderer-api" }
+    { "path": "../renderer-api" },
+    { "path": "../timeline" }
   ]
 }

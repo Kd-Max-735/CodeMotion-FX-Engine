@@ -1,0 +1,3453 @@
+{
+  "schemaVersion": "1.1.0",
+  "owner": "Group 2",
+  "scope": "39 P0 2D effects; T08 excluded and interface-verified only",
+  "dimensions": [
+    "identity-version",
+    "schema-ui",
+    "presets",
+    "effect-time",
+    "translation-invariance",
+    "real-input",
+    "cpu-golden",
+    "webgl-golden",
+    "straight-alpha",
+    "premultiplied-alpha",
+    "srgb",
+    "linear-srgb",
+    "display-p3",
+    "mask-matte",
+    "determinism",
+    "size-seed-quality",
+    "performance",
+    "resources-dispose",
+    "preview-cover",
+    "documentation-migration"
+  ],
+  "rows": [
+    {
+      "sourceId": "M01",
+      "effectId": "fx.motion.fade",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "M01/fx.motion.fade@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.m01.gentle, preset.m01.balanced, preset.m01.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "motion fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 02b7edc5,b8cb00a0,34ef73fa,de28fc49,7f8fb449"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 02b7edc5,1aac204f,bf94725c,8462699b,05ee8853"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.668/4ms; Edge median 2.5/4ms; GPU 0.018ms; 1% Low 85.47fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/M01.svg, ./previews/M01-gentle.svg, ./previews/M01-balanced.svg, ./previews/M01-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "M02",
+      "effectId": "fx.motion.slide",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "M02/fx.motion.slide@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.m02.gentle, preset.m02.balanced, preset.m02.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "motion fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 1e7b9d22,b2b02ba1,8cbd732e,b8cb00a0,b8cb00a0"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 3cb880fe,1aac204f,a0b4a726,c291c26f,361ac6a8"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.385/5ms; Edge median 2.2/5ms; GPU 0.016ms; 1% Low 76.34fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/M02.svg, ./previews/M02-gentle.svg, ./previews/M02-balanced.svg, ./previews/M02-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "M03",
+      "effectId": "fx.motion.scalePop",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "M03/fx.motion.scalePop@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.m03.gentle, preset.m03.balanced, preset.m03.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "motion fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 7afe8741,b8cb00a0,dc840fea,e71fbe1a,b2b02ba1"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 7226baa5,2fe78464,fde1f8d0,352b2b16,0fa33cc0"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.839/5ms; Edge median 2.1/5ms; GPU 0.014ms; 1% Low 89.29fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/M03.svg, ./previews/M03-gentle.svg, ./previews/M03-balanced.svg, ./previews/M03-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "M04",
+      "effectId": "fx.motion.rotateIn",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "M04/fx.motion.rotateIn@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.m04.gentle, preset.m04.balanced, preset.m04.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "motion fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: cea3433b,b8cb00a0,46f1307a,0e0964b5,d9cd23ad"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: e4ccc4f4,6c9eb39d,5300d62e,1499ec9e,216d01be"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.532/7ms; Edge median 1.9/7ms; GPU 0.015ms; 1% Low 89.29fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/M04.svg, ./previews/M04-gentle.svg, ./previews/M04-balanced.svg, ./previews/M04-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "M05",
+      "effectId": "fx.motion.bounce",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "M05/fx.motion.bounce@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.m05.gentle, preset.m05.balanced, preset.m05.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "motion fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: b8cb00a0,5d7d98a0,71cbb4ce,5d7d98a0,a4f030a0"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 1aac204f,aecc2457,ba048fe6,dde4efc6,aa18a526"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.037/5ms; Edge median 2.1/5ms; GPU 0.014ms; 1% Low 96.15fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/M05.svg, ./previews/M05-gentle.svg, ./previews/M05-balanced.svg, ./previews/M05-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "M06",
+      "effectId": "fx.motion.elastic",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "M06/fx.motion.elastic@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.m06.gentle, preset.m06.balanced, preset.m06.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "motion fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: b8cb00a0,b8cb00a0,8cbd732e,c225a841,b8cb00a0"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 1aac204f,fc7017d0,555f79b4,c198faab,a297b401"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.542/5ms; Edge median 3.1/5ms; GPU 0.013ms; 1% Low 78.74fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/M06.svg, ./previews/M06-gentle.svg, ./previews/M06-balanced.svg, ./previews/M06-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "M07",
+      "effectId": "fx.motion.float",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "M07/fx.motion.float@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.m07.gentle, preset.m07.balanced, preset.m07.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "motion fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: b8cb00a0,b8cb00a0,2379b4a0,b8cb00a0,36cc4ca0"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 1aac204f,1aac204f,71ce3cd1,1aac204f,cde1f48f"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.089/5ms; Edge median 3.2/5ms; GPU 0.013ms; 1% Low 91.74fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/M07.svg, ./previews/M07-gentle.svg, ./previews/M07-balanced.svg, ./previews/M07-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "M08",
+      "effectId": "fx.motion.shake",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "M08/fx.motion.shake@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.m08.gentle, preset.m08.balanced, preset.m08.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "motion fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 00a1c1c1,b8cb00a0,3baa41f0,b2b02ba1,b8cb00a0"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 9506fca2,8bb0d346,29de62cf,7ced58a1,58245ec8"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.769/5ms; Edge median 3/5ms; GPU 0.014ms; 1% Low 84.75fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/M08.svg, ./previews/M08-gentle.svg, ./previews/M08-balanced.svg, ./previews/M08-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "T01",
+      "effectId": "fx.text.typewriter",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "T01/fx.text.typewriter@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.t01.gentle, preset.t01.balanced, preset.t01.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "text fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: d40a51bc,f9ee7f18,41062f74,f9ee7f18,f9ee7f18"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 62ac7ba7,3f8b903d,3f8b903d,3f8b903d,3f8b903d"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.994/5ms; Edge median 3.1/5ms; GPU 0.017ms; 1% Low 78.12fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/T01.svg, ./previews/T01-gentle.svg, ./previews/T01-balanced.svg, ./previews/T01-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "T02",
+      "effectId": "fx.text.characterCascade",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "T02/fx.text.characterCascade@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.t02.gentle, preset.t02.balanced, preset.t02.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "text fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 02b7edc5,f9ee7f18,b6b85657,f9ee7f18,f9ee7f18"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 02b7edc5,3f8b903d,661df0d5,3f8b903d,3f8b903d"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 2.44/5ms; Edge median 2.9/5ms; GPU 0.014ms; 1% Low 87.72fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/T02.svg, ./previews/T02-gentle.svg, ./previews/T02-balanced.svg, ./previews/T02-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "T03",
+      "effectId": "fx.text.kineticTypography",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "T03/fx.text.kineticTypography@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.t03.gentle, preset.t03.balanced, preset.t03.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "text fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: e216d193,f9ee7f18,f9ee7f18,a3171274,f9ee7f18"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 224cd6f4,74af4180,2856057d,cc0c6e08,6f3b97c7"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.421/7ms; Edge median 3.2/7ms; GPU 0.013ms; 1% Low 89.29fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/T03.svg, ./previews/T03-gentle.svg, ./previews/T03-balanced.svg, ./previews/T03-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "T04",
+      "effectId": "fx.text.textPathReveal",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "T04/fx.text.textPathReveal@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.t04.gentle, preset.t04.balanced, preset.t04.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "text fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 02b7edc5,a6519297,4fbfff54,c0e2f386,63c393f6"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 02b7edc5,678d18af,c11afab6,bd470b39,63cab1f7"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 5.318/7ms; Edge median 3.1/7ms; GPU 0.014ms; 1% Low 76.34fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/T04.svg, ./previews/T04-gentle.svg, ./previews/T04-balanced.svg, ./previews/T04-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "T05",
+      "effectId": "fx.text.textMorph",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "T05/fx.text.textMorph@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.t05.gentle, preset.t05.balanced, preset.t05.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "text fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: f576e594,bfb655c0,afaefdb7,9d8294f9,6f831580"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 3f8b903d,3f8b903d,c8554bd8,ca2bdbf7,93afc0c4"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.594/10ms; Edge median 2.7/10ms; GPU 0.016ms; 1% Low 78.12fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/T05.svg, ./previews/T05-gentle.svg, ./previews/T05-balanced.svg, ./previews/T05-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "T06",
+      "effectId": "fx.text.scrambleDecode",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "T06/fx.text.scrambleDecode@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.t06.gentle, preset.t06.balanced, preset.t06.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "text fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 88ed099f,f9ee7f18,40f4066c,957b5250,07117178"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: b3ea6905,3c43f399,6c11c58a,40dc2f80,03e718a0"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 4.763/7ms; Edge median 3.1/7ms; GPU 0.015ms; 1% Low 85.47fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/T06.svg, ./previews/T06-gentle.svg, ./previews/T06-balanced.svg, ./previews/T06-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "T07",
+      "effectId": "fx.text.wordExplode",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "T07/fx.text.wordExplode@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.t07.gentle, preset.t07.balanced, preset.t07.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "text fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: f9ee7f18,2e8ba0c9,e7d625e7,dbfe3ffe,79d7d082"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 3f8b903d,b29824a4,032af2ec,5896f9a4,7e5e03f5"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 4.203/7ms; Edge median 3/7ms; GPU 0.015ms; 1% Low 92.59fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/T07.svg, ./previews/T07-gentle.svg, ./previews/T07-balanced.svg, ./previews/T07-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "V01",
+      "effectId": "fx.vector.pathTrim",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "V01/fx.vector.pathTrim@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.v01.gentle, preset.v01.balanced, preset.v01.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "vector fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 39e1ad5f,5af63a63,d6158463,8f479498,1c934523"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 2f166405,2f166405,2f166405,2f166405,2f166405"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 3.138/5ms; Edge median 3.7/5ms; GPU 0.014ms; 1% Low 80fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/V01.svg, ./previews/V01-gentle.svg, ./previews/V01-balanced.svg, ./previews/V01-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "V02",
+      "effectId": "fx.vector.pathMorph",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "V02/fx.vector.pathMorph@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.v02.gentle, preset.v02.balanced, preset.v02.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "vector fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: bce8a466,6dcdcbf7,6db84ca5,0cd82346,166e1a94"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: fd5ad043,1c464f67,1f91f805,54b837a3,06217c9c"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 5.374/7ms; Edge median 3.3/7ms; GPU 0.015ms; 1% Low 85.47fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/V02.svg, ./previews/V02-gentle.svg, ./previews/V02-balanced.svg, ./previews/V02-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "V03",
+      "effectId": "fx.vector.shapeRepeater",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "V03/fx.vector.shapeRepeater@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.v03.gentle, preset.v03.balanced, preset.v03.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "vector fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: d612e5b6,d612e5b6,d612e5b6,d612e5b6,d612e5b6"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 1a61358e,1a61358e,1a61358e,1a61358e,1a61358e"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 5.721/8ms; Edge median 3.1/8ms; GPU 0.016ms; 1% Low 83.33fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/V03.svg, ./previews/V03-gentle.svg, ./previews/V03-balanced.svg, ./previews/V03-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "V04",
+      "effectId": "fx.vector.radialBurst",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "V04/fx.vector.radialBurst@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.v04.gentle, preset.v04.balanced, preset.v04.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "vector fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: aa5d8480,aa5d8480,aa5d8480,aa5d8480,aa5d8480"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: e4fdde5d,e4fdde5d,e4fdde5d,e4fdde5d,e4fdde5d"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 3.461/8ms; Edge median 3.2/8ms; GPU 0.016ms; 1% Low 80fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/V04.svg, ./previews/V04-gentle.svg, ./previews/V04-balanced.svg, ./previews/V04-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "D01",
+      "effectId": "fx.draw.handwriting",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "D01/fx.draw.handwriting@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.d01.gentle, preset.d01.balanced, preset.d01.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "draw fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: af723a6a,0185555b,f73e1f1f,c7bc690c,3cfd91ea"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 0076fa4d,b2de4d91,e5bdad88,ecd7b822,538b1933"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 5.976/7ms; Edge median 2.7/7ms; GPU 0.013ms; 1% Low 67.57fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/D01.svg, ./previews/D01-gentle.svg, ./previews/D01-balanced.svg, ./previews/D01-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "D02",
+      "effectId": "fx.draw.brushReveal",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "D02/fx.draw.brushReveal@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.d02.gentle, preset.d02.balanced, preset.d02.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "draw fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 9182c539,83e5b356,caa61680,4c1d1560,d6657f0e"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: df6c1412,8f4ebc8e,59c0cb47,0625337e,dcdd5d9f"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 7.035/8ms; Edge median 2.9/8ms; GPU 0.014ms; 1% Low 80fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/D02.svg, ./previews/D02-gentle.svg, ./previews/D02-balanced.svg, ./previews/D02-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "D03",
+      "effectId": "fx.draw.inkSpread",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "D03/fx.draw.inkSpread@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.d03.gentle, preset.d03.balanced, preset.d03.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "draw fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 779c4709,76110231,cbcc704e,73db8920,89a7de76"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 00c2f945,e6db9743,953bcf2a,12ebf445,bcdfc1a2"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 4.747/11ms; Edge median 3.1/11ms; GPU 0.013ms; 1% Low 86.21fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/D03.svg, ./previews/D03-gentle.svg, ./previews/D03-balanced.svg, ./previews/D03-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "D04",
+      "effectId": "fx.draw.chalkStroke",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "D04/fx.draw.chalkStroke@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.d04.gentle, preset.d04.balanced, preset.d04.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "draw fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 79c94155,846d3bbe,6f123bbe,f3e32fdc,cf6b8306"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: cdd7c1ed,321e063d,1d9bf54d,89a4519b,43150fe9"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 5.538/8ms; Edge median 3.3/8ms; GPU 0.014ms; 1% Low 93.46fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/D04.svg, ./previews/D04-gentle.svg, ./previews/D04-balanced.svg, ./previews/D04-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "L01",
+      "effectId": "fx.light.neonGlow",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "L01/fx.light.neonGlow@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.l01.gentle, preset.l01.balanced, preset.l01.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "light fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 0c32f26d,5537b293,60f9a5f0,adfc68d0,d19774a1"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: e4b6332b,71e733ec,e4b6332b,e4b6332b,e4b6332b"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.873/12ms; Edge median 2.5/12ms; GPU 0.014ms; 1% Low 94.34fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/L01.svg, ./previews/L01-gentle.svg, ./previews/L01-balanced.svg, ./previews/L01-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "L02",
+      "effectId": "fx.light.scanBeam",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "L02/fx.light.scanBeam@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.l02.gentle, preset.l02.balanced, preset.l02.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "light fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 69096978,0f6b5663,f037cc7e,560705d4,23502a90"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: fa3f406b,77132b6f,35448f13,83ac7f7e,54efb2c8"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.845/8ms; Edge median 3.1/8ms; GPU 0.014ms; 1% Low 95.24fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/L02.svg, ./previews/L02-gentle.svg, ./previews/L02-balanced.svg, ./previews/L02-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "L03",
+      "effectId": "fx.light.lensFlare",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "L03/fx.light.lensFlare@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.l03.gentle, preset.l03.balanced, preset.l03.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "light fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 0390c71e,0390c71e,0390c71e,0390c71e,0390c71e"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 62a0c10a,62a0c10a,62a0c10a,62a0c10a,62a0c10a"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.403/13ms; Edge median 2.5/13ms; GPU 0.014ms; 1% Low 96.15fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/L03.svg, ./previews/L03-gentle.svg, ./previews/L03-balanced.svg, ./previews/L03-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "L04",
+      "effectId": "fx.light.energyPulse",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "L04/fx.light.energyPulse@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.l04.gentle, preset.l04.balanced, preset.l04.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "light fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: ef475900,5683db80,ad46fd89,bb24b846,d5f978b6"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: e2b30092,24f5b77c,fb216917,46e79301,32c471db"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.918/9ms; Edge median 2.8/9ms; GPU 0.013ms; 1% Low 91.74fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/L04.svg, ./previews/L04-gentle.svg, ./previews/L04-balanced.svg, ./previews/L04-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "P01",
+      "effectId": "fx.post.gaussianBlur",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "P01/fx.post.gaussianBlur@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.p01.gentle, preset.p01.balanced, preset.p01.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "post fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: db4791e8,db4791e8,db4791e8,db4791e8,db4791e8"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 76f0b97a,76f0b97a,76f0b97a,76f0b97a,76f0b97a"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 2.067/14ms; Edge median 2.6/14ms; GPU 0.016ms; 1% Low 98.04fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/P01.svg, ./previews/P01-gentle.svg, ./previews/P01-balanced.svg, ./previews/P01-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "P02",
+      "effectId": "fx.post.directionalBlur",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "P02/fx.post.directionalBlur@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.p02.gentle, preset.p02.balanced, preset.p02.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "post fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 921c574e,921c574e,921c574e,921c574e,921c574e"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 4e05c60a,4e05c60a,4e05c60a,4e05c60a,4e05c60a"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 2.074/14ms; Edge median 3.1/14ms; GPU 0.017ms; 1% Low 86.96fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/P02.svg, ./previews/P02-gentle.svg, ./previews/P02-balanced.svg, ./previews/P02-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "P03",
+      "effectId": "fx.post.radialBlur",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "P03/fx.post.radialBlur@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.p03.gentle, preset.p03.balanced, preset.p03.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "post fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: d107fbd7,d107fbd7,d107fbd7,d107fbd7,d107fbd7"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: b200e1f9,b200e1f9,b200e1f9,b200e1f9,b200e1f9"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 2.166/15ms; Edge median 2.4/15ms; GPU 0.02ms; 1% Low 93.46fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/P03.svg, ./previews/P03-gentle.svg, ./previews/P03-balanced.svg, ./previews/P03-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "P04",
+      "effectId": "fx.post.motionBlur",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "P04/fx.post.motionBlur@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.p04.gentle, preset.p04.balanced, preset.p04.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "post fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 878e6290,878e6290,878e6290,878e6290,878e6290"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 2f65eb68,2f65eb68,2f65eb68,2f65eb68,2f65eb68"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 1.978/15ms; Edge median 2.7/15ms; GPU 0.018ms; 1% Low 90.91fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 1; textures 1; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/P04.svg, ./previews/P04-gentle.svg, ./previews/P04-balanced.svg, ./previews/P04-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "C01",
+      "effectId": "fx.transition.wipe",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "C01/fx.transition.wipe@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.c01.gentle, preset.c01.balanced, preset.c01.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "transition fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: b8cb00a0,21ad921d,be98fc8f,c01ccdfb,11cafe01"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 4868c7b9,2b2e95d8,970e339f,722d05d4,54bfcb70"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.806/6ms; Edge median 3.9/6ms; GPU 0.025ms; 1% Low 81.3fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 2; textures 2; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/C01.svg, ./previews/C01-gentle.svg, ./previews/C01-balanced.svg, ./previews/C01-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "C02",
+      "effectId": "fx.transition.radialWipe",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "C02/fx.transition.radialWipe@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.c02.gentle, preset.c02.balanced, preset.c02.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "transition fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: b8cb00a0,21ad921d,e0b764f2,804f2a60,84c4a98f"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 02b7edc5,cd617d89,d07aa5b8,de35d2cf,5e940cb8"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.733/8ms; Edge median 4.2/8ms; GPU 0.024ms; 1% Low 73.53fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 2; textures 2; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/C02.svg, ./previews/C02-gentle.svg, ./previews/C02-balanced.svg, ./previews/C02-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "C03",
+      "effectId": "fx.transition.liquidWipe",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "C03/fx.transition.liquidWipe@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.c03.gentle, preset.c03.balanced, preset.c03.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "transition fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: b8cb00a0,21ad921d,cf051ff4,4891402a,1c11548c"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: f9a97268,49ec4d09,1e9eb39d,b013c738,6b96049e"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 2.481/12ms; Edge median 4.1/12ms; GPU 0.032ms; 1% Low 74.07fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 2; textures 2; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/C03.svg, ./previews/C03-gentle.svg, ./previews/C03-balanced.svg, ./previews/C03-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "C04",
+      "effectId": "fx.transition.pixelDissolve",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "C04/fx.transition.pixelDissolve@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.c04.gentle, preset.c04.balanced, preset.c04.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "transition fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: b8cb00a0,21ad921d,a468bf6a,c1a75902,603c5369"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 1028facc,93e3284e,13cd85fa,2cca0dac,68062c7f"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 2.135/9ms; Edge median 4/9ms; GPU 0.024ms; 1% Low 78.74fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 2; textures 2; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/C04.svg, ./previews/C04-gentle.svg, ./previews/C04-balanced.svg, ./previews/C04-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "H01",
+      "effectId": "fx.composite.maskReveal",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "H01/fx.composite.maskReveal@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.h01.gentle, preset.h01.balanced, preset.h01.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "composite fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: cd994224,e3c79d16,4f63814d,2ccb45e3,6950db39"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: cd617d89,d3f2d888,27fbb73a,e1958966,7d2483bd"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.784/8ms; Edge median 4.3/8ms; GPU 0.023ms; 1% Low 73.53fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 2; textures 2; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/H01.svg, ./previews/H01-gentle.svg, ./previews/H01-balanced.svg, ./previews/H01-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "H02",
+      "effectId": "fx.composite.trackMatte",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "H02/fx.composite.trackMatte@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.h02.gentle, preset.h02.balanced, preset.h02.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "composite fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 22c31f5a,22c31f5a,22c31f5a,22c31f5a,22c31f5a"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 66ad94b7,66ad94b7,66ad94b7,66ad94b7,66ad94b7"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.649/8ms; Edge median 3.7/8ms; GPU 0.022ms; 1% Low 79.37fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 2; textures 2; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/H02.svg, ./previews/H02-gentle.svg, ./previews/H02-balanced.svg, ./previews/H02-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "H03",
+      "effectId": "fx.composite.blend",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "H03/fx.composite.blend@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.h03.gentle, preset.h03.balanced, preset.h03.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "composite fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: fd9125e5,fd9125e5,fd9125e5,fd9125e5,fd9125e5"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: fd8cdc63,fd8cdc63,fd8cdc63,fd8cdc63,fd8cdc63"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.866/8ms; Edge median 3.9/8ms; GPU 0.023ms; 1% Low 84.03fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 2; textures 2; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/H03.svg, ./previews/H03-gentle.svg, ./previews/H03-balanced.svg, ./previews/H03-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    },
+    {
+      "sourceId": "H04",
+      "effectId": "fx.composite.displacementMap",
+      "version": "1.1.0",
+      "checks": {
+        "identity-version": {
+          "status": "PASS",
+          "evidence": "H04/fx.composite.displacementMap@1.1.0; package/preset 1.1.0"
+        },
+        "schema-ui": {
+          "status": "PASS",
+          "evidence": "4 declared properties and matching UI fields"
+        },
+        "presets": {
+          "status": "PASS",
+          "evidence": "3 named presets; preset.h04.gentle, preset.h04.balanced, preset.h04.bold"
+        },
+        "effect-time": {
+          "status": "PASS",
+          "evidence": "EffectTimeSample 1.1 explicit effectId/effectInstanceId/effectTime/progress/deltaTime; official resolver output renders directly"
+        },
+        "translation-invariance": {
+          "status": "PASS",
+          "evidence": "446-test suite: arbitrary project start, duration, FPS and layer translation"
+        },
+        "real-input": {
+          "status": "PASS",
+          "evidence": "composite fixture uses glyph coverage, parsed SVG, decoded RGBA, or independent A/B as applicable"
+        },
+        "cpu-golden": {
+          "status": "PASS",
+          "evidence": "0/25/50/75/100: 2ef13c62,2ef13c62,2ef13c62,2ef13c62,2ef13c62"
+        },
+        "webgl-golden": {
+          "status": "PASS",
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: a927ac2a,a927ac2a,a927ac2a,a927ac2a,a927ac2a"
+        },
+        "straight-alpha": {
+          "status": "PASS",
+          "evidence": "real antialiased foreground edge checked on CPU and Edge WebGL2"
+        },
+        "premultiplied-alpha": {
+          "status": "PASS",
+          "evidence": "straight/premultiplied physical equivalence checked"
+        },
+        "srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 sRGB checked"
+        },
+        "linear-srgb": {
+          "status": "PASS",
+          "evidence": "CPU and Edge WebGL2 linear-sRGB checked"
+        },
+        "display-p3": {
+          "status": "PASS",
+          "evidence": "CPU Display-P3 checked; explicit renderer fallback required and exercised"
+        },
+        "mask-matte": {
+          "status": "PASS",
+          "evidence": "zero, partial, feathered, inverted and translated coverage checked"
+        },
+        "determinism": {
+          "status": "PASS",
+          "evidence": "three identical runs; createEffectRandom streams isolate same-type effect instances by explicit instance ID"
+        },
+        "size-seed-quality": {
+          "status": "PASS",
+          "evidence": "two sizes, two seeds and draft/preview/final checked"
+        },
+        "performance": {
+          "status": "PASS",
+          "evidence": "CPU 0.962/9ms; Edge median 4.7/9ms; GPU 0.024ms; 1% Low 71.43fps"
+        },
+        "resources-dispose": {
+          "status": "PASS",
+          "evidence": "draws 2; textures 2; VRAM 55296; all five WebGL resource kinds balanced"
+        },
+        "preview-cover": {
+          "status": "PASS",
+          "evidence": "./previews/H04.svg, ./previews/H04-gentle.svg, ./previews/H04-balanced.svg, ./previews/H04-bold.svg"
+        },
+        "documentation-migration": {
+          "status": "PASS",
+          "evidence": "README/CHANGELOG/package/definition/preset 1.1.0; 0.9→1.0→1.1 migrations"
+        }
+      }
+    }
+  ],
+  "totals": {
+    "effects": 39,
+    "dimensions": 20,
+    "checks": 780,
+    "passed": 780
+  },
+  "evidence": {
+    "unitTests": 450,
+    "cpuGoldenFrames": 200,
+    "group2CpuGoldenFrames": 195,
+    "group2WebglGoldenFrames": 195,
+    "parameterPerturbations": 156,
+    "edgePreviews": 40,
+    "edgeWebgl": {
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+      "renderer": "ANGLE (Intel, Intel(R) UHD Graphics (0x0000A788) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "alphaChecks": 39,
+      "maskChecks": 39,
+      "deterministicChecks": 39,
+      "instanceRandomChecks": 6,
+      "instanceRandomThreeRunDeterministic": true,
+      "instanceRandomStreamsDistinct": true,
+      "qualityChecks": 117,
+      "colors": {
+        "srgbChecks": 39,
+        "linearSrgbChecks": 39,
+        "displayP3FallbackRequired": true
+      },
+      "resourcesBalanced": true
+    }
+  }
+}

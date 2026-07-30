@@ -1,10 +1,16 @@
 import type { EffectDefinition, JsonObject } from "@codemotion/core";
-import type {
-  EffectRenderContext,
-  RenderOutput,
-  TextureHandle
-} from "@codemotion/renderer-api";
 import {
+  assertLayerRasterizationOutput,
+  assertTemporalEffectContext,
+  type LayerRasterizationOutput,
+  type RenderOutput,
+  type TemporalEffectRenderContext,
+  type TextureHandle
+} from "@codemotion/renderer-api";
+import { createTextExtrusionGeometry } from "./geometry.js";
+import {
+  assertTextExtrude3DRasterInput,
+  assertTextExtrude3DTime,
   defaultTextExtrude3DParams,
   normalizeTextExtrude3DParams,
   renderTextExtrude3DPixels
@@ -14,6 +20,7 @@ import type {
   PixelSurface,
   TextExtrude3DEffectDefinition,
   TextExtrude3DPreset,
+  TextExtrude3DRasterInput,
   TextExtrude3DRenderOptions
 } from "./types.js";
 
@@ -27,11 +34,7 @@ interface EffectStackRenderer {
 interface MaskStackRenderer {
   applyMaskStack(
     source: TextureHandle,
-    masks: readonly [{
-      readonly texture: TextureHandle;
-      readonly mode: "add";
-      readonly opacity: 1;
-    }]
+    masks: readonly [{ readonly texture: TextureHandle; readonly mode: "add"; readonly opacity: 1 }]
   ): TextureHandle;
 }
 
@@ -45,34 +48,45 @@ function hasMaskStack(value: unknown): value is MaskStackRenderer {
     && "applyMaskStack" in value && typeof value.applyMaskStack === "function";
 }
 
-function parseSurface(value: unknown): PixelSurface | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const candidate = value as Record<string, unknown>;
-  if (!Number.isInteger(candidate.width) || !Number.isInteger(candidate.height)
-    || typeof candidate.width !== "number" || typeof candidate.height !== "number"
-    || !Array.isArray(candidate.data)) return undefined;
-  return {
-    width: candidate.width,
-    height: candidate.height,
-    data: new Uint8ClampedArray(candidate.data.filter((value): value is number => typeof value === "number")),
-    colorSpace: candidate.colorSpace === "display-p3" || candidate.colorSpace === "linear-srgb"
-      ? candidate.colorSpace : "srgb",
-    alphaMode: candidate.alphaMode === "none" || candidate.alphaMode === "premultiplied"
-      ? candidate.alphaMode : "straight"
-  };
+function requireTextRaster(value: unknown): TextExtrude3DRasterInput {
+  if (typeof value !== "object" || value === null
+    || !("rasterInput" in value) || !("surface" in value)) {
+    throw new TypeError("T08 requires data.textRaster with real glyph and raster provenance.");
+  }
+  const input = value as TextExtrude3DRasterInput;
+  assertTextExtrude3DRasterInput(input);
+  return input;
 }
 
-function frameOutput(surface: PixelSurface): RenderOutput {
+function requireRasterOutput(
+  value: unknown,
+  input: TextExtrude3DRasterInput,
+  texture: TextureHandle
+): LayerRasterizationOutput {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("T08 WebGL requires data.rasterOutput from the real text rasterizer.");
+  }
+  const output = value as LayerRasterizationOutput;
+  assertLayerRasterizationOutput(input.rasterInput, output);
+  if (output.texture.id !== texture.id || output.sourceKind !== "text") {
+    throw new TypeError("T08 WebGL texture must be the declared real text raster output.");
+  }
+  return output;
+}
+
+function frameOutput(surface: PixelSurface, context: TemporalEffectRenderContext): RenderOutput {
   return {
     type: "frame",
     data: {
-      effectId: "fx.text.textExtrude3D",
+      effectId: context.timing.effectTime.effectId,
+      effectInstanceId: context.timing.effectTime.effectInstanceId,
+      contractVersion: context.timing.effectTime.contractVersion,
       width: surface.width,
       height: surface.height,
       colorSpace: surface.colorSpace,
       alphaMode: surface.alphaMode,
       degraded: true,
-      degradation: "Deterministic Canvas2D/CPU layered extrusion",
+      degradation: "Deterministic Canvas2D/CPU glyph-mesh extrusion",
       pixels: Array.from(surface.data)
     }
   };
@@ -86,7 +100,7 @@ const PRESETS: readonly [TextExtrude3DPreset, TextExtrude3DPreset, TextExtrude3D
       version: "1.0.0",
       name: "Soft Studio",
       tags: Object.freeze(["text", "3d", "matte", "p0"]),
-      params: Object.freeze({ depth: 0.16, bevel: 0.04, material: "matte", light: "studio", rotationX: 12, rotationY: -18, perspective: 0.4, progress: 0.5 }),
+      params: Object.freeze({ depth: 0.16, bevel: 0.04, material: "matte", light: "studio", rotationX: 12, rotationY: -18, perspective: 0.4 }),
       previewAsset: "./preview.html#T08-soft-studio"
     }),
     Object.freeze({
@@ -95,7 +109,7 @@ const PRESETS: readonly [TextExtrude3DPreset, TextExtrude3DPreset, TextExtrude3D
       version: "1.0.0",
       name: "Chrome Rim",
       tags: Object.freeze(["text", "3d", "metal", "p0"]),
-      params: Object.freeze({ depth: 0.32, bevel: 0.08, material: "metal", light: "rim", rotationX: 18, rotationY: -28, perspective: 0.6, progress: 0.5 }),
+      params: Object.freeze({ depth: 0.32, bevel: 0.08, material: "metal", light: "rim", rotationX: 18, rotationY: -28, perspective: 0.6 }),
       previewAsset: "./preview.html#T08-chrome-rim"
     }),
     Object.freeze({
@@ -104,7 +118,7 @@ const PRESETS: readonly [TextExtrude3DPreset, TextExtrude3DPreset, TextExtrude3D
       version: "1.0.0",
       name: "Glass Top",
       tags: Object.freeze(["text", "3d", "glass", "p0"]),
-      params: Object.freeze({ depth: 0.48, bevel: 0.12, material: "glass", light: "top", rotationX: 26, rotationY: 34, perspective: 0.72, progress: 0.5 }),
+      params: Object.freeze({ depth: 0.48, bevel: 0.12, material: "glass", light: "top", rotationX: 26, rotationY: 34, perspective: 0.72 }),
       previewAsset: "./preview.html#T08-glass-top"
     })
   ]);
@@ -117,14 +131,14 @@ function definitionFields(): EffectDefinition {
     version: "1.0.0",
     displayName: "Text Extrude 3D",
     category: "text",
-    description: "Deterministic P0 text extrusion with geometry, material and directional-light shading.",
-    tags: ["text", "3d", "extrude", "p0", "t08"],
+    description: "Deterministic P0 extrusion of validated rasterized Unicode glyph geometry.",
+    tags: ["text", "3d", "extrude", "p0", "t08", "temporal-1.1"],
     inputTypes: ["texture"],
     outputType: "texture",
     parameterSchema: {
       $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
-      required: ["depth", "bevel", "material", "light", "rotationX", "rotationY", "perspective", "progress"],
+      required: ["depth", "bevel", "material", "light", "rotationX", "rotationY", "perspective"],
       properties: {
         depth: { type: "number", default: defaults.depth, minimum: 0, maximum: 1, multipleOf: 0.01 },
         bevel: { type: "number", default: defaults.bevel, minimum: 0, maximum: 0.25, multipleOf: 0.01 },
@@ -132,14 +146,13 @@ function definitionFields(): EffectDefinition {
         light: { type: "string", default: defaults.light, enum: ["studio", "rim", "top"] },
         rotationX: { type: "number", default: defaults.rotationX, minimum: -60, maximum: 60, multipleOf: 1 },
         rotationY: { type: "number", default: defaults.rotationY, minimum: -90, maximum: 90, multipleOf: 1 },
-        perspective: { type: "number", default: defaults.perspective, minimum: 0, maximum: 1, multipleOf: 0.01 },
-        progress: { type: "number", default: defaults.progress, minimum: 0, maximum: 1, multipleOf: 0.01 }
+        perspective: { type: "number", default: defaults.perspective, minimum: 0, maximum: 1, multipleOf: 0.01 }
       },
       additionalProperties: false
     },
     uiSchema: {
       layout: "group",
-      order: ["depth", "bevel", "material", "light", "rotationX", "rotationY", "perspective", "progress"],
+      order: ["depth", "bevel", "material", "light", "rotationX", "rotationY", "perspective"],
       fields: {
         depth: { label: "Depth", control: "slider", unit: "ratio", keyframeable: true, performanceImpact: "high", nullBehavior: "use-default" },
         bevel: { label: "Bevel", control: "slider", unit: "ratio", keyframeable: true, performanceImpact: "medium", nullBehavior: "use-default" },
@@ -147,8 +160,7 @@ function definitionFields(): EffectDefinition {
         light: { label: "Light", control: "select", keyframeable: false, performanceImpact: "low", nullBehavior: "use-default" },
         rotationX: { label: "Rotation X", control: "slider", unit: "deg", keyframeable: true, performanceImpact: "low", nullBehavior: "use-default" },
         rotationY: { label: "Rotation Y", control: "slider", unit: "deg", keyframeable: true, performanceImpact: "low", nullBehavior: "use-default" },
-        perspective: { label: "Perspective", control: "slider", unit: "ratio", keyframeable: true, performanceImpact: "low", nullBehavior: "use-default" },
-        progress: { label: "Progress", control: "slider", unit: "ratio", keyframeable: true, performanceImpact: "medium", nullBehavior: "use-default" }
+        perspective: { label: "Perspective", control: "slider", unit: "ratio", keyframeable: true, performanceImpact: "low", nullBehavior: "use-default" }
       }
     },
     defaultPreset: defaultTextExtrude3DParams(),
@@ -168,14 +180,14 @@ function definitionFields(): EffectDefinition {
     ],
     validationRules: [
       {
-        ruleId: "t08.finite-bounds",
-        message: "T08 numeric parameters are clamped to their declared finite bounds.",
+        ruleId: "t08.temporal-identity",
+        message: "Time contract 1.1 requires exact effectId and explicit effectInstanceId.",
         severity: "error",
-        config: { action: "clamp" }
+        config: { action: "reject" }
       },
       {
-        ruleId: "t08.texture-mask-size",
-        message: "Source and optional mask must have equal positive dimensions.",
+        ruleId: "t08.real-text-raster",
+        message: "Only validated TextRasterSource glyph coverage and matching raster output are accepted.",
         severity: "error",
         config: { action: "reject" }
       }
@@ -196,11 +208,11 @@ export function createTextExtrude3DEffect(): TextExtrude3DEffectDefinition {
       width: 160,
       height: 90,
       frameProgress: 0.5,
-      alt: "T08 deterministic extruded 3D text preview"
+      alt: "T08 Unicode glyph extrusion at official 50% effect time"
     }),
-    alphaBehavior: "Treats source Alpha as glyph occupancy, preserves straight/premultiplied association, and RGB-zeros every transparent output pixel.",
-    maskBehavior: "Applies the context mask after lighting; mask Alpha multiplies output Alpha without altering the source.",
-    fallbackBehavior: "If the WebGL effect-stack seam is unavailable, a deterministic Canvas2D/CPU layered extrusion uses the same normalized geometry, material, light, quality, Alpha and mask rules; frame metadata declares degradation.",
+    alphaBehavior: "Consumes premultiplied text raster Alpha as glyph occupancy, shades unassociated color, then restores association and RGB-zeros transparent pixels.",
+    maskBehavior: "Applies the context mask after geometry/material/light shading; mask Alpha multiplies output Alpha.",
+    fallbackBehavior: "If WebGL is unavailable, deterministic CPU glyph-mesh extrusion consumes the same required EffectTimeSample 1.1 and TextRasterSource; degradation is explicit in frame metadata.",
     benchmarkBudgetMs: 35,
     migrationHandlers: Object.freeze([{
       fromVersion: "0.9.0",
@@ -209,17 +221,23 @@ export function createTextExtrude3DEffect(): TextExtrude3DEffectDefinition {
         return { ...normalizeTextExtrude3DParams(params) };
       }
     }]),
-    async render(context: EffectRenderContext): Promise<RenderOutput> {
+    async render(context: TemporalEffectRenderContext): Promise<RenderOutput> {
       if (disposed) throw new Error("fx.text.textExtrude3D has been disposed.");
-      const params = normalizeTextExtrude3DParams({
-        ...context.params,
-        progress: context.params.progress ?? Math.min(1, Math.max(0, context.time - Math.floor(context.time)))
-      });
+      assertTemporalEffectContext(context.timing);
+      assertTextExtrude3DTime(context.timing.effectTime);
+      const input = requireTextRaster(context.data?.textRaster);
+      if (input.rasterInput.time !== context.timing.layerTime
+        && (input.rasterInput.time.layerId !== context.timing.layerTime.layerId
+          || input.rasterInput.time.localTime !== context.timing.layerTime.localTime)) {
+        throw new TypeError("T08 text raster layer time must match the temporal render context.");
+      }
+      const params = normalizeTextExtrude3DParams(context.params);
+      const geometry = createTextExtrusionGeometry(input, params, context.quality);
       if (context.renderer.backend === "webgl" && context.inputTextures[0] && hasEffectStack(context.renderer)) {
-        const result = context.renderer.applyEffectStack(
-          context.inputTextures[0],
-          [createTextExtrude3DWebGLPass(params, context.quality)]
-        );
+        requireRasterOutput(context.data?.rasterOutput, input, context.inputTextures[0]);
+        const result = context.renderer.applyEffectStack(context.inputTextures[0], [
+          createTextExtrude3DWebGLPass(params, context.timing.effectTime, context.quality, geometry)
+        ]);
         if (result.failures[0]) throw result.failures[0].error;
         const output = context.mask && hasMaskStack(context.renderer)
           ? context.renderer.applyMaskStack(result.output, [{ texture: context.mask, mode: "add", opacity: 1 }])
@@ -227,23 +245,21 @@ export function createTextExtrude3DEffect(): TextExtrude3DEffectDefinition {
         if (output.id !== result.output.id) context.renderer.releaseTexture(result.output);
         return { type: "texture", texture: output };
       }
-      const source = parseSurface(context.data?.pixelSurface);
-      if (!source) throw new Error("fx.text.textExtrude3D fallback requires data.pixelSurface.");
-      const mask = parseSurface(context.data?.maskSurface);
-      return frameOutput(renderTextExtrude3DPixels(source, { ...params }, {
-        progress: params.progress,
+      const mask = context.data?.maskSurface as PixelSurface | undefined;
+      return frameOutput(renderTextExtrude3DPixels(input, { ...params }, {
+        time: context.timing.effectTime,
         seed: context.seed,
         quality: context.quality,
         ...(mask ? { mask } : {})
-      }));
+      }), context);
     },
     renderPixels(
-      source: PixelSurface,
-      params: Readonly<Record<string, unknown>> = {},
-      options: Partial<TextExtrude3DRenderOptions> = {}
+      input: TextExtrude3DRasterInput,
+      params: Readonly<Record<string, unknown>>,
+      options: TextExtrude3DRenderOptions
     ) {
       if (disposed) throw new Error("fx.text.textExtrude3D has been disposed.");
-      return renderTextExtrude3DPixels(source, params, options);
+      return renderTextExtrude3DPixels(input, params, options);
     },
     dispose(): void {
       disposed = true;

@@ -1,5 +1,7 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "inputFixtureVersion": "real-raster-1.0.0",
+  "baselineReason": "EffectTimeSample 1.1 explicit effect-instance random isolation and real raster inputs",
   "runtime": {
     "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
     "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
@@ -8,44 +10,278 @@
     "height": 36
   },
   "frames": {
-    "fx.motion.fade": {"0":"02b7edc5","1":"02b7edc5","0.25":"de946624","0.5":"ed546c52","0.75":"ed546c52"},
-    "fx.motion.slide": {"0":"979ba88b","1":"979ba88b","0.25":"28eceadd","0.5":"d4afd2be","0.75":"40fd7965"},
-    "fx.motion.scalePop": {"0":"da642bdd","1":"da642bdd","0.25":"2d50de39","0.5":"f802009e","0.75":"f5530703"},
-    "fx.motion.rotateIn": {"0":"bc6643a4","1":"bc6643a4","0.25":"4a8c5bbd","0.5":"dfa88676","0.75":"93a5c84f"},
-    "fx.motion.bounce": {"0":"ed546c52","1":"ed546c52","0.25":"40eb9302","0.5":"e535ab20","0.75":"115cb4d9"},
-    "fx.motion.elastic": {"0":"ed546c52","1":"ed546c52","0.25":"078fac63","0.5":"a72fb31f","0.75":"120855e2"},
-    "fx.motion.float": {"0":"ed546c52","1":"ed546c52","0.25":"eed0d5b3","0.5":"b44eae13","0.75":"eed0d5b3"},
-    "fx.motion.shake": {"0":"fc2cd66e","1":"fc2cd66e","0.25":"8178a8ca","0.5":"af180229","0.75":"d40a1635"},
-    "fx.text.typewriter": {"0":"17c17786","1":"17c17786","0.25":"923cd9fb","0.5":"f91c6938","0.75":"08ff1d26"},
-    "fx.text.characterCascade": {"0":"02b7edc5","1":"02b7edc5","0.25":"fbebeca3","0.5":"c9d326cc","0.75":"ed546c52"},
-    "fx.text.kineticTypography": {"0":"4fe33ea5","1":"4fe33ea5","0.25":"9304f838","0.5":"efd49c93","0.75":"4e9083cc"},
-    "fx.text.textPathReveal": {"0":"969d7825","1":"92a4a8b8","0.25":"eb0f483b","0.5":"65155586","0.75":"b9eb6cf7"},
-    "fx.text.textMorph": {"0":"6a294404","1":"195b0f35","0.25":"7a26c97d","0.5":"33e5b8ac","0.75":"0f3c3137"},
-    "fx.text.scrambleDecode": {"0":"147ff472","1":"6b275ddb","0.25":"94e1fb60","0.5":"a3094e7d","0.75":"8898f595"},
-    "fx.text.wordExplode": {"0":"ed546c52","1":"ed546c52","0.25":"e6c9ed5a","0.5":"8e0e60c0","0.75":"0e8d2175"},
-    "fx.vector.pathTrim": {"0":"823cda66","1":"823cda66","0.25":"823cda66","0.5":"823cda66","0.75":"823cda66"},
-    "fx.vector.pathMorph": {"0":"e1e50b30","1":"d84881a7","0.25":"4a3298a0","0.5":"408c5666","0.75":"b29cf37d"},
-    "fx.vector.shapeRepeater": {"0":"64dc792b","1":"64dc792b","0.25":"64dc792b","0.5":"64dc792b","0.75":"64dc792b"},
-    "fx.vector.radialBurst": {"0":"0adb5623","1":"0adb5623","0.25":"0adb5623","0.5":"0adb5623","0.75":"0adb5623"},
-    "fx.draw.handwriting": {"0":"ed546c52","1":"4fcd473e","0.25":"04a74187","0.5":"ce8c89be","0.75":"86243451"},
-    "fx.draw.brushReveal": {"0":"7dff54eb","1":"79b29fcd","0.25":"13083dd7","0.5":"d39052b4","0.75":"2d53fb4b"},
-    "fx.draw.inkSpread": {"0":"ed546c52","1":"d534008e","0.25":"8aef2be2","0.5":"30dbc085","0.75":"10f92ef8"},
-    "fx.draw.chalkStroke": {"0":"66ce7b09","1":"d918d80e","0.25":"ab7fee91","0.5":"dd3331e2","0.75":"10f88ac3"},
-    "fx.light.neonGlow": {"0":"010ad46b","1":"010ad46b","0.25":"010ad46b","0.5":"010ad46b","0.75":"010ad46b"},
-    "fx.light.scanBeam": {"0":"423ae757","1":"423ae757","0.25":"9ed25a9e","0.5":"360c3a4e","0.75":"47ca2f8f"},
-    "fx.light.lensFlare": {"0":"7bb5f7e8","1":"7bb5f7e8","0.25":"7bb5f7e8","0.5":"7bb5f7e8","0.75":"7bb5f7e8"},
-    "fx.light.energyPulse": {"0":"f1a2138a","1":"f1a2138a","0.25":"b55518ec","0.5":"31482401","0.75":"dc0b7604"},
-    "fx.post.gaussianBlur": {"0":"6bb5825c","1":"6bb5825c","0.25":"6bb5825c","0.5":"6bb5825c","0.75":"6bb5825c"},
-    "fx.post.directionalBlur": {"0":"1d24fedc","1":"1d24fedc","0.25":"1d24fedc","0.5":"1d24fedc","0.75":"1d24fedc"},
-    "fx.post.radialBlur": {"0":"d41c0d0b","1":"d41c0d0b","0.25":"d41c0d0b","0.5":"d41c0d0b","0.75":"d41c0d0b"},
-    "fx.post.motionBlur": {"0":"3967a75e","1":"3967a75e","0.25":"3967a75e","0.5":"3967a75e","0.75":"3967a75e"},
-    "fx.transition.wipe": {"0":"9b9f6da2","1":"88fc1ac1","0.25":"d639675e","0.5":"8faf1cbf","0.75":"d896122b"},
-    "fx.transition.radialWipe": {"0":"02b7edc5","1":"a8cc0c47","0.25":"6f53dfc4","0.5":"7be377ed","0.75":"1563c2f3"},
-    "fx.transition.liquidWipe": {"0":"bb9bfa4f","1":"a3aa6d44","0.25":"d9d3cb7b","0.5":"bbd538ac","0.75":"f7384a5b"},
-    "fx.transition.pixelDissolve": {"0":"23d24794","1":"c6e96e48","0.25":"04ed1865","0.5":"5a54f219","0.75":"d586539e"},
-    "fx.composite.maskReveal": {"0":"a8cc0c47","1":"4cd02609","0.25":"a8cc0c47","0.5":"e0c9660d","0.75":"e8f9bb6b"},
-    "fx.composite.trackMatte": {"0":"6c85a1ae","1":"6c85a1ae","0.25":"6c85a1ae","0.5":"6c85a1ae","0.75":"6c85a1ae"},
-    "fx.composite.blend": {"0":"61c578ee","1":"61c578ee","0.25":"61c578ee","0.5":"61c578ee","0.75":"61c578ee"},
-    "fx.composite.displacementMap": {"0":"26a20a85","1":"26a20a85","0.25":"26a20a85","0.5":"26a20a85","0.75":"26a20a85"}
+    "fx.motion.fade": {
+      "0": "02b7edc5",
+      "1": "1aac204f",
+      "0.25": "bf94725c",
+      "0.5": "8462699b",
+      "0.75": "05ee8853"
+    },
+    "fx.motion.slide": {
+      "0": "3cb880fe",
+      "1": "1aac204f",
+      "0.25": "a0b4a726",
+      "0.5": "c291c26f",
+      "0.75": "361ac6a8"
+    },
+    "fx.motion.scalePop": {
+      "0": "7226baa5",
+      "1": "2fe78464",
+      "0.25": "fde1f8d0",
+      "0.5": "352b2b16",
+      "0.75": "0fa33cc0"
+    },
+    "fx.motion.rotateIn": {
+      "0": "e4ccc4f4",
+      "1": "6c9eb39d",
+      "0.25": "5300d62e",
+      "0.5": "1499ec9e",
+      "0.75": "216d01be"
+    },
+    "fx.motion.bounce": {
+      "0": "1aac204f",
+      "1": "aecc2457",
+      "0.25": "ba048fe6",
+      "0.5": "dde4efc6",
+      "0.75": "aa18a526"
+    },
+    "fx.motion.elastic": {
+      "0": "1aac204f",
+      "1": "fc7017d0",
+      "0.25": "555f79b4",
+      "0.5": "c198faab",
+      "0.75": "a297b401"
+    },
+    "fx.motion.float": {
+      "0": "1aac204f",
+      "1": "1aac204f",
+      "0.25": "71ce3cd1",
+      "0.5": "1aac204f",
+      "0.75": "cde1f48f"
+    },
+    "fx.motion.shake": {
+      "0": "9506fca2",
+      "1": "8bb0d346",
+      "0.25": "29de62cf",
+      "0.5": "7ced58a1",
+      "0.75": "58245ec8"
+    },
+    "fx.text.typewriter": {
+      "0": "62ac7ba7",
+      "1": "3f8b903d",
+      "0.25": "3f8b903d",
+      "0.5": "3f8b903d",
+      "0.75": "3f8b903d"
+    },
+    "fx.text.characterCascade": {
+      "0": "02b7edc5",
+      "1": "3f8b903d",
+      "0.25": "661df0d5",
+      "0.5": "3f8b903d",
+      "0.75": "3f8b903d"
+    },
+    "fx.text.kineticTypography": {
+      "0": "224cd6f4",
+      "1": "74af4180",
+      "0.25": "2856057d",
+      "0.5": "cc0c6e08",
+      "0.75": "6f3b97c7"
+    },
+    "fx.text.textPathReveal": {
+      "0": "02b7edc5",
+      "1": "678d18af",
+      "0.25": "c11afab6",
+      "0.5": "bd470b39",
+      "0.75": "63cab1f7"
+    },
+    "fx.text.textMorph": {
+      "0": "3f8b903d",
+      "1": "3f8b903d",
+      "0.25": "c8554bd8",
+      "0.5": "ca2bdbf7",
+      "0.75": "93afc0c4"
+    },
+    "fx.text.scrambleDecode": {
+      "0": "b3ea6905",
+      "1": "3c43f399",
+      "0.25": "6c11c58a",
+      "0.5": "40dc2f80",
+      "0.75": "03e718a0"
+    },
+    "fx.text.wordExplode": {
+      "0": "3f8b903d",
+      "1": "b29824a4",
+      "0.25": "032af2ec",
+      "0.5": "5896f9a4",
+      "0.75": "7e5e03f5"
+    },
+    "fx.vector.pathTrim": {
+      "0": "2f166405",
+      "1": "2f166405",
+      "0.25": "2f166405",
+      "0.5": "2f166405",
+      "0.75": "2f166405"
+    },
+    "fx.vector.pathMorph": {
+      "0": "fd5ad043",
+      "1": "1c464f67",
+      "0.25": "1f91f805",
+      "0.5": "54b837a3",
+      "0.75": "06217c9c"
+    },
+    "fx.vector.shapeRepeater": {
+      "0": "1a61358e",
+      "1": "1a61358e",
+      "0.25": "1a61358e",
+      "0.5": "1a61358e",
+      "0.75": "1a61358e"
+    },
+    "fx.vector.radialBurst": {
+      "0": "e4fdde5d",
+      "1": "e4fdde5d",
+      "0.25": "e4fdde5d",
+      "0.5": "e4fdde5d",
+      "0.75": "e4fdde5d"
+    },
+    "fx.draw.handwriting": {
+      "0": "0076fa4d",
+      "1": "b2de4d91",
+      "0.25": "e5bdad88",
+      "0.5": "ecd7b822",
+      "0.75": "538b1933"
+    },
+    "fx.draw.brushReveal": {
+      "0": "df6c1412",
+      "1": "8f4ebc8e",
+      "0.25": "59c0cb47",
+      "0.5": "0625337e",
+      "0.75": "dcdd5d9f"
+    },
+    "fx.draw.inkSpread": {
+      "0": "00c2f945",
+      "1": "e6db9743",
+      "0.25": "953bcf2a",
+      "0.5": "12ebf445",
+      "0.75": "bcdfc1a2"
+    },
+    "fx.draw.chalkStroke": {
+      "0": "cdd7c1ed",
+      "1": "321e063d",
+      "0.25": "1d9bf54d",
+      "0.5": "89a4519b",
+      "0.75": "43150fe9"
+    },
+    "fx.light.neonGlow": {
+      "0": "e4b6332b",
+      "1": "71e733ec",
+      "0.25": "e4b6332b",
+      "0.5": "e4b6332b",
+      "0.75": "e4b6332b"
+    },
+    "fx.light.scanBeam": {
+      "0": "fa3f406b",
+      "1": "77132b6f",
+      "0.25": "35448f13",
+      "0.5": "83ac7f7e",
+      "0.75": "54efb2c8"
+    },
+    "fx.light.lensFlare": {
+      "0": "62a0c10a",
+      "1": "62a0c10a",
+      "0.25": "62a0c10a",
+      "0.5": "62a0c10a",
+      "0.75": "62a0c10a"
+    },
+    "fx.light.energyPulse": {
+      "0": "e2b30092",
+      "1": "24f5b77c",
+      "0.25": "fb216917",
+      "0.5": "46e79301",
+      "0.75": "32c471db"
+    },
+    "fx.post.gaussianBlur": {
+      "0": "76f0b97a",
+      "1": "76f0b97a",
+      "0.25": "76f0b97a",
+      "0.5": "76f0b97a",
+      "0.75": "76f0b97a"
+    },
+    "fx.post.directionalBlur": {
+      "0": "4e05c60a",
+      "1": "4e05c60a",
+      "0.25": "4e05c60a",
+      "0.5": "4e05c60a",
+      "0.75": "4e05c60a"
+    },
+    "fx.post.radialBlur": {
+      "0": "b200e1f9",
+      "1": "b200e1f9",
+      "0.25": "b200e1f9",
+      "0.5": "b200e1f9",
+      "0.75": "b200e1f9"
+    },
+    "fx.post.motionBlur": {
+      "0": "2f65eb68",
+      "1": "2f65eb68",
+      "0.25": "2f65eb68",
+      "0.5": "2f65eb68",
+      "0.75": "2f65eb68"
+    },
+    "fx.transition.wipe": {
+      "0": "4868c7b9",
+      "1": "2b2e95d8",
+      "0.25": "970e339f",
+      "0.5": "722d05d4",
+      "0.75": "54bfcb70"
+    },
+    "fx.transition.radialWipe": {
+      "0": "02b7edc5",
+      "1": "cd617d89",
+      "0.25": "d07aa5b8",
+      "0.5": "de35d2cf",
+      "0.75": "5e940cb8"
+    },
+    "fx.transition.liquidWipe": {
+      "0": "f9a97268",
+      "1": "49ec4d09",
+      "0.25": "1e9eb39d",
+      "0.5": "b013c738",
+      "0.75": "6b96049e"
+    },
+    "fx.transition.pixelDissolve": {
+      "0": "1028facc",
+      "1": "93e3284e",
+      "0.25": "13cd85fa",
+      "0.5": "2cca0dac",
+      "0.75": "68062c7f"
+    },
+    "fx.composite.maskReveal": {
+      "0": "cd617d89",
+      "1": "d3f2d888",
+      "0.25": "27fbb73a",
+      "0.5": "e1958966",
+      "0.75": "7d2483bd"
+    },
+    "fx.composite.trackMatte": {
+      "0": "66ad94b7",
+      "1": "66ad94b7",
+      "0.25": "66ad94b7",
+      "0.5": "66ad94b7",
+      "0.75": "66ad94b7"
+    },
+    "fx.composite.blend": {
+      "0": "fd8cdc63",
+      "1": "fd8cdc63",
+      "0.25": "fd8cdc63",
+      "0.5": "fd8cdc63",
+      "0.75": "fd8cdc63"
+    },
+    "fx.composite.displacementMap": {
+      "0": "a927ac2a",
+      "1": "a927ac2a",
+      "0.25": "a927ac2a",
+      "0.5": "a927ac2a",
+      "0.75": "a927ac2a"
+    }
   }
 }

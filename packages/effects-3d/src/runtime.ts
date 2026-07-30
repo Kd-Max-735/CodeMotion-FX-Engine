@@ -1,9 +1,15 @@
-import type { JsonObject, RenderQuality } from "@codemotion/core";
+import {
+  TIME_CONTRACT_VERSION,
+  type EffectTimeSample,
+  type JsonObject
+} from "@codemotion/core";
+import { assertLayerRasterizationInput } from "@codemotion/renderer-api";
 import { createTextExtrusionGeometry } from "./geometry.js";
 import { qualityLayerCount } from "./shader.js";
 import type {
   PixelSurface,
   TextExtrude3DParams,
+  TextExtrude3DRasterInput,
   TextExtrude3DRenderOptions,
   TextLight,
   TextMaterial
@@ -16,8 +22,7 @@ const DEFAULTS: TextExtrude3DParams = Object.freeze({
   light: "studio",
   rotationX: 18,
   rotationY: -24,
-  perspective: 0.55,
-  progress: 0.5
+  perspective: 0.55
 });
 
 function finite(value: unknown, fallback: number, min: number, max: number): number {
@@ -40,8 +45,7 @@ export function normalizeTextExtrude3DParams(
     light: enumValue<TextLight>(supplied.light, DEFAULTS.light, ["studio", "rim", "top"]),
     rotationX: finite(supplied.rotationX, DEFAULTS.rotationX, -60, 60),
     rotationY: finite(supplied.rotationY, DEFAULTS.rotationY, -90, 90),
-    perspective: finite(supplied.perspective, DEFAULTS.perspective, 0, 1),
-    progress: finite(supplied.progress, DEFAULTS.progress, 0, 1)
+    perspective: finite(supplied.perspective, DEFAULTS.perspective, 0, 1)
   });
 }
 
@@ -49,11 +53,83 @@ export function defaultTextExtrude3DParams(): JsonObject {
   return { ...DEFAULTS };
 }
 
-function assertSurface(surface: PixelSurface): void {
+export function assertPixelSurface(surface: PixelSurface): void {
   if (!Number.isInteger(surface.width) || surface.width < 1
     || !Number.isInteger(surface.height) || surface.height < 1
     || surface.data.length !== surface.width * surface.height * 4) {
     throw new RangeError("Text extrusion surface must have positive dimensions and exact RGBA data.");
+  }
+}
+
+export function assertTextExtrude3DTime(time: EffectTimeSample): void {
+  if (time.contractVersion !== TIME_CONTRACT_VERSION) {
+    throw new TypeError(`T08 requires EffectTimeSample ${TIME_CONTRACT_VERSION}.`);
+  }
+  if (time.effectId !== "fx.text.textExtrude3D") {
+    throw new TypeError("T08 EffectTimeSample.effectId must equal fx.text.textExtrude3D.");
+  }
+  if (time.effectInstanceId.length === 0) {
+    throw new TypeError("T08 requires an explicit effectInstanceId distinct from effectId.");
+  }
+  const values = [
+    time.projectTime, time.layerTime, time.effectTime, time.progress,
+    time.deltaTime, time.fps, time.frame
+  ];
+  if (!values.every(Number.isFinite) || time.progress < 0 || time.progress > 1) {
+    throw new RangeError("T08 EffectTimeSample values must be finite with progress in [0, 1].");
+  }
+}
+
+export function assertTextExtrude3DRasterInput(input: TextExtrude3DRasterInput): void {
+  if (typeof input !== "object" || input === null
+    || typeof input.rasterInput !== "object" || input.rasterInput === null
+    || typeof input.surface !== "object" || input.surface === null) {
+    throw new TypeError("T08 requires rasterInput and surface from a real TextRasterSource.");
+  }
+  assertLayerRasterizationInput(input.rasterInput);
+  assertPixelSurface(input.surface);
+  if (input.rasterInput.layerType !== "text" || input.rasterInput.source.kind !== "text") {
+    throw new TypeError("T08 requires a real TextRasterSource; generic pixel surfaces are forbidden.");
+  }
+  const source = input.rasterInput.source;
+  if (source.text.length === 0 || source.glyphs.length === 0) {
+    throw new TypeError("T08 requires non-empty text and rasterized glyph coverage.");
+  }
+  if (source.glyphs.some((glyph) => !glyph.coverage.data.some((value) => value > 0))) {
+    throw new TypeError("T08 requires real non-empty coverage for every rasterized glyph.");
+  }
+  const target = input.rasterInput.target;
+  if (input.surface.width !== target.width || input.surface.height !== target.height
+    || input.surface.colorSpace !== target.colorSpace) {
+    throw new TypeError("T08 raster surface must match the declared text raster target.");
+  }
+  const [a, b, c, d, e, f] = input.rasterInput.transform.matrix;
+  const inGlyphBounds = new Uint8Array(input.surface.width * input.surface.height);
+  for (const glyph of source.glyphs) {
+    const corners = [
+      [glyph.bounds.x + glyph.offsetX, glyph.bounds.y + glyph.offsetY],
+      [glyph.bounds.x + glyph.offsetX + glyph.bounds.width, glyph.bounds.y + glyph.offsetY],
+      [glyph.bounds.x + glyph.offsetX, glyph.bounds.y + glyph.offsetY + glyph.bounds.height],
+      [glyph.bounds.x + glyph.offsetX + glyph.bounds.width, glyph.bounds.y + glyph.offsetY + glyph.bounds.height]
+    ] as const;
+    const mapped = corners.map(([x, y]) => [a * x + b * y + c, d * x + e * y + f] as const);
+    const minX = Math.max(0, Math.floor(Math.min(...mapped.map((point) => point[0]))));
+    const maxX = Math.min(input.surface.width - 1, Math.ceil(Math.max(...mapped.map((point) => point[0]))));
+    const minY = Math.max(0, Math.floor(Math.min(...mapped.map((point) => point[1]))));
+    const maxY = Math.min(input.surface.height - 1, Math.ceil(Math.max(...mapped.map((point) => point[1]))));
+    let overlap = false;
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        inGlyphBounds[y * input.surface.width + x] = 1;
+        if (input.surface.data[(y * input.surface.width + x) * 4 + 3]! > 0) overlap = true;
+      }
+    }
+    if (!overlap) throw new TypeError(`T08 raster surface is missing glyph coverage for glyph ${glyph.glyphId}.`);
+  }
+  for (let pixel = 0; pixel < inGlyphBounds.length; pixel += 1) {
+    if (input.surface.data[pixel * 4 + 3]! > 0 && inGlyphBounds[pixel] === 0) {
+      throw new TypeError("T08 raster surface contains pixels outside declared glyph bounds.");
+    }
   }
 }
 
@@ -126,7 +202,7 @@ function write(output: PixelSurface, x: number, y: number, color: Rgba): void {
 
 function applyMask(output: PixelSurface, mask: PixelSurface | undefined): PixelSurface {
   if (!mask) return output;
-  assertSurface(mask);
+  assertPixelSurface(mask);
   if (mask.width !== output.width || mask.height !== output.height) {
     throw new RangeError("Mask and text extrusion output must have equal dimensions.");
   }
@@ -151,21 +227,21 @@ function applyMask(output: PixelSurface, mask: PixelSurface | undefined): PixelS
 }
 
 export function renderTextExtrude3DPixels(
-  source: PixelSurface,
-  suppliedParams: Readonly<Record<string, unknown>> = {},
-  suppliedOptions: Partial<TextExtrude3DRenderOptions> = {}
+  input: TextExtrude3DRasterInput,
+  suppliedParams: Readonly<Record<string, unknown>>,
+  suppliedOptions: TextExtrude3DRenderOptions
 ): PixelSurface {
-  assertSurface(source);
-  const params = normalizeTextExtrude3DParams({
-    ...suppliedParams,
-    progress: suppliedOptions.progress ?? suppliedParams.progress
-  });
-  const quality: RenderQuality = suppliedOptions.quality ?? "preview";
-  const geometry = createTextExtrusionGeometry(source, params, quality);
+  if (!suppliedOptions) throw new TypeError("T08 requires non-optional time, seed and quality options.");
+  assertTextExtrude3DRasterInput(input);
+  assertTextExtrude3DTime(suppliedOptions.time);
+  const source = input.surface;
+  const params = normalizeTextExtrude3DParams(suppliedParams);
+  const quality = suppliedOptions.quality;
+  const geometry = createTextExtrusionGeometry(input, params, quality);
   const output = emptyLike(source);
   if (geometry.occupiedCells === 0) return applyMask(output, suppliedOptions.mask);
   const layers = qualityLayerCount(quality);
-  const progress = params.progress;
+  const progress = suppliedOptions.time.progress;
   const rx = params.rotationX * Math.PI / 180;
   const ry = params.rotationY * Math.PI / 180;
   const depthPixels = params.depth * progress * Math.min(source.width, source.height) * (0.45 + params.perspective * 0.55);
@@ -192,48 +268,6 @@ export function renderTextExtrude3DPixels(
     }
   }
   return applyMask(output, suppliedOptions.mask);
-}
-
-const GLYPHS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
-  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"]
-});
-
-export function makeTextExtrudePreviewInput(width = 64, height = 36): PixelSurface {
-  const output: PixelSurface = {
-    width,
-    height,
-    data: new Uint8ClampedArray(width * height * 4),
-    colorSpace: "srgb",
-    alphaMode: "straight"
-  };
-  const text = "3D";
-  const scale = Math.max(1, Math.floor(Math.min(width / 15, height / 10)));
-  const textWidth = text.length * 6 * scale - scale;
-  const startX = Math.floor((width - textWidth) / 2);
-  const startY = Math.floor((height - 7 * scale) / 2);
-  for (let index = 0; index < text.length; index += 1) {
-    const glyph = GLYPHS[text[index]!]!;
-    for (let gy = 0; gy < glyph.length; gy += 1) {
-      for (let gx = 0; gx < glyph[gy]!.length; gx += 1) {
-        if (glyph[gy]![gx] !== "1") continue;
-        for (let py = 0; py < scale; py += 1) {
-          for (let px = 0; px < scale; px += 1) {
-            const x = startX + (index * 6 + gx) * scale + px;
-            const y = startY + gy * scale + py;
-            if (x < 0 || y < 0 || x >= width || y >= height) continue;
-            const offset = (y * width + x) * 4;
-            const u = x / Math.max(1, width - 1);
-            output.data[offset] = Math.round(70 + u * 140);
-            output.data[offset + 1] = Math.round(150 + u * 80);
-            output.data[offset + 2] = 255;
-            output.data[offset + 3] = 255;
-          }
-        }
-      }
-    }
-  }
-  return output;
 }
 
 export function hashPixelSurface(surface: PixelSurface): string {

@@ -175,12 +175,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+function jsonReplacer(_key: string, value: unknown): unknown {
+  return ArrayBuffer.isView(value)
+    ? Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
+    : value;
+}
+
 export const exportApi = {
   list: () => request<{ tasks: ExportTaskView[] }>("/api/editor-exports"),
   create: (project: MotionProject, settings: ExportSettings) => request<{ task: ExportTaskView }>("/api/editor-exports", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ project, settings })
+    body: JSON.stringify({ project, settings }, jsonReplacer)
   }),
   retry: (id: string) => request<{ task: ExportTaskView }>(`/api/editor-exports/${encodeURIComponent(id)}/retry`, { method: "POST" }),
   downloadUrl: (id: string) => `/api/editor-exports/${encodeURIComponent(id)}/download`

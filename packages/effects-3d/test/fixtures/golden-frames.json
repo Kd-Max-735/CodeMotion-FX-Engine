@@ -1,15 +1,20 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
+  "timeContractVersion": "1.1.0",
   "effectId": "fx.text.textExtrude3D",
+  "effectInstanceId": "instance.t08.golden",
+  "text": "立体",
   "width": 64,
   "height": 36,
-  "seed": 20260728,
+  "seed": 20260729,
   "quality": "final",
+  "duration": 7.3,
+  "fps": 48,
   "frames": {
-    "0": "f91d3367",
-    "0.25": "1989a8d1",
-    "0.5": "74197f86",
-    "0.75": "b0c30ea1",
-    "1": "1941d4dc"
+    "0": "ad041865",
+    "0.25": "d0f4b984",
+    "0.5": "50e2ae3a",
+    "0.75": "87569f1b",
+    "1": "8b82eded"
   }
 }

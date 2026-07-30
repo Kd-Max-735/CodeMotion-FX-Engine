@@ -96,7 +96,7 @@ for (const testCase of cases) {
       resources: testCase.resources,
       timeoutMs: 180_000
     });
-    const planned = planAnimation(result, { resources: testCase.resources, duration: 6 });
+    const planned = await planAnimation(result, { resources: testCase.resources, duration: 6 });
     if (planned.dsl.compositions[0]?.layers.length === 0 || planned.preview.frameHashes.length === 0) {
       throw new Error("Real response did not enter the DSL and preview pipeline.");
     }

@@ -6,32 +6,67 @@ without rewriting its implementation.
 
 Each effect is a real deterministic implementation with:
 
-- Effect Definition `1.0.0`, JSON parameter Schema, generated UI Schema, defaults and three valid built-in presets;
+- package and Effect Definition `1.1.0`, JSON parameter Schema, generated UI Schema, defaults and three valid built-in presets;
 - a WebGL2 shader path plus deterministic CPU/Canvas2D fallback;
 - `draft`, `preview`, and `final` quality settings, a performance class and measured budget;
 - straight/premultiplied Alpha handling, post-effect masks, bounded extreme-parameter normalization and `dispose`;
-- a live preview in `preview.html`, unit coverage, 0/25/50/75/100% Golden Frames and benchmark coverage.
+- independently addressable effect/preset SVG covers plus the live `preview.html`,
+  unit coverage, 0/25/50/75/100% Golden Frames and benchmark coverage.
 
 ## Usage
 
 ```ts
-import { GROUP_2_P0_BY_ID, makePreviewInput } from "@codemotion/effects-2d";
+import {
+  GROUP_2_P0_BY_ID,
+  makeBrushCoverage,
+  makeEffectTimeSample,
+  makeRealInputFixture
+} from "@codemotion/effects-2d";
 
 const effect = GROUP_2_P0_BY_ID.get("fx.transition.liquidWipe")!;
-const frame = effect.renderPixels(makePreviewInput(), effect.presets[2].params, {
-  progress: 0.5,
+const effectInstanceId = "composition.hero.transition.liquid-wipe";
+const time = makeEffectTimeSample(effect.effectId, effectInstanceId, 0.5);
+const source = makeRealInputFixture(effect.effectId, "media", 160, 90, false, "srgb", time);
+const secondary = makeRealInputFixture(effect.effectId, "media", 160, 90, true, "srgb", time);
+const frame = effect.renderPixels(source.surface, effect.presets[2].params, {
+  time,
   seed: 42,
   quality: "preview",
-  secondary: makePreviewInput(160, 90, true)
+  rasterInput: source.input,
+  secondaryRasterInput: secondary.input,
+  secondary: secondary.surface,
+  brushCoverage: makeBrushCoverage(),
+  brushAssetId: "builtin://brush/round"
 });
 effect.dispose();
 ```
+
+## 1.0.0 to 1.1.0 migration
+
+Effect parameters do not change. Callers replace normalized-only runtime options with
+G1's `EffectTimeSample`, provide the real `LayerRasterizationInput` that produced the
+source pixels, and provide an independently materialized secondary raster input for
+transition/composite effects. WebGL callers pass G1's `TemporalEffectRenderContext`;
+A/B effects additionally pass `DualInputTextures`. Hidden elapsed-time keys and
+project-global time inference are rejected. Random effects derive their streams from
+`createEffectRandom`, keyed by effect type ID, the caller-supplied
+`EffectInstance.id` (`effectInstanceId`), and effect-local time rather than absolute
+frame. The two IDs are mandatory and are never inferred or replaced with a shared
+fixture ID.
+
+Text inputs must contain immutable font identity plus English/Chinese glyph coverage;
+Shape/SVG and draw inputs must contain parsed path commands (D02 also requires brush
+coverage); light/post inputs require decoded RGBA image/video content. Malformed or
+missing provenance fails explicitly.
 
 Run `npm run benchmark -w @codemotion/effects-2d` after the root build. The durable
 browser gates are `npm run qa:webgl -w @codemotion/effects-2d` for real Microsoft Edge
 WebGL2 pixel readback/parameter/Alpha/mask/performance/resource QA and
 `npm run qa:preview -w @codemotion/effects-2d` for 40 non-empty, pairwise-distinct Edge
 previews. Open `preview.html` through an HTTP server after the build for interactive use.
+Run `npm run evidence:s5r -w @codemotion/effects-2d` after those gates to regenerate
+the machine-readable 39-by-20 evidence matrix in
+`test/fixtures/s5r-self-check.json`.
 
 ## Aggregate registry
 
@@ -39,6 +74,12 @@ previews. Open `preview.html` through an HTTP server after the build for interac
 order. T08 occupies slot 16 between T07 and V01 and remains owned by Group 3.
 `GROUP_2_P0_EFFECTS` and `GROUP_2_P0_BY_ID` remain the unchanged 39-item Group 2
 implementation slice.
+
+Aggregate tests, previews and QA use `makeTextExtrudeCatalogFixture` for T08. Callers
+must explicitly provide `effectId: "fx.text.textExtrude3D"`, their own
+`effectInstanceId`, effect-local seconds, duration, FPS and project start. The helper
+uses the official 1.1.0 timeline resolvers and G3's reviewed real `TextRasterSource`;
+the removed generic pixel/progress compatibility input is not re-exported.
 
 ## Effect inventory
 

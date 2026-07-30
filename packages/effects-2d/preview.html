@@ -25,12 +25,15 @@
   </header>
   <main id="grid"></main>
   <script type="module">
-    import { P0_EFFECTS, makePreviewInput, makeTextExtrudePreviewInput } from "./dist/index.js";
+    import {
+      P0_EFFECTS,
+      makeBrushCoverage,
+      makeEffectTimeSample,
+      makeRealInputFixture,
+      makeTextExtrudeCatalogFixture
+    } from "./dist/index.js";
     const width = 160;
     const height = 90;
-    const source = makePreviewInput(width, height);
-    const textExtrudeSource = makeTextExtrudePreviewInput(width, height);
-    const secondary = makePreviewInput(width, height, true);
     const grid = document.querySelector("#grid");
     const slider = document.querySelector("#progress");
     const output = document.querySelector("output");
@@ -39,19 +42,67 @@
       article.id = effect.sourceId;
       article.innerHTML = `<canvas width="${width}" height="${height}" aria-label="${effect.preview.alt}"></canvas><h2>${effect.sourceId} · ${effect.displayName}</h2><p>${effect.effectId} · ${effect.performanceClass}</p>`;
       grid.append(article);
-      return { effect, canvas: article.querySelector("canvas") };
+      return {
+        effect,
+        canvas: article.querySelector("canvas"),
+        previewParams: effect.presets?.[1]?.params ?? effect.defaultPreset
+      };
     });
     function render() {
       const progress = Number(slider.value);
       output.value = `${Math.round(progress * 100)}%`;
-      for (const { effect, canvas } of cards) {
-        const effectSource = effect.sourceId === "T08" ? textExtrudeSource : source;
-        const surface = effect.renderPixels(effectSource, { ...effect.defaultPreset, progress }, {
-          progress,
-          seed: 20260728,
-          quality: "preview",
-          secondary
-        });
+      for (const { effect, canvas, previewParams } of cards) {
+        const cardProgress = effect.sourceId === "T08"
+          ? progress
+          : Math.max(0, Math.min(1, effect.preview.frameProgress + progress - 0.5));
+        let surface;
+        const previewDurationSeconds = effect.category === "text" ? 0.2 : 1;
+        const textExtrude = effect.sourceId === "T08"
+          ? makeTextExtrudeCatalogFixture({
+              effectId: effect.effectId,
+              effectInstanceId: "preview.edge.T08",
+              text: "FX",
+              width,
+              height,
+              effectTime: cardProgress * previewDurationSeconds,
+              duration: previewDurationSeconds,
+              fps: 60,
+              projectStart: 29
+            })
+          : undefined;
+        const time = textExtrude?.time ?? makeEffectTimeSample(
+          effect.effectId,
+          `preview.edge.${effect.sourceId}`,
+          cardProgress * previewDurationSeconds,
+          previewDurationSeconds,
+          29,
+          60,
+          1 / 60
+        );
+        const kind = effect.category === "text" ? "text"
+          : effect.category === "vector" || effect.category === "draw" ? "vector" : "media";
+        const source = textExtrude
+          ? undefined
+          : makeRealInputFixture(effect.effectId, kind, width, height, false, "srgb", time);
+        if (effect.sourceId === "T08") {
+          surface = effect.renderPixels(textExtrude.input, previewParams, {
+            time,
+            seed: 20260728,
+            quality: "preview"
+          });
+        } else {
+          const secondary = makeRealInputFixture(effect.effectId, "media", width, height, true, "srgb", time);
+          surface = effect.renderPixels(source.surface, previewParams, {
+            time,
+            seed: 20260728,
+            quality: "preview",
+            rasterInput: source.input,
+            secondaryRasterInput: secondary.input,
+            secondary: secondary.surface,
+            brushCoverage: makeBrushCoverage(),
+            brushAssetId: "builtin://brush/round"
+          });
+        }
         const context = canvas.getContext("2d");
         const image = context.createImageData(width, height);
         image.data.set(surface.data);
@@ -60,7 +111,6 @@
     }
     slider.addEventListener("input", render);
     render();
-    if (location.hash) document.querySelector(location.hash.split("-")[0])?.scrollIntoView();
   </script>
 </body>
 </html>

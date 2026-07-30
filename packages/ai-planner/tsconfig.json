@@ -10,6 +10,7 @@
     { "path": "../core" },
     { "path": "../schema" },
     { "path": "../effects-2d" },
+    { "path": "../renderer-api" },
     { "path": "../exporter" }
   ]
 }

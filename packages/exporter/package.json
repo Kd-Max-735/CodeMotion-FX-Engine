@@ -7,12 +7,16 @@
   "types": "./dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "scripts": {
-    "qa:alpha": "node test/run-edge-alpha-qa.mjs"
+    "qa:alpha": "node test/run-edge-alpha-qa.mjs",
+    "qa:t08-webgl": "node test/run-t08-webgl-qa.mjs",
+    "evidence:s5r": "node test/generate-s5r-export-evidence.mjs"
   },
   "files": ["dist/**/*.js", "dist/**/*.js.map", "dist/**/*.d.ts", "dist/**/*.d.ts.map"],
   "dependencies": {
     "@codemotion/core": "0.3.0",
-    "@codemotion/effects-2d": "1.0.0",
+    "@codemotion/effects-2d": "1.1.0",
+    "@codemotion/effects-3d": "1.0.0",
+    "@codemotion/renderer-api": "0.2.0",
     "@codemotion/renderer-webgl": "0.1.0",
     "@codemotion/resource-manager": "0.1.0",
     "@codemotion/timeline": "0.1.0"

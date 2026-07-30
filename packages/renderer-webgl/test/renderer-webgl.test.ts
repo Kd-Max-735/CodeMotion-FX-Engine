@@ -1,7 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES, RENDERER_API_VERSION, type LayerDefinition } from "@codemotion/core";
-import type { FrameContext, RendererAdapter, TextureDescriptor } from "@codemotion/renderer-api";
+import {
+  BACKEND_CONFORMANCE_CONTRACT,
+  BLEND_CONFORMANCE_FIXTURES,
+  COLOR_CONFORMANCE_FIXTURES,
+  type FrameContext,
+  type RendererAdapter,
+  type TextureDescriptor
+} from "@codemotion/renderer-api";
 import {
   PIPELINE_VALIDATION_EFFECT,
   WEBGL_PIPELINE_VALIDATION_EFFECT,
@@ -308,6 +315,93 @@ describe("failure isolation and backend contract", () => {
 });
 
 describe("multi-backend pixels and Golden Frame", () => {
+  it("matches the public sRGB, linear-sRGB, Display-P3, and Alpha fixtures", () => {
+    for (const fixture of COLOR_CONFORMANCE_FIXTURES) {
+      const source: PixelSurface = {
+        width: 1,
+        height: 1,
+        data: new Uint8ClampedArray(fixture.sourceRgba8),
+        colorSpace: fixture.sourceColorSpace,
+        alphaMode: fixture.sourceAlphaMode
+      };
+      const actual = convertPixelSurface(source, fixture.targetColorSpace, fixture.targetAlphaMode);
+      fixture.expectedRgba8.forEach((expected, channel) => {
+        expect(Math.abs(actual.data[channel]! - expected)).toBeLessThanOrEqual(
+          BACKEND_CONFORMANCE_CONTRACT.rgba8ChannelTolerance
+        );
+      });
+    }
+  });
+
+  it("matches public blend fixtures through direct and normalized fallback paths", () => {
+    for (const fixture of BLEND_CONFORMANCE_FIXTURES) {
+      const surface = (rgba: readonly number[], colorSpace: PixelSurface["colorSpace"]): PixelSurface => ({
+        width: 1,
+        height: 1,
+        data: new Uint8ClampedArray(rgba),
+        colorSpace,
+        alphaMode: "straight"
+      });
+      const direct = compositePixelSurfaces(
+        surface(fixture.backdropRgba8, "srgb"),
+        surface(fixture.sourceRgba8, "srgb"),
+        fixture.blendMode,
+        fixture.opacity,
+        "srgb",
+        "premultiplied"
+      );
+      const normalized = compositePixelSurfaces(
+        convertPixelSurface(surface(fixture.backdropRgba8, "srgb"), "linear-srgb", "premultiplied"),
+        convertPixelSurface(surface(fixture.sourceRgba8, "srgb"), "linear-srgb", "premultiplied"),
+        fixture.blendMode,
+        fixture.opacity,
+        "srgb",
+        "premultiplied"
+      );
+      fixture.expectedRgba8.forEach((expected, channel) => {
+        expect(Math.abs(direct.data[channel]! - expected)).toBeLessThanOrEqual(
+          BACKEND_CONFORMANCE_CONTRACT.rgba8ChannelTolerance
+        );
+        expect(Math.abs(normalized.data[channel]! - direct.data[channel]!)).toBeLessThanOrEqual(
+          BACKEND_CONFORMANCE_CONTRACT.rgba8ChannelTolerance
+        );
+      });
+    }
+  });
+
+  it("keeps every public blend mode within the backend conformance tolerance", () => {
+    const modes = [
+      "normal", "multiply", "screen", "overlay", "darken", "lighten",
+      "color-dodge", "color-burn", "hard-light", "soft-light", "difference",
+      "exclusion", "hue", "saturation", "color", "luminosity", "add"
+    ] as const;
+    const surface = (rgba: readonly number[], colorSpace: PixelSurface["colorSpace"]): PixelSurface => ({
+      width: 1,
+      height: 1,
+      data: new Uint8ClampedArray(rgba),
+      colorSpace,
+      alphaMode: "straight"
+    });
+    const backdrop = surface([64, 128, 192, 255], "srgb");
+    const source = surface([192, 96, 32, 160], "srgb");
+    for (const mode of modes) {
+      const direct = compositePixelSurfaces(backdrop, source, mode, 0.75, "srgb", "premultiplied");
+      const fallback = compositePixelSurfaces(
+        convertPixelSurface(backdrop, "linear-srgb", "premultiplied"),
+        convertPixelSurface(source, "linear-srgb", "premultiplied"),
+        mode,
+        0.75,
+        "srgb",
+        "premultiplied"
+      );
+      for (let channel = 0; channel < 4; channel += 1) {
+        expect(Math.abs(direct.data[channel]! - fallback.data[channel]!)).toBeLessThanOrEqual(
+          BACKEND_CONFORMANCE_CONTRACT.rgba8ChannelTolerance
+        );
+      }
+    }
+  });
+
   it("normalizes straight/sRGB and premultiplied/linear inputs to the same contract", () => {
     const straight: PixelSurface = {
       width: 1,

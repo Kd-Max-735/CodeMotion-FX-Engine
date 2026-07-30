@@ -1,5 +1,13 @@
-import type { JsonObject, RenderQuality } from "@codemotion/core";
-import type { RegisteredEffectDefinition } from "@codemotion/renderer-api";
+import type {
+  EffectTimeSample,
+  JsonObject,
+  RenderQuality
+} from "@codemotion/core";
+import type {
+  LayerRasterizationInput,
+  RegisteredTemporalEffectDefinition,
+  TextRasterSource
+} from "@codemotion/renderer-api";
 
 export type TextMaterial = "matte" | "metal" | "glass";
 export type TextLight = "studio" | "rim" | "top";
@@ -20,14 +28,21 @@ export interface TextExtrude3DParams {
   readonly rotationX: number;
   readonly rotationY: number;
   readonly perspective: number;
-  readonly progress: number;
 }
 
 export interface TextExtrude3DRenderOptions {
-  readonly progress: number;
+  readonly time: EffectTimeSample;
   readonly seed: number;
   readonly quality: RenderQuality;
   readonly mask?: PixelSurface;
+}
+
+export interface TextExtrude3DRasterInput {
+  readonly rasterInput: LayerRasterizationInput & {
+    readonly layerType: "text";
+    readonly source: TextRasterSource;
+  };
+  readonly surface: PixelSurface;
 }
 
 export interface TextExtrude3DPreset {
@@ -48,11 +63,13 @@ export interface TextExtrusionGeometry {
   readonly occupiedCells: number;
   readonly frontTriangles: number;
   readonly sideTriangles: number;
+  readonly vertices: Float32Array;
+  readonly indices: Uint32Array;
   readonly boundary: Int32Array;
   readonly bounds: readonly [number, number, number, number, number, number];
 }
 
-export interface TextExtrude3DEffectDefinition extends RegisteredEffectDefinition {
+export interface TextExtrude3DEffectDefinition extends RegisteredTemporalEffectDefinition {
   readonly sourceId: "T08";
   readonly implementationOwner: "Group 3";
   readonly presets: readonly [
@@ -72,8 +89,8 @@ export interface TextExtrude3DEffectDefinition extends RegisteredEffectDefinitio
   readonly fallbackBehavior: string;
   readonly benchmarkBudgetMs: number;
   renderPixels(
-    source: PixelSurface,
-    params?: Readonly<Record<string, unknown>>,
-    options?: Partial<TextExtrude3DRenderOptions>
+    input: TextExtrude3DRasterInput,
+    params: Readonly<Record<string, unknown>>,
+    options: TextExtrude3DRenderOptions
   ): PixelSurface;
 }

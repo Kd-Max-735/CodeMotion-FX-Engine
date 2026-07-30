@@ -1,0 +1,334 @@
+{
+  "schemaVersion": "1.0.0",
+  "platform": "win32-x64",
+  "node": "v24.13.0",
+  "dimensions": "64x36",
+  "quality": "preview",
+  "timeContractVersion": "1.1.0",
+  "t08Input": "TextRasterSource",
+  "iterations": 7,
+  "passed": 40,
+  "failed": 0,
+  "results": [
+    {
+      "sourceId": "M01",
+      "effectId": "fx.motion.fade",
+      "performanceClass": "light",
+      "medianMs": 1.668,
+      "budgetMs": 4,
+      "pass": true
+    },
+    {
+      "sourceId": "M02",
+      "effectId": "fx.motion.slide",
+      "performanceClass": "light",
+      "medianMs": 1.385,
+      "budgetMs": 5,
+      "pass": true
+    },
+    {
+      "sourceId": "M03",
+      "effectId": "fx.motion.scalePop",
+      "performanceClass": "light",
+      "medianMs": 1.839,
+      "budgetMs": 5,
+      "pass": true
+    },
+    {
+      "sourceId": "M04",
+      "effectId": "fx.motion.rotateIn",
+      "performanceClass": "medium",
+      "medianMs": 1.532,
+      "budgetMs": 7,
+      "pass": true
+    },
+    {
+      "sourceId": "M05",
+      "effectId": "fx.motion.bounce",
+      "performanceClass": "light",
+      "medianMs": 1.037,
+      "budgetMs": 5,
+      "pass": true
+    },
+    {
+      "sourceId": "M06",
+      "effectId": "fx.motion.elastic",
+      "performanceClass": "light",
+      "medianMs": 1.542,
+      "budgetMs": 5,
+      "pass": true
+    },
+    {
+      "sourceId": "M07",
+      "effectId": "fx.motion.float",
+      "performanceClass": "light",
+      "medianMs": 1.089,
+      "budgetMs": 5,
+      "pass": true
+    },
+    {
+      "sourceId": "M08",
+      "effectId": "fx.motion.shake",
+      "performanceClass": "light",
+      "medianMs": 0.769,
+      "budgetMs": 5,
+      "pass": true
+    },
+    {
+      "sourceId": "T01",
+      "effectId": "fx.text.typewriter",
+      "performanceClass": "light",
+      "medianMs": 0.994,
+      "budgetMs": 5,
+      "pass": true
+    },
+    {
+      "sourceId": "T02",
+      "effectId": "fx.text.characterCascade",
+      "performanceClass": "light",
+      "medianMs": 2.44,
+      "budgetMs": 5,
+      "pass": true
+    },
+    {
+      "sourceId": "T03",
+      "effectId": "fx.text.kineticTypography",
+      "performanceClass": "medium",
+      "medianMs": 1.421,
+      "budgetMs": 7,
+      "pass": true
+    },
+    {
+      "sourceId": "T04",
+      "effectId": "fx.text.textPathReveal",
+      "performanceClass": "medium",
+      "medianMs": 5.318,
+      "budgetMs": 7,
+      "pass": true
+    },
+    {
+      "sourceId": "T05",
+      "effectId": "fx.text.textMorph",
+      "performanceClass": "heavy",
+      "medianMs": 1.594,
+      "budgetMs": 10,
+      "pass": true
+    },
+    {
+      "sourceId": "T06",
+      "effectId": "fx.text.scrambleDecode",
+      "performanceClass": "medium",
+      "medianMs": 4.763,
+      "budgetMs": 7,
+      "pass": true
+    },
+    {
+      "sourceId": "T07",
+      "effectId": "fx.text.wordExplode",
+      "performanceClass": "medium",
+      "medianMs": 4.203,
+      "budgetMs": 7,
+      "pass": true
+    },
+    {
+      "sourceId": "T08",
+      "effectId": "fx.text.textExtrude3D",
+      "performanceClass": "heavy",
+      "medianMs": 2.994,
+      "budgetMs": 35,
+      "pass": true
+    },
+    {
+      "sourceId": "V01",
+      "effectId": "fx.vector.pathTrim",
+      "performanceClass": "light",
+      "medianMs": 3.138,
+      "budgetMs": 5,
+      "pass": true
+    },
+    {
+      "sourceId": "V02",
+      "effectId": "fx.vector.pathMorph",
+      "performanceClass": "medium",
+      "medianMs": 5.374,
+      "budgetMs": 7,
+      "pass": true
+    },
+    {
+      "sourceId": "V03",
+      "effectId": "fx.vector.shapeRepeater",
+      "performanceClass": "medium",
+      "medianMs": 5.721,
+      "budgetMs": 8,
+      "pass": true
+    },
+    {
+      "sourceId": "V04",
+      "effectId": "fx.vector.radialBurst",
+      "performanceClass": "medium",
+      "medianMs": 3.461,
+      "budgetMs": 8,
+      "pass": true
+    },
+    {
+      "sourceId": "D01",
+      "effectId": "fx.draw.handwriting",
+      "performanceClass": "medium",
+      "medianMs": 5.976,
+      "budgetMs": 7,
+      "pass": true
+    },
+    {
+      "sourceId": "D02",
+      "effectId": "fx.draw.brushReveal",
+      "performanceClass": "medium",
+      "medianMs": 7.035,
+      "budgetMs": 8,
+      "pass": true
+    },
+    {
+      "sourceId": "D03",
+      "effectId": "fx.draw.inkSpread",
+      "performanceClass": "heavy",
+      "medianMs": 4.747,
+      "budgetMs": 11,
+      "pass": true
+    },
+    {
+      "sourceId": "D04",
+      "effectId": "fx.draw.chalkStroke",
+      "performanceClass": "medium",
+      "medianMs": 5.538,
+      "budgetMs": 8,
+      "pass": true
+    },
+    {
+      "sourceId": "L01",
+      "effectId": "fx.light.neonGlow",
+      "performanceClass": "heavy",
+      "medianMs": 1.873,
+      "budgetMs": 12,
+      "pass": true
+    },
+    {
+      "sourceId": "L02",
+      "effectId": "fx.light.scanBeam",
+      "performanceClass": "medium",
+      "medianMs": 0.845,
+      "budgetMs": 8,
+      "pass": true
+    },
+    {
+      "sourceId": "L03",
+      "effectId": "fx.light.lensFlare",
+      "performanceClass": "heavy",
+      "medianMs": 1.403,
+      "budgetMs": 13,
+      "pass": true
+    },
+    {
+      "sourceId": "L04",
+      "effectId": "fx.light.energyPulse",
+      "performanceClass": "medium",
+      "medianMs": 0.918,
+      "budgetMs": 9,
+      "pass": true
+    },
+    {
+      "sourceId": "P01",
+      "effectId": "fx.post.gaussianBlur",
+      "performanceClass": "heavy",
+      "medianMs": 2.067,
+      "budgetMs": 14,
+      "pass": true
+    },
+    {
+      "sourceId": "P02",
+      "effectId": "fx.post.directionalBlur",
+      "performanceClass": "heavy",
+      "medianMs": 2.074,
+      "budgetMs": 14,
+      "pass": true
+    },
+    {
+      "sourceId": "P03",
+      "effectId": "fx.post.radialBlur",
+      "performanceClass": "heavy",
+      "medianMs": 2.166,
+      "budgetMs": 15,
+      "pass": true
+    },
+    {
+      "sourceId": "P04",
+      "effectId": "fx.post.motionBlur",
+      "performanceClass": "heavy",
+      "medianMs": 1.978,
+      "budgetMs": 15,
+      "pass": true
+    },
+    {
+      "sourceId": "C01",
+      "effectId": "fx.transition.wipe",
+      "performanceClass": "light",
+      "medianMs": 0.806,
+      "budgetMs": 6,
+      "pass": true
+    },
+    {
+      "sourceId": "C02",
+      "effectId": "fx.transition.radialWipe",
+      "performanceClass": "medium",
+      "medianMs": 0.733,
+      "budgetMs": 8,
+      "pass": true
+    },
+    {
+      "sourceId": "C03",
+      "effectId": "fx.transition.liquidWipe",
+      "performanceClass": "heavy",
+      "medianMs": 2.481,
+      "budgetMs": 12,
+      "pass": true
+    },
+    {
+      "sourceId": "C04",
+      "effectId": "fx.transition.pixelDissolve",
+      "performanceClass": "medium",
+      "medianMs": 2.135,
+      "budgetMs": 9,
+      "pass": true
+    },
+    {
+      "sourceId": "H01",
+      "effectId": "fx.composite.maskReveal",
+      "performanceClass": "medium",
+      "medianMs": 0.784,
+      "budgetMs": 8,
+      "pass": true
+    },
+    {
+      "sourceId": "H02",
+      "effectId": "fx.composite.trackMatte",
+      "performanceClass": "medium",
+      "medianMs": 0.649,
+      "budgetMs": 8,
+      "pass": true
+    },
+    {
+      "sourceId": "H03",
+      "effectId": "fx.composite.blend",
+      "performanceClass": "medium",
+      "medianMs": 0.866,
+      "budgetMs": 8,
+      "pass": true
+    },
+    {
+      "sourceId": "H04",
+      "effectId": "fx.composite.displacementMap",
+      "performanceClass": "medium",
+      "medianMs": 0.962,
+      "budgetMs": 9,
+      "pass": true
+    }
+  ]
+}

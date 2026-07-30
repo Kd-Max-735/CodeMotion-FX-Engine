@@ -12,6 +12,8 @@
   "references": [
     { "path": "../ai-planner" },
     { "path": "../core" },
+    { "path": "../effects-2d" },
+    { "path": "../effects-3d" },
     { "path": "../exporter" },
     { "path": "../renderer-api" },
     { "path": "../renderer-webgl" },

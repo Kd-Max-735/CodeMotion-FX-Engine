@@ -1,5 +1,19 @@
-import type { JsonObject, RenderQuality } from "@codemotion/core";
+import {
+  TIME_CONTRACT_VERSION,
+  type EffectTimeSample,
+  type JsonObject,
+  type RenderQuality
+} from "@codemotion/core";
+import { assertLayerRasterizationInput } from "@codemotion/renderer-api";
+import { createEffectRandom } from "@codemotion/timeline";
 import { GROUP_2_BLUEPRINTS } from "./blueprints.js";
+import {
+  flattenVectorPath,
+  makeEffectTimeSample,
+  makeRealInputFixture,
+  parseSvgPathData,
+  sampleVectorPath
+} from "./inputs.js";
 import type {
   EffectBlueprint,
   EffectRuntimeOptions,
@@ -9,6 +23,10 @@ import type {
 
 const blueprintById = new Map(GROUP_2_BLUEPRINTS.map((entry) => [entry.effectId, entry]));
 const TAU = Math.PI * 2;
+
+function elapsedSeconds(options: EffectRuntimeOptions): number {
+  return options.time.effectTime;
+}
 
 function clamp(value: number, min = 0, max = 1): number {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
@@ -24,17 +42,28 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
-function hash(x: number, y: number, seed: number): number {
-  return fract(Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453123);
-}
-
-function hashString(value: string): number {
-  let state = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    state ^= value.charCodeAt(index);
-    state = Math.imul(state, 0x01000193);
-  }
-  return (state >>> 0) / 0xffffffff;
+function effectRandom(
+  options: EffectRuntimeOptions,
+  stream: string,
+  sampleX = 0,
+  sampleY = 0,
+  samplesPerSecond = 1,
+  seedOffset = 0,
+  temporal = true
+): number {
+  const seed = (options.seed + Math.trunc(seedOffset)) >>> 0;
+  const time = temporal ? options.time : {
+    ...options.time,
+    effectTime: 0,
+    progress: 0,
+    deltaTime: 0
+  };
+  return createEffectRandom(
+    seed,
+    time,
+    `${stream}\u0000${sampleX}\u0000${sampleY}`,
+    samplesPerSecond
+  ).next();
 }
 
 function applyEasing(progress: number, easing: string): number {
@@ -67,18 +96,73 @@ function emptyLike(surface: PixelSurface): PixelSurface {
 
 type Rgba = [number, number, number, number];
 
+type Rgb = [number, number, number];
+
+const DISPLAY_P3_TO_LINEAR_SRGB = Object.freeze([
+  1.224745, -0.224904, 0,
+  -0.042058, 1.042081, 0,
+  -0.019642, -0.078655, 1.098537
+] as const);
+
+const LINEAR_SRGB_TO_DISPLAY_P3 = Object.freeze([
+  0.822593, 0.177534, 0,
+  0.0332, 0.966784, 0,
+  0.017085, 0.072396, 0.910302
+] as const);
+
+function matrixColor(matrix: readonly number[], color: readonly number[]): Rgb {
+  return [
+    matrix[0]! * color[0]! + matrix[1]! * color[1]! + matrix[2]! * color[2]!,
+    matrix[3]! * color[0]! + matrix[4]! * color[1]! + matrix[5]! * color[2]!,
+    matrix[6]! * color[0]! + matrix[7]! * color[1]! + matrix[8]! * color[2]!
+  ];
+}
+
+function decodeTransfer(value: number, colorSpace: PixelSurface["colorSpace"]): number {
+  if (colorSpace === "linear-srgb") return value;
+  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+}
+
+function encodeTransfer(value: number, colorSpace: PixelSurface["colorSpace"]): number {
+  const bounded = clamp(value);
+  if (colorSpace === "linear-srgb") return bounded;
+  return bounded <= 0.0031308 ? bounded * 12.92 : 1.055 * bounded ** (1 / 2.4) - 0.055;
+}
+
+function decodeColor(color: Rgb, colorSpace: PixelSurface["colorSpace"]): Rgb {
+  const decoded: Rgb = [
+    decodeTransfer(color[0], colorSpace),
+    decodeTransfer(color[1], colorSpace),
+    decodeTransfer(color[2], colorSpace)
+  ];
+  return colorSpace === "display-p3"
+    ? matrixColor(DISPLAY_P3_TO_LINEAR_SRGB, decoded)
+    : decoded;
+}
+
+function encodeColor(color: Rgb, colorSpace: PixelSurface["colorSpace"]): Rgb {
+  const primaries = colorSpace === "display-p3"
+    ? matrixColor(LINEAR_SRGB_TO_DISPLAY_P3, color)
+    : color;
+  return [
+    encodeTransfer(primaries[0], colorSpace),
+    encodeTransfer(primaries[1], colorSpace),
+    encodeTransfer(primaries[2], colorSpace)
+  ];
+}
+
 function read(surface: PixelSurface, x: number, y: number): Rgba {
   const px = Math.min(surface.width - 1, Math.max(0, Math.round(x)));
   const py = Math.min(surface.height - 1, Math.max(0, Math.round(y)));
   const offset = (py * surface.width + px) * 4;
   const alpha = surface.alphaMode === "none" ? 1 : surface.data[offset + 3]! / 255;
   const divisor = surface.alphaMode === "premultiplied" && alpha > 0 ? alpha : 1;
-  return [
+  const linear = decodeColor([
     clamp(surface.data[offset]! / 255 / divisor),
     clamp(surface.data[offset + 1]! / 255 / divisor),
-    clamp(surface.data[offset + 2]! / 255 / divisor),
-    alpha
-  ];
+    clamp(surface.data[offset + 2]! / 255 / divisor)
+  ], surface.colorSpace);
+  return [linear[0], linear[1], linear[2], alpha];
 }
 
 function edgeCoordinate(value: number, size: number, mode: string): number {
@@ -105,10 +189,30 @@ function write(surface: PixelSurface, x: number, y: number, rgba: Rgba): void {
   const alphaByte = Math.round(alpha * 255);
   const multiplier = surface.alphaMode === "premultiplied" ? alpha : 1;
   const visible = alphaByte > 0 ? multiplier : 0;
-  surface.data[offset] = Math.round(clamp(rgba[0]) * visible * 255);
-  surface.data[offset + 1] = Math.round(clamp(rgba[1]) * visible * 255);
-  surface.data[offset + 2] = Math.round(clamp(rgba[2]) * visible * 255);
+  const encoded = encodeColor([rgba[0], rgba[1], rgba[2]], surface.colorSpace);
+  surface.data[offset] = Math.round(clamp(encoded[0]) * visible * 255);
+  surface.data[offset + 1] = Math.round(clamp(encoded[1]) * visible * 255);
+  surface.data[offset + 2] = Math.round(clamp(encoded[2]) * visible * 255);
   surface.data[offset + 3] = alphaByte;
+}
+
+export function convertPixelSurface(
+  surface: PixelSurface,
+  colorSpace: PixelSurface["colorSpace"],
+  alphaMode: PixelSurface["alphaMode"] = surface.alphaMode
+): PixelSurface {
+  assertSurface(surface);
+  const output: PixelSurface = {
+    width: surface.width,
+    height: surface.height,
+    data: new Uint8ClampedArray(surface.data.length),
+    colorSpace,
+    alphaMode
+  };
+  for (let y = 0; y < surface.height; y += 1) {
+    for (let x = 0; x < surface.width; x += 1) write(output, x, y, read(surface, x, y));
+  }
+  return output;
 }
 
 function mixColor(a: Rgba, b: Rgba, t: number): Rgba {
@@ -152,6 +256,95 @@ function vectorParam(
 
 function defaultParams(blueprint: EffectBlueprint): Record<string, unknown> {
   return Object.fromEntries(blueprint.parameters.map((spec) => [spec.name, spec.default]));
+}
+
+function assertEffectTimeSample(sample: EffectTimeSample, effectId: string): void {
+  if (sample.contractVersion !== TIME_CONTRACT_VERSION) {
+    throw new TypeError(`${effectId} requires EffectTimeSample ${TIME_CONTRACT_VERSION}.`);
+  }
+  if (sample.effectId !== effectId) {
+    throw new TypeError(`EffectTimeSample.effectId must equal ${effectId}.`);
+  }
+  if (typeof sample.effectInstanceId !== "string" || sample.effectInstanceId.length === 0) {
+    throw new TypeError("EffectTimeSample.effectInstanceId must be an explicit non-empty ID.");
+  }
+  const values = [
+    sample.projectTime,
+    sample.layerTime,
+    sample.effectTime,
+    sample.progress,
+    sample.deltaTime,
+    sample.fps,
+    sample.frame
+  ];
+  if (!values.every(Number.isFinite)) throw new RangeError("EffectTimeSample values must be finite.");
+  if (sample.effectTime < 0 || sample.deltaTime < 0 || sample.fps <= 0
+    || sample.progress < 0 || sample.progress > 1 || !Number.isInteger(sample.frame)) {
+    throw new RangeError("EffectTimeSample contains an invalid local time, progress, FPS, or frame.");
+  }
+}
+
+function effectProgress(
+  blueprint: EffectBlueprint,
+  params: Readonly<Record<string, unknown>>,
+  options: EffectRuntimeOptions
+): number {
+  const progressSpec = blueprint.parameters.find((spec) => spec.name === "progress");
+  if (progressSpec?.kind !== "number") return options.time.progress;
+  const parameter = numberParam(params, "progress", progressSpec.default);
+  return clamp(options.time.progress + parameter - progressSpec.default);
+}
+
+function assertRuntimeInput(
+  blueprint: EffectBlueprint,
+  source: PixelSurface,
+  options: EffectRuntimeOptions,
+  params: Readonly<Record<string, unknown>>
+): void {
+  assertEffectTimeSample(options.time, blueprint.effectId);
+  assertLayerRasterizationInput(options.rasterInput);
+  const target = options.rasterInput.target;
+  if (target.width !== source.width || target.height !== source.height
+    || target.colorSpace !== source.colorSpace) {
+    throw new TypeError("Raster input target must match the supplied pixel surface.");
+  }
+  const kind = options.rasterInput.source.kind;
+  if (blueprint.category === "text" && kind !== "text") {
+    throw new TypeError(`${blueprint.effectId} requires real text glyph coverage.`);
+  }
+  if ((blueprint.category === "vector" || blueprint.category === "draw")
+    && kind !== "shape" && kind !== "svg") {
+    throw new TypeError(`${blueprint.effectId} requires a real Shape/SVG path source.`);
+  }
+  if ((blueprint.category === "light" || blueprint.category === "post")
+    && kind !== "image" && kind !== "video") {
+    throw new TypeError(`${blueprint.effectId} requires decoded RGBA image/video input.`);
+  }
+  if (blueprint.category === "transition" || blueprint.category === "composite") {
+    if (!options.secondary || !options.secondaryRasterInput) {
+      throw new TypeError(`${blueprint.effectId} requires independent source and secondary inputs.`);
+    }
+    assertLayerRasterizationInput(options.secondaryRasterInput);
+    if (options.secondaryRasterInput.layerId === options.rasterInput.layerId) {
+      throw new TypeError("Dual inputs must have independent layer identities.");
+    }
+    if (options.secondaryRasterInput.target.width !== target.width
+      || options.secondaryRasterInput.target.height !== target.height
+      || options.secondaryRasterInput.target.colorSpace !== target.colorSpace) {
+      throw new TypeError("Dual raster inputs must share dimensions and color space.");
+    }
+  }
+  if (blueprint.sourceId === "D02") {
+    const brush = options.brushCoverage;
+    if (!brush || brush.width < 1 || brush.height < 1
+      || brush.data.length !== brush.width * brush.height) {
+      throw new TypeError("Brush Reveal requires real brush coverage.");
+    }
+    const requested = stringParam(params, "brushTexture", "");
+    if (requested !== options.brushAssetId) {
+      throw new TypeError(`Unresolved brushTexture ${requested}.`);
+    }
+  }
 }
 
 export function normalizeEffectParams(
@@ -206,7 +399,21 @@ function renderMotion(
   options: EffectRuntimeOptions
 ): PixelSurface {
   const output = emptyLike(source);
-  const p = eased(options.progress);
+  const p = eased(effectProgress(blueprint, params, options));
+  const seconds = elapsedSeconds(options);
+  const shakeOffset = blueprint.sourceId === "M08" ? (() => {
+    const intensity = numberParam(params, "intensity", 0.04);
+    const frequency = numberParam(params, "frequency", 12);
+    const decay = numberParam(params, "decay", 2.5);
+    const attenuation = Math.exp(-decay * seconds);
+    const seedOffset = numberParam(params, "seedOffset", 0);
+    return [
+      (effectRandom(options, "M08.x", 0, 0, Math.max(0.01, frequency), seedOffset) * 2 - 1)
+        * intensity * attenuation,
+      (effectRandom(options, "M08.y", 0, 0, Math.max(0.01, frequency), seedOffset) * 2 - 1)
+        * intensity * attenuation
+    ] as const;
+  })() : undefined;
   for (let y = 0; y < source.height; y += 1) {
     for (let x = 0; x < source.width; x += 1) {
       const u = source.width === 1 ? 0.5 : x / (source.width - 1);
@@ -216,7 +423,7 @@ function renderMotion(
         rgba = read(source, x, y);
         const duration = Math.max(0.01, numberParam(params, "duration", 1));
         const fadeProgress = applyEasing(
-          options.progress / duration,
+          seconds / duration,
           stringParam(params, "easing", "easeOut")
         );
         const alpha = numberParam(params, "from", 0)
@@ -272,15 +479,19 @@ function renderMotion(
         const height = numberParam(params, "height", 0.25);
         const gravity = numberParam(params, "gravity", 9.8);
         const damping = numberParam(params, "damping", 0.55);
-        const gravityScale = clamp(gravity / 9.8, 0.05, 4);
-        const offset = Math.abs(Math.sin(p * Math.PI * bounceCount * gravityScale))
-          * height * (1 - p) ** (1 + damping * gravityScale);
+        const flightSeconds = 2 * Math.sqrt(2 * Math.max(0.001, height) / gravity);
+        const bounceIndex = Math.floor(seconds / flightSeconds);
+        const localTime = (seconds % flightSeconds) / flightSeconds;
+        const offset = bounceIndex < bounceCount
+          ? Math.sin(localTime * Math.PI) * height * damping ** bounceIndex
+          : 0;
         rgba = transformedSample(source, u, v, (su, sv) => [su, sv + offset]);
       } else if (blueprint.sourceId === "M06") {
         const amplitude = numberParam(params, "amplitude", 0.16);
         const decay = numberParam(params, "decay", 5);
         const period = Math.max(0.02, numberParam(params, "period", 0.28));
-        const displacement = amplitude * Math.sin(p * TAU / period) * Math.exp(-decay * p);
+        const displacement = amplitude * Math.sin(seconds * TAU / period)
+          * Math.exp(-decay * seconds);
         const axis = stringParam(params, "axis", "x");
         const scale = axis === "scale" ? Math.max(0.05, 1 + displacement) : 1;
         rgba = transformedSample(source, u, v, (su, sv) => axis === "x"
@@ -292,22 +503,19 @@ function renderMotion(
         const range = numberParam(params, "range", 0.04);
         const frequency = numberParam(params, "frequency", 1);
         const phase = numberParam(params, "phase", 0);
-        const amount = Math.sin(options.progress * TAU * frequency + phase) * range;
+        const amount = Math.sin(seconds * TAU * frequency + phase) * range;
         const axis = stringParam(params, "axis", "y");
         rgba = transformedSample(source, u, v, (su, sv) => [
           su - (axis === "x" || axis === "both" ? amount : 0),
           sv - (axis === "y" || axis === "both" ? amount : 0)
         ]);
       } else {
-        const intensity = numberParam(params, "intensity", 0.04);
-        const frequency = numberParam(params, "frequency", 12);
-        const decay = numberParam(params, "decay", 2.5);
-        const seed = options.seed + numberParam(params, "seedOffset", 0);
-        const step = Math.floor(options.progress * frequency * 10);
-        const attenuation = Math.exp(-decay * options.progress);
-        const dx = (hash(step, 1, seed) * 2 - 1) * intensity * attenuation;
-        const dy = (hash(step, 2, seed) * 2 - 1) * intensity * attenuation;
-        rgba = transformedSample(source, u, v, (su, sv) => [su - dx, sv - dy]);
+        rgba = transformedSample(
+          source,
+          u,
+          v,
+          (su, sv) => [su - shakeOffset![0], sv - shakeOffset![1]]
+        );
       }
       write(output, x, y, rgba);
     }
@@ -315,16 +523,42 @@ function renderMotion(
   return output;
 }
 
-function glyphCell(u: number, v: number): { index: number; localX: number; localY: number } {
-  const columns = 12;
-  const rows = 5;
-  const gx = Math.min(columns - 1, Math.floor(u * columns));
-  const gy = Math.min(rows - 1, Math.floor(v * rows));
-  return {
-    index: gy * columns + gx,
-    localX: fract(u * columns),
-    localY: fract(v * rows)
-  };
+function glyphCell(
+  options: EffectRuntimeOptions,
+  x: number,
+  y: number
+): { index: number; localX: number; localY: number } {
+  const raster = options.rasterInput.source;
+  if (raster.kind !== "text") throw new TypeError("Text effect requires text raster provenance.");
+  for (const glyph of raster.glyphs) {
+    const left = glyph.bounds.x + glyph.offsetX;
+    const top = glyph.bounds.y + glyph.offsetY;
+    if (x >= left && y >= top && x < left + glyph.bounds.width && y < top + glyph.bounds.height) {
+      return {
+        index: glyph.cluster,
+        localX: clamp((x - left) / Math.max(1, glyph.bounds.width)),
+        localY: clamp((y - top) / Math.max(1, glyph.bounds.height))
+      };
+    }
+  }
+  return { index: raster.glyphs.length, localX: 0, localY: 0 };
+}
+
+function numericMap(value: string, name: string): readonly number[] {
+  const entries = value.split(",").map((entry) => Number(entry.trim()));
+  if (entries.length === 0 || entries.some((entry) => !Number.isFinite(entry))) {
+    throw new TypeError(`${name} must be a comma-separated finite-number map.`);
+  }
+  return entries;
+}
+
+function sampledMap(values: readonly number[], progress: number): number {
+  if (values.length === 1) return values[0]!;
+  const position = clamp(progress) * (values.length - 1);
+  const first = Math.floor(position);
+  const second = Math.min(values.length - 1, first + 1);
+  const fraction = position - first;
+  return values[first]! + (values[second]! - values[first]!) * fraction;
 }
 
 function renderText(
@@ -334,30 +568,44 @@ function renderText(
   options: EffectRuntimeOptions
 ): PixelSurface {
   const output = emptyLike(source);
-  const p = clamp(numberParam(params, "progress", options.progress));
+  const p = effectProgress(blueprint, params, options);
+  const seconds = elapsedSeconds(options);
+  const beatMap = blueprint.sourceId === "T03"
+    ? numericMap(stringParam(params, "beatMap", "0,0.5,1"), "beatMap")
+    : undefined;
+  const scaleMap = blueprint.sourceId === "T03"
+    ? numericMap(stringParam(params, "scaleMap", "0.8,1.2,1"), "scaleMap")
+    : undefined;
+  const textPath = blueprint.sourceId === "T04"
+    ? flattenVectorPath(parseSvgPathData(stringParam(params, "path", "")))
+    : undefined;
   for (let y = 0; y < source.height; y += 1) {
     for (let x = 0; x < source.width; x += 1) {
       const u = source.width === 1 ? 0.5 : x / (source.width - 1);
       const v = source.height === 1 ? 0.5 : y / (source.height - 1);
-      const cell = glyphCell(u, v);
+      const cell = glyphCell(options, x, y);
       let sample = read(source, x, y);
       let visibility = 1;
       if (blueprint.sourceId === "T01") {
         const speed = numberParam(params, "speed", 12);
         const wordMode = booleanParam(params, "wordMode", false);
         const revealIndex = wordMode ? Math.floor(cell.index / 5) * 5 : cell.index;
-        const revealProgress = clamp(p * (0.6 + speed / 30));
-        visibility = revealIndex / 60 <= revealProgress ? 1 : 0;
+        const revealedGlyphs = seconds * speed;
+        visibility = revealIndex <= revealedGlyphs ? 1 : 0;
         const cursorWidth = numberParam(params, "cursorWidth", 0.08);
+        const rasterCursorWidth = Math.max(cursorWidth, 12 / source.width);
         if (booleanParam(params, "cursor", true)
-          && Math.abs(revealIndex / 60 - revealProgress) < 0.04
-          && cell.localX > 1 - cursorWidth) sample = [1, 1, 1, 1];
+          && Math.abs(revealIndex - revealedGlyphs) < 1
+          && cell.localX > 1 - rasterCursorWidth) {
+          sample = [1, 1, 1, sample[3]];
+          visibility = 1;
+        }
       } else if (blueprint.sourceId === "T02") {
         const stagger = numberParam(params, "stagger", 0.04);
         const selector = stringParam(params, "selector", "character");
         const groupSize = selector === "word" ? 5 : selector === "line" ? 12 : selector === "paragraph" ? 60 : 1;
         const selectedIndex = Math.floor(cell.index / groupSize) * groupSize;
-        const threshold = clamp(p * 1.4 - selectedIndex * stagger / 3);
+        const threshold = clamp((seconds - selectedIndex * stagger) / 0.25);
         const offset = (1 - threshold) * numberParam(params, "offset", 0.25);
         const axis = stringParam(params, "axis", "y");
         sample = transformedSample(source, u, v, (su, sv) =>
@@ -366,17 +614,17 @@ function renderText(
       } else if (blueprint.sourceId === "T03") {
         const strength = numberParam(params, "strength", 0.35);
         const layout = stringParam(params, "layoutMode", "grid");
-        const beatHash = hashString(stringParam(params, "beatMap", "0,0.5,1"));
-        const scaleHash = hashString(stringParam(params, "scaleMap", "0.8,1.2,1"));
+        const beat = sampledMap(beatMap!, p);
+        const scaleValue = sampledMap(scaleMap!, p);
         const layoutPhase = layout === "radial"
           ? Math.atan2(v - 0.5, u - 0.5) : layout === "stack" ? v * 8 : cell.index % 7;
-        const pulse = 1 + Math.sin(layoutPhase + p * TAU * (1 + beatHash * 3))
-          * strength * (0.15 + scaleHash * 0.25);
+        const pulse = Math.max(0.05, scaleValue + Math.sin(layoutPhase + p * TAU * (1 + Math.abs(beat) * 3))
+          * strength * (0.15 + Math.abs(scaleValue) * 0.25));
         sample = transformedSample(source, u, v, (su, sv) => {
-          const centerU = (Math.floor(su * 12) + 0.5) / 12;
-          const centerV = (Math.floor(sv * 5) + 0.5) / 5;
+          const centerU = u - (cell.localX - 0.5) * 0.08;
+          const centerV = v - (cell.localY - 0.5) * 0.16;
           const radialOffset = layout === "radial" ? (pulse - 1) * 0.04 : 0;
-          const scaleMapOffset = (scaleHash - 0.5) * strength * 0.18;
+          const scaleMapOffset = (scaleValue - 1) * strength * 0.18;
           return [
             centerU + (su - centerU) / pulse
               + (su - 0.5) * (radialOffset + scaleMapOffset),
@@ -385,40 +633,52 @@ function renderText(
           ];
         });
       } else if (blueprint.sourceId === "T04") {
-        const pathHash = hashString(stringParam(params, "path", ""));
         const orientation = stringParam(params, "orientation", "tangent");
-        const pathY = 0.5 + Math.sin(u * TAU * (1 + pathHash * 2) + pathHash * TAU) * (0.12 + pathHash * 0.18);
-        const pathProgress = orientation === "upright" ? v * 0.25 + u * 0.75 : u;
+        const pathSample = sampleVectorPath(textPath!, u, v);
+        const pathProgress = orientation === "upright"
+          ? clamp(pathSample.progress * 0.75 + v * 0.25)
+          : pathSample.progress;
         const feather = numberParam(params, "feather", 0.04);
         visibility = (1 - smoothstep(p - feather, p + feather, pathProgress))
-          * smoothstep(0.16, 0.02, Math.abs(v - pathY));
+          * smoothstep(0.16, 0.01, pathSample.distance);
       } else if (blueprint.sourceId === "T05") {
-        const sourceHash = hashString(stringParam(params, "sourceText", "CODE"));
-        const targetHash = hashString(stringParam(params, "targetText", "MOTION"));
+        const sourceText = [...stringParam(params, "sourceText", "CODE")];
+        const targetText = [...stringParam(params, "targetText", "MOTION")];
+        if (sourceText.length === 0 || targetText.length === 0) {
+          throw new TypeError("Text Morph requires non-empty sourceText and targetText.");
+        }
+        const sourceValue = sourceText[cell.index % sourceText.length]!.codePointAt(0)! / 0x10ffff;
+        const targetValue = targetText[cell.index % targetText.length]!.codePointAt(0)! / 0x10ffff;
         const matchMode = stringParam(params, "matchMode", "glyph");
         const matchScale = matchMode === "outline" ? 1.8 : matchMode === "position" ? 0.65 : 1;
-        const wobble = Math.sin(cell.index * (1.2 + sourceHash)
-          + p * Math.PI * (1 + targetHash)) * 0.025 * matchScale * Math.sin(p * Math.PI);
+        const wobble = Math.sin(cell.index * (1.2 + sourceValue * 4)
+          + p * Math.PI * (1 + targetValue * 4)) * 0.025 * matchScale * Math.sin(p * Math.PI);
         sample = transformedSample(source, u, v, (su, sv) => [su + wobble, sv - wobble]);
-        sample[0] = clamp(sample[0] + p * (0.06 + targetHash * 0.12));
-        sample[2] = clamp(sample[2] + (1 - p) * (0.06 + sourceHash * 0.12));
+        sample[0] = clamp(sample[0] + p * (0.06 + targetValue * 0.12));
+        sample[2] = clamp(sample[2] + (1 - p) * (0.06 + sourceValue * 0.12));
       } else if (blueprint.sourceId === "T06") {
         const direction = stringParam(params, "lockDirection", "left-to-right");
-        const charsetHash = hashString(stringParam(params, "charset", ""));
+        const charset = [...stringParam(params, "charset", "")];
+        if (charset.length === 0) throw new TypeError("Scramble Decode requires a non-empty charset.");
         const speed = numberParam(params, "speed", 24);
         const decodeProgress = clamp(p * (0.5 + speed / 48));
         const threshold = direction === "right-to-left" ? 1 - u
-          : direction === "random" ? hash(cell.index, 0, options.seed) : u;
+          : direction === "random"
+            ? effectRandom(options, "T06.lock", cell.index, 0, 1, 0, false)
+            : u;
         if (threshold > decodeProgress) {
-          const noise = hash(cell.index, Math.floor(p * speed), options.seed + charsetHash * 997);
-          sample = [noise, 1 - noise * 0.5, 0.7 + noise * 0.3, sample[3] * 0.8];
+          const noise = effectRandom(options, "T06.scramble", cell.index, 0, Math.max(0.1, speed));
+          const character = charset[Math.min(charset.length - 1, Math.floor(noise * charset.length))]!;
+          const codeTone = character.codePointAt(0)! / 0x10ffff;
+          sample = [noise, 1 - noise * 0.5, 0.65 + codeTone * 0.35, sample[3] * 0.8];
         }
       } else {
         const force = numberParam(params, "force", 0.45) * p;
         const selector = stringParam(params, "selector", "word");
         const selectedIndex = selector === "word" ? Math.floor(cell.index / 5) * 5 : cell.index;
         const rotation = numberParam(params, "rotation", 35) * Math.PI / 180;
-        const angle = hash(selectedIndex, 3, options.seed) * TAU + rotation * p;
+        const angle = effectRandom(options, "T07.word", selectedIndex, 3, 1, 0, false)
+          * TAU + rotation * p;
         const dx = Math.cos(angle) * force * p;
         const dy = Math.sin(angle) * force * p;
         const cosine = Math.cos(rotation * p);
@@ -437,44 +697,84 @@ function renderText(
   return output;
 }
 
+interface VectorRuntimeGeometry {
+  readonly source: readonly ReturnType<typeof flattenVectorPath>[];
+  readonly from?: ReturnType<typeof flattenVectorPath>;
+  readonly to?: ReturnType<typeof flattenVectorPath>;
+  readonly morphed?: ReturnType<typeof flattenVectorPath>;
+  readonly draw?: ReturnType<typeof flattenVectorPath>;
+}
+
+function interpolatePaths(
+  from: ReturnType<typeof flattenVectorPath>,
+  to: ReturnType<typeof flattenVectorPath>,
+  progress: number,
+  maxPoints: number
+): ReturnType<typeof flattenVectorPath> {
+  const count = Math.min(maxPoints, Math.max(from.length, to.length));
+  const points = Array.from({ length: count }, (_, index) => {
+    const fromPoint = from[Math.round(index * (from.length - 1) / Math.max(1, count - 1))]!;
+    const toPoint = to[Math.round(index * (to.length - 1) / Math.max(1, count - 1))]!;
+    return Object.freeze({
+      x: fromPoint.x + (toPoint.x - fromPoint.x) * progress,
+      y: fromPoint.y + (toPoint.y - fromPoint.y) * progress,
+      progress: index / Math.max(1, count - 1)
+    });
+  });
+  return Object.freeze(points);
+}
+
+function resamplePath(
+  path: ReturnType<typeof flattenVectorPath>,
+  maxPoints: number
+): ReturnType<typeof flattenVectorPath> {
+  if (path.length <= maxPoints) return path;
+  return Object.freeze(Array.from({ length: maxPoints }, (_, index) =>
+    path[Math.round(index * (path.length - 1) / Math.max(1, maxPoints - 1))]!
+  ));
+}
+
 function coverageForVector(
   sourceId: EffectBlueprint["sourceId"],
   u: number,
   v: number,
   params: Readonly<Record<string, unknown>>,
-  options: EffectRuntimeOptions
+  options: EffectRuntimeOptions,
+  geometry: VectorRuntimeGeometry
 ): number {
-  const p = clamp(numberParam(params, "progress", options.progress));
+  const blueprint = blueprintById.get(options.time.effectId)!;
+  const p = effectProgress(blueprint, params, options);
+  const inputPath = geometry.source[0]!;
+  const inputSample = sampleVectorPath(inputPath, u, v);
   if (sourceId === "V01") {
     const offset = numberParam(params, "offset", 0);
-    const angle = fract(Math.atan2(v - 0.5, u - 0.5) / TAU + 1 + offset);
     const start = numberParam(params, "start", 0);
     const end = numberParam(params, "end", 0.75) * p;
-    const radius = Math.hypot(u - 0.5, v - 0.5);
     const strokeWidth = numberParam(params, "strokeWidth", 0.03);
-    return smoothstep(strokeWidth, 0, Math.abs(radius - 0.305))
-      * (angle >= start && angle <= end ? 1 : 0);
+    const pathProgress = fract(inputSample.progress + offset + 1);
+    return smoothstep(strokeWidth, 0, inputSample.distance)
+      * (pathProgress >= start && pathProgress <= end ? 1 : 0);
   }
   if (sourceId === "V02") {
-    const fromHash = hashString(stringParam(params, "fromPath", ""));
-    const toHash = hashString(stringParam(params, "toPath", ""));
     const normalize = booleanParam(params, "normalize", true);
-    const aspect = normalize ? 1 : 0.65 + fromHash * 0.7;
-    const du = (u - 0.5) * aspect;
-    const diamond = (Math.abs(du) + Math.abs(v - 0.5)) * (0.8 + fromHash * 0.4);
-    const circle = Math.hypot(du, v - 0.5) * (0.8 + toHash * 0.4);
-    const distance = diamond * (1 - p) + circle * p;
-    return smoothstep(0.37, 0.34, Math.abs(distance - 0.34));
+    const aspectU = normalize ? u : u * options.rasterInput.target.width
+      / Math.max(1, options.rasterInput.target.height);
+    return smoothstep(0.04, 0.004, sampleVectorPath(geometry.morphed!, aspectU, v).distance);
   }
   if (sourceId === "V03") {
     const count = Math.max(1, Math.round(numberParam(params, "count", 8)));
     const offset = vectorParam(params, "offset", [0.08, 0.04]);
     const rotation = numberParam(params, "rotation", 12) * Math.PI / 180;
     const scale = Math.max(0.01, numberParam(params, "scale", 0.92));
-    const rotated = (u + offset[0]) * Math.cos(rotation)
-      + (v + offset[1]) * Math.sin(rotation);
-    const cell = fract(rotated * count / scale);
-    return smoothstep(0.18 / scale, 0.02, Math.abs(cell - 0.5));
+    const angle = rotation * Math.floor(fract((u + v) * count) * count);
+    const shiftedU = fract((u - offset[0]) * count) / Math.max(0.01, scale);
+    const shiftedV = fract((v - offset[1]) * count) / Math.max(0.01, scale);
+    const du = shiftedU - 0.5;
+    const dv = shiftedV - 0.5;
+    const sample = sampleVectorPath(inputPath,
+      0.5 + du * Math.cos(angle) - dv * Math.sin(angle),
+      0.5 + du * Math.sin(angle) + dv * Math.cos(angle));
+    return smoothstep(0.06 / scale, 0.005, sample.distance);
   }
   if (sourceId === "V04") {
     const count = Math.max(2, Math.round(numberParam(params, "count", 24)));
@@ -482,29 +782,48 @@ function coverageForVector(
     const angle = fract((Math.atan2(v - 0.5, u - 0.5) / TAU + rotation) * count);
     const radius = Math.hypot(u - 0.5, v - 0.5);
     const thickness = numberParam(params, "thickness", 0.012);
+    const outlineInfluence = smoothstep(0.12, 0.005, inputSample.distance);
     return radius < numberParam(params, "radius", 0.42)
-      ? smoothstep(Math.min(0.48, thickness * count), 0.002, Math.min(angle, 1 - angle)) : 0;
+      ? smoothstep(Math.min(0.48, thickness * count), 0.002, Math.min(angle, 1 - angle))
+        * (0.55 + outlineInfluence * 0.45)
+      : 0;
   }
   if (sourceId === "D01") {
-    const pathHash = hashString(stringParam(params, "path", ""));
     const pressure = numberParam(params, "pressure", 0.7);
     const variation = numberParam(params, "speedVariation", 0.25);
-    const path = 0.62 - (0.18 + pathHash * 0.2)
-      * Math.sin(u * Math.PI * (1.6 + pathHash * 2));
-    const revealHead = p + (variation - 0.25) * 0.3
-      + Math.sin(u * 19) * variation * 0.12;
-    const revealed = u <= clamp(revealHead) ? 1 : 0;
-    return revealed * smoothstep(0.02 + pressure * 0.07, 0.003, Math.abs(v - path));
+    const pathSample = sampleVectorPath(geometry.draw!, u, v);
+    const speedWarp = Math.sin(pathSample.progress * 19) * variation * 0.12;
+    const revealed = pathSample.progress <= clamp(p + (variation - 0.25) * 0.3 + speedWarp) ? 1 : 0;
+    return revealed * smoothstep(0.02 + pressure * 0.07, 0.002, pathSample.distance);
   }
   if (sourceId === "D02") {
-    const textureHash = hashString(stringParam(params, "brushTexture", ""));
+    const brushReference = stringParam(params, "brushTexture", "");
+    if (!/^(?:builtin|asset):\/\//u.test(brushReference)) {
+      throw new TypeError("brushTexture must resolve to a builtin:// or asset:// coverage asset.");
+    }
     const size = numberParam(params, "size", 0.12);
-    const noise = hash(Math.floor(u / Math.max(0.005, size)), Math.floor(v / Math.max(0.005, size)), options.seed + textureHash * 997);
-    return smoothstep(p + size, p - size, u + (noise - 0.5) * numberParam(params, "roughness", 0.35));
+    const brush = options.brushCoverage!;
+    const bx = Math.min(brush.width - 1, Math.floor(fract(u / Math.max(0.005, size)) * brush.width));
+    const by = Math.min(brush.height - 1, Math.floor(fract(v / Math.max(0.005, size)) * brush.height));
+    const brushAlpha = brush.data[by * brush.width + bx]! / 255;
+    const noise = effectRandom(options, "D02.roughness", bx, by, 1, 0, false);
+    return brushAlpha * smoothstep(
+      p + size,
+      p - size,
+      u + (noise - 0.5) * numberParam(params, "roughness", 0.35)
+    );
   }
   if (sourceId === "D03") {
-    const distance = Math.hypot(u - 0.5, v - 0.5);
-    const noise = (hash(Math.floor(u * 32), Math.floor(v * 32), options.seed) - 0.5)
+    const distance = Math.min(Math.hypot(u - 0.5, v - 0.5), inputSample.distance * 1.8);
+    const noise = (effectRandom(
+      options,
+      "D03.diffusion",
+      Math.floor(u * 32),
+      Math.floor(v * 32),
+      1,
+      0,
+      false
+    ) - 0.5)
       * numberParam(params, "edgeNoise", 0.2);
     const diffusion = numberParam(params, "diffusion", 0.55);
     const absorption = numberParam(params, "absorption", 0.65);
@@ -512,11 +831,19 @@ function coverageForVector(
     return smoothstep(radius + noise, radius - (0.02 + absorption * 0.14), distance)
       * (0.55 + absorption * 0.45);
   }
-  const grain = hash(Math.floor(u * 90), Math.floor(v * 90), options.seed);
-  const stroke = smoothstep(0.12, 0.02, Math.abs(v - (0.25 + u * 0.5)));
+  const grain = effectRandom(options, "D04.grain", Math.floor(u * 90), Math.floor(v * 90), 1, 0, false);
+  const stroke = smoothstep(0.12, 0.005, inputSample.distance);
   const scatter = numberParam(params, "scatter", 0.18);
   const opacity = numberParam(params, "opacity", 0.85);
-  const scattered = hash(Math.floor(u * 37), Math.floor(v * 53), options.seed + 17);
+  const scattered = effectRandom(
+    options,
+    "D04.scatter",
+    Math.floor(u * 37),
+    Math.floor(v * 53),
+    1,
+    17,
+    false
+  );
   return u <= p + (scattered - 0.5) * scatter
     ? stroke * (grain > numberParam(params, "grain", 0.55) * 0.45 ? 1 : 0.25) * opacity : 0;
 }
@@ -529,12 +856,45 @@ function renderVectorOrDraw(
 ): PixelSurface {
   const output = emptyLike(source);
   const isDraw = blueprint.category === "draw";
+  const raster = options.rasterInput.source;
+  if (raster.kind !== "shape" && raster.kind !== "svg") {
+    throw new TypeError(`${blueprint.effectId} requires vector path provenance.`);
+  }
+  const fromPath = blueprint.sourceId === "V02"
+    ? flattenVectorPath(parseSvgPathData(stringParam(params, "fromPath", "")))
+    : undefined;
+  const toPath = blueprint.sourceId === "V02"
+    ? flattenVectorPath(parseSvgPathData(stringParam(params, "toPath", "")))
+    : undefined;
+  const geometryPointLimit = options.quality === "draft" ? 16
+    : options.quality === "preview" ? 20 : 40;
+  const geometry: VectorRuntimeGeometry = {
+    source: raster.paths.map((path) =>
+      resamplePath(flattenVectorPath(path), geometryPointLimit)
+    ),
+    ...(blueprint.sourceId === "V02" ? {
+      from: fromPath!,
+      to: toPath!,
+      morphed: interpolatePaths(
+        fromPath!,
+        toPath!,
+        effectProgress(blueprint, params, options),
+        geometryPointLimit
+      )
+    } : {}),
+    ...(blueprint.sourceId === "D01" ? {
+      draw: resamplePath(
+        flattenVectorPath(parseSvgPathData(stringParam(params, "path", ""))),
+        geometryPointLimit
+      )
+    } : {})
+  };
   for (let y = 0; y < source.height; y += 1) {
     for (let x = 0; x < source.width; x += 1) {
       const u = source.width === 1 ? 0.5 : x / (source.width - 1);
       const v = source.height === 1 ? 0.5 : y / (source.height - 1);
       const sourceColor = read(source, x, y);
-      const coverage = coverageForVector(blueprint.sourceId, u, v, params, options);
+      const coverage = coverageForVector(blueprint.sourceId, u, v, params, options, geometry);
       const ink: Rgba = isDraw ? [0.96, 0.88, 0.7, coverage] : [0.25, 0.82, 1, coverage];
       write(output, x, y, mixColor(sourceColor, ink, coverage * (isDraw ? 0.9 : 0.75)));
     }
@@ -559,6 +919,7 @@ function renderLight(
   options: EffectRuntimeOptions
 ): PixelSurface {
   const output = emptyLike(source);
+  const seconds = elapsedSeconds(options);
   const neon = parseHex(stringParam(params, "color", "#42C8FF"));
   for (let y = 0; y < source.height; y += 1) {
     for (let x = 0; x < source.width; x += 1) {
@@ -573,12 +934,12 @@ function renderLight(
         const neighbor = read(source, x + sampleRadius, y + sampleRadius);
         const edge = Math.abs(base[3] - neighbor[3]) + Math.abs(base[0] - neighbor[0]);
         const flicker = 1 - numberParam(params, "flicker", 0.12)
-          * hash(Math.floor(options.progress * 30), 0, options.seed);
+          * effectRandom(options, "L01.flicker", x, y, 30);
         light = clamp(edge * numberParam(params, "intensity", 1.8) * 4 * flicker);
       } else if (blueprint.sourceId === "L02") {
         const angle = numberParam(params, "angle", 18) * Math.PI / 180;
         const coordinate = u * Math.cos(angle) + v * Math.sin(angle);
-        const center = fract(options.progress * numberParam(params, "speed", 0.8));
+        const center = fract(seconds * numberParam(params, "speed", 0.8));
         const distance = Math.abs(fract(coordinate - center + 0.5) - 0.5);
         const width = numberParam(params, "width", 0.12);
         const softness = numberParam(params, "softness", 0.4);
@@ -597,7 +958,8 @@ function renderLight(
         color = [1, clamp(0.72 - chromatic * 0.4), clamp(0.32 + chromatic * 0.8)];
       } else {
         const center = vectorParam(params, "center", [0.5, 0.5]);
-        const radius = numberParam(params, "radius", 0.34) * (0.65 + options.progress * 0.7);
+        const radius = numberParam(params, "radius", 0.34)
+          * (0.65 + effectProgress(blueprint, params, options) * 0.7);
         const distance = Math.hypot(u - center[0], v - center[1]);
         const rings = Math.max(1, numberParam(params, "rings", 4));
         const falloff = numberParam(params, "falloff", 0.2);
@@ -726,7 +1088,15 @@ function transitionCoverage(
     const noise = numberParam(params, "noise", 0.16);
     const viscosity = numberParam(params, "viscosity", 0.6);
     const frequency = 8 + (1 - viscosity) * 48;
-    const edge = u + (hash(Math.floor(v * frequency), Math.floor(u * frequency * 0.5), options.seed) - 0.5) * noise;
+    const edge = u + (effectRandom(
+      options,
+      "C03.liquid",
+      Math.floor(v * frequency),
+      Math.floor(u * frequency * 0.5),
+      1,
+      0,
+      false
+    ) - 0.5) * noise;
     const softness = 0.015 + (1 - viscosity) * 0.1;
     return smoothstep(progress - softness, progress + softness, 1 - edge);
   }
@@ -736,7 +1106,15 @@ function transitionCoverage(
   const order = stringParam(params, "order", "random");
   const threshold = order === "linear" ? cellX / grid
     : order === "radial" ? Math.hypot(u - 0.5, v - 0.5) * 1.414
-      : hash(cellX, cellY, options.seed + numberParam(params, "seed", 1));
+      : effectRandom(
+        options,
+        "C04.order",
+        cellX,
+        cellY,
+        1,
+        numberParam(params, "seed", 1),
+        false
+      );
   return threshold <= progress ? 1 : 0;
 }
 
@@ -746,12 +1124,13 @@ function renderTransition(
   params: Readonly<Record<string, unknown>>,
   options: EffectRuntimeOptions
 ): PixelSurface {
-  const secondary = options.secondary ?? source;
+  const secondary = options.secondary;
+  if (!secondary) throw new TypeError("Transition requires an independent B input.");
   assertSurface(secondary);
   if (secondary.width !== source.width || secondary.height !== source.height) {
     throw new RangeError("Transition A/B inputs must have equal dimensions.");
   }
-  const p = clamp(numberParam(params, "progress", options.progress));
+  const p = effectProgress(blueprint, params, options);
   if (p <= 0) return cloneSurface(source);
   if (p >= 1) return cloneSurface(secondary);
   const output = emptyLike(source);
@@ -793,16 +1172,46 @@ function blend(base: Rgba, top: Rgba, mode: string, opacity: number): Rgba {
   return output;
 }
 
+function assertResolvedInputReference(
+  value: string,
+  contextual: string,
+  input: EffectRuntimeOptions["secondaryRasterInput"]
+): void {
+  if (value !== contextual && value !== input?.layerId) {
+    throw new TypeError(`Unresolved input reference ${value}; expected ${contextual} or ${input?.layerId ?? "a layer ID"}.`);
+  }
+}
+
 function renderComposite(
   blueprint: EffectBlueprint,
   source: PixelSurface,
   params: Readonly<Record<string, unknown>>,
   options: EffectRuntimeOptions
 ): PixelSurface {
-  const secondary = options.secondary ?? options.mask ?? source;
+  const secondary = options.secondary;
+  if (!secondary) throw new TypeError("Composite effect requires an independent secondary input.");
   assertSurface(secondary);
   if (secondary.width !== source.width || secondary.height !== source.height) {
     throw new RangeError("Composite inputs must have equal dimensions.");
+  }
+  if (blueprint.sourceId === "H01") {
+    assertResolvedInputReference(
+      stringParam(params, "mask", "context://mask"),
+      "context://mask",
+      options.secondaryRasterInput
+    );
+  } else if (blueprint.sourceId === "H02") {
+    assertResolvedInputReference(
+      stringParam(params, "matteLayer", "context://secondary"),
+      "context://secondary",
+      options.secondaryRasterInput
+    );
+  } else if (blueprint.sourceId === "H04") {
+    assertResolvedInputReference(
+      stringParam(params, "map", "context://secondary"),
+      "context://secondary",
+      options.secondaryRasterInput
+    );
   }
   const output = emptyLike(source);
   for (let y = 0; y < source.height; y += 1) {
@@ -812,23 +1221,15 @@ function renderComposite(
       let result: Rgba;
       if (blueprint.sourceId === "H01") {
         let coverage = matte[3];
-        const maskRef = hashString(stringParam(params, "mask", "context://mask"));
         if (booleanParam(params, "invert", false)) coverage = 1 - coverage;
-        const p = numberParam(params, "progress", options.progress);
+        const p = effectProgress(blueprint, params, options);
         const feather = numberParam(params, "feather", 0.04);
-        const threshold = clamp(p + (maskRef - 0.5) * 0.12);
-        coverage = smoothstep(threshold - feather, threshold + feather, coverage);
+        coverage = smoothstep(p - feather, p + feather, coverage);
         result = [...base] as Rgba;
         result[3] *= coverage;
       } else if (blueprint.sourceId === "H02") {
-        const matteRef = hashString(stringParam(params, "matteLayer", "context://secondary"));
-        const shiftedMatte = read(
-          secondary,
-          x + (matteRef - 0.5) * secondary.width * 0.1,
-          y - (matteRef - 0.5) * secondary.height * 0.1
-        );
         let coverage = stringParam(params, "mode", "alpha") === "luma"
-          ? luma(shiftedMatte) : shiftedMatte[3];
+          ? luma(matte) : matte[3];
         if (booleanParam(params, "invert", false)) coverage = 1 - coverage;
         result = [...base] as Rgba;
         result[3] *= coverage * numberParam(params, "opacity", 1);
@@ -844,13 +1245,12 @@ function renderComposite(
         result = blend(base, top, stringParam(params, "mode", "normal"), opacity);
       } else {
         const channel = stringParam(params, "channel", "luma");
-        const sampledValue = channel === "red" ? matte[0] : channel === "green" ? matte[1]
-          : channel === "blue" ? matte[2] : channel === "alpha" ? matte[3] : luma(matte);
-        const value = Math.round(sampledValue * 3) / 3;
-        const mapRef = hashString(stringParam(params, "map", "context://secondary"));
-        const mapBias = (mapRef - 0.5) * 0.25;
-        const sx = x + (value - 0.5 + mapBias) * numberParam(params, "xAmount", 0.05) * source.width;
-        const sy = y + (value - 0.5 - mapBias) * numberParam(params, "yAmount", 0.05) * source.height;
+        const mapColor = read(secondary, x, y);
+        const linearValue = channel === "red" ? mapColor[0] : channel === "green" ? mapColor[1]
+          : channel === "blue" ? mapColor[2] : channel === "alpha" ? mapColor[3] : luma(mapColor);
+        const sampledValue = Math.round(clamp(linearValue) * 7) / 7;
+        const sx = x + (sampledValue - 0.5) * numberParam(params, "xAmount", 0.05) * source.width;
+        const sy = y + (sampledValue - 0.5) * numberParam(params, "yAmount", 0.05) * source.height;
         result = read(source, sx, sy);
       }
       write(output, x, y, result);
@@ -886,13 +1286,29 @@ export function renderEffectPixels(
   const blueprint = blueprintById.get(effectId);
   if (!blueprint) throw new RangeError(`Unknown Group 2 P0 effect: ${effectId}`);
   const params = { ...defaultParams(blueprint), ...normalizeEffectParams(effectId, suppliedParams) };
+  if (!suppliedOptions.time) {
+    throw new TypeError(`${effectId} requires EffectRuntimeOptions.time.`);
+  }
+  if (!suppliedOptions.rasterInput) {
+    throw new TypeError(`${effectId} requires EffectRuntimeOptions.rasterInput.`);
+  }
   const options: EffectRuntimeOptions = {
-    progress: clamp(suppliedOptions.progress ?? numberParam(params, "progress", 0.5)),
-    seed: Math.trunc(suppliedOptions.seed ?? 1),
+    time: suppliedOptions.time,
+    seed: Math.trunc(suppliedOptions.seed ?? 1) >>> 0,
     quality: suppliedOptions.quality ?? "preview",
+    rasterInput: suppliedOptions.rasterInput,
+    ...(suppliedOptions.secondaryRasterInput
+      ? { secondaryRasterInput: suppliedOptions.secondaryRasterInput } : {}),
+    ...(suppliedOptions.dualInputTextures
+      ? { dualInputTextures: suppliedOptions.dualInputTextures } : {}),
+    ...(suppliedOptions.brushCoverage
+      ? { brushCoverage: suppliedOptions.brushCoverage } : {}),
+    ...(suppliedOptions.brushAssetId
+      ? { brushAssetId: suppliedOptions.brushAssetId } : {}),
     ...(suppliedOptions.secondary ? { secondary: suppliedOptions.secondary } : {}),
     ...(suppliedOptions.mask ? { mask: suppliedOptions.mask } : {})
   };
+  assertRuntimeInput(blueprint, source, options, params);
   const rendered = blueprint.category === "motion" ? renderMotion(blueprint, source, params, options)
     : blueprint.category === "text" ? renderText(blueprint, source, params, options)
       : blueprint.category === "vector" || blueprint.category === "draw"
@@ -904,20 +1320,23 @@ export function renderEffectPixels(
   return applyMask(rendered, options.mask);
 }
 
-export function makePreviewInput(width = 160, height = 90, alternate = false): PixelSurface {
-  const data = new Uint8ClampedArray(width * height * 4);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const offset = (y * width + x) * 4;
-      const u = width === 1 ? 0 : x / (width - 1);
-      const v = height === 1 ? 0 : y / (height - 1);
-      data[offset] = Math.round((alternate ? 1 - u : u) * 230 + 20);
-      data[offset + 1] = Math.round((alternate ? v : 1 - v) * 190 + 30);
-      data[offset + 2] = Math.round((0.35 + 0.65 * Math.sin((u + v + (alternate ? 0.5 : 0)) * Math.PI) ** 2) * 255);
-      data[offset + 3] = Math.round(clamp(0.2 + 0.8 * (u * 0.6 + v * 0.4)) * 255);
-    }
-  }
-  return { width, height, data, colorSpace: "srgb", alphaMode: "straight" };
+export function makePreviewInput(
+  effectId: string,
+  effectInstanceId: string,
+  width = 160,
+  height = 90,
+  alternate = false
+): PixelSurface {
+  const time = makeEffectTimeSample(effectId, effectInstanceId, 0.5);
+  return makeRealInputFixture(
+    effectId,
+    "media",
+    width,
+    height,
+    alternate,
+    "srgb",
+    time
+  ).surface;
 }
 
 export function hashPixelSurface(surface: PixelSurface): string {

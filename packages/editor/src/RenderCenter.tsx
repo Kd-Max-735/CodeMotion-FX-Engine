@@ -1,6 +1,7 @@
 import { AlertTriangle, ArrowLeft, CheckCircle2, Download, FileVideo2, HardDrive, History, LoaderCircle, Play, RefreshCw, Server, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { estimateExportBytes, exportApi, projectMedia, validateExportSettings, type ExportFormat, type ExportSettings, type ExportTaskView } from "./export-center.js";
+import { preparePreviewProject } from "./preview-raster.js";
 import type { EditorStore } from "./store.js";
 
 function bytes(value: number): string {
@@ -60,7 +61,14 @@ export function RenderCenter({ store }: { store: EditorStore }) {
     setSubmitting(true);
     setActionError(undefined);
     try {
-      const { task } = await exportApi.create(project, settings);
+      const exportProject = await preparePreviewProject(
+        project,
+        settings.width,
+        settings.height,
+        0,
+        "final"
+      );
+      const { task } = await exportApi.create(exportProject, settings);
       setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
       setSelectedId(task.id);
     } catch (error) {

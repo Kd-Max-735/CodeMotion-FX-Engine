@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.1.0",
+  "timeContractVersion": "1.1.0",
+  "effectId": "fx.text.textExtrude3D",
+  "effectInstanceId": "preview.t08.立体",
+  "text": "立体",
+  "renderer": "Microsoft Edge 150 / WebGL2 / ANGLE SwiftShader",
+  "width": 160,
+  "height": 90,
+  "quality": "preview",
+  "medianMs": 30.1,
+  "budgetMs": 35,
+  "frames": {
+    "0": "7f7a65df",
+    "0.25": "b076c1bf",
+    "0.5": "438f9c94",
+    "0.75": "c0066bbf",
+    "1": "6481d0dc"
+  },
+  "resources": "balanced"
+}

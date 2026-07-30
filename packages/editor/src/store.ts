@@ -1,6 +1,19 @@
-import { CommandHistory, type JsonValue, type LayerDefinition, type MotionProject, type UndoableCommand } from "@codemotion/core";
+import { CommandHistory, type EffectInstance, type JsonValue, type LayerDefinition, type MotionProject, type UndoableCommand } from "@codemotion/core";
 import { loadProject, saveProject } from "@codemotion/schema";
-import { evaluateAnimatable } from "@codemotion/timeline";
+import {
+  evaluateAnimatable,
+  evaluateAnimatableAt,
+  resolveEffectTimeSample,
+  resolveLayerTimeSample,
+  resolveProjectTimeSample
+} from "@codemotion/timeline";
+import {
+  createP0EffectInstance,
+  effectDefinition,
+  effectParameterFields,
+  presetParams,
+  type EffectParameterField
+} from "./effect-catalog.js";
 import {
   createStarterProject,
   findLayer,
@@ -28,6 +41,7 @@ export interface EditorSnapshot {
   currentTime: number;
   zoom: number;
   playing: boolean;
+  selectedEffectId: string | null;
   saveStatus: "saved" | "dirty" | "saving" | "error";
   recoverable: boolean;
   error: LocatedError | null;
@@ -72,6 +86,30 @@ function setPath(target: object, path: string, value: unknown): void {
   cursor[key] = value;
 }
 
+function findEffect(layer: LayerDefinition | undefined, effectInstanceId: string): EffectInstance | undefined {
+  return layer?.effects.find((effect) => effect.id === effectInstanceId);
+}
+
+function isAnimatableValue(value: unknown): value is { mode: string; value?: JsonValue; keyframes?: { time: number; value: JsonValue }[] } {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && "mode" in value;
+}
+
+function effectEvaluation(
+  project: MotionProject,
+  layer: LayerDefinition,
+  effect: EffectInstance,
+  currentTime: number
+) {
+  const projectTime = resolveProjectTimeSample({
+    projectTime: Math.min(currentTime, Math.max(0, project.duration - 1 / project.fps)),
+    previousProjectTime: Math.max(0, currentTime - 1 / project.fps),
+    fps: project.fps
+  });
+  const layerTime = resolveLayerTimeSample(layer, projectTime);
+  const effectTime = resolveEffectTimeSample(effect, layerTime, projectTime, layer.endTime - layer.startTime);
+  return { project: projectTime, layer: layerTime, effect: effectTime };
+}
+
 export class EditorStore {
   private history: CommandHistory<EditorDocument>;
   private selectedLayerId: string | null;
@@ -90,6 +128,7 @@ export class EditorStore {
       currentTime: 0,
       zoom: 52,
       playing: false,
+      selectedEffectId: null,
       saveStatus: "saved",
       recoverable: storage?.getItem(AUTOSAVE_KEY) !== null,
       error: null,
@@ -124,13 +163,18 @@ export class EditorStore {
   setTime(currentTime: number): void { this.publish({ currentTime: Math.max(0, Math.min(this.history.state.project.duration, currentTime)) }); }
   setZoom(zoom: number): void { this.publish({ zoom: Math.max(15, Math.min(200, zoom)) }); }
   setPlaying(playing: boolean): void { this.publish({ playing }); }
-  selectLayer(selectedLayerId: string): void { this.selectedLayerId = selectedLayerId; this.publish(); }
+  selectLayer(selectedLayerId: string): void {
+    this.selectedLayerId = selectedLayerId;
+    this.publish({ selectedEffectId: null });
+  }
+
+  selectEffect(effectId: string | null): void { this.publish({ selectedEffectId: effectId }); }
 
   newProject(name: string, width: number, height: number, fps: number): void {
     const project = createStarterProject(name, width, height, fps);
     this.selectedLayerId = "layer.accent";
     this.history = new CommandHistory({ project, selectedLayerId: "layer.accent" }, { maxDepth: 100 });
-    this.publish({ view: "editor", currentTime: 0, saveStatus: "dirty", error: null });
+    this.publish({ view: "editor", currentTime: 0, selectedEffectId: null, saveStatus: "dirty", error: null });
     this.scheduleAutosave();
   }
 
@@ -138,7 +182,7 @@ export class EditorStore {
     const project = loadProject(json);
     this.selectedLayerId = mainLayers(project)[0]?.id ?? null;
     this.history = new CommandHistory({ project, selectedLayerId: this.selectedLayerId }, { maxDepth: 100 });
-    this.publish({ view: "editor", currentTime: 0, saveStatus: "saved", error: null });
+    this.publish({ view: "editor", currentTime: 0, selectedEffectId: null, saveStatus: "saved", error: null });
   }
 
   undo(): void { this.history.undo(); this.publish({ saveStatus: "dirty" }); this.scheduleAutosave(); }
@@ -288,6 +332,132 @@ export class EditorStore {
   addPipelineEffect(layerId: string): void {
     this.execute("添加 WebGL 管线校验", (draft) => {
       findLayer(draft.project, layerId)?.effects.push(pipelineEffect());
+    });
+  }
+
+  addEffect(layerId: string, effectId: string, presetIndex = 1): void {
+    const instance = createP0EffectInstance(effectId, presetIndex);
+    this.execute(`添加 ${effectDefinition(effectId).displayName}`, (draft) => {
+      const layer = findLayer(draft.project, layerId);
+      if (layer === undefined) throw new Error(`Layer not found: ${layerId}`);
+      layer.effects.push(instance);
+    });
+    this.selectedLayerId = layerId;
+    this.publish({ selectedEffectId: instance.id });
+  }
+
+  toggleEffect(layerId: string, effectInstanceId: string): void {
+    this.execute("启停效果", (draft) => {
+      const effect = findEffect(findLayer(draft.project, layerId), effectInstanceId);
+      if (effect !== undefined) effect.enabled = !effect.enabled;
+    });
+  }
+
+  deleteEffect(layerId: string, effectInstanceId: string): void {
+    this.execute("删除效果", (draft) => {
+      const effects = findLayer(draft.project, layerId)?.effects;
+      const index = effects?.findIndex((effect) => effect.id === effectInstanceId) ?? -1;
+      if (effects !== undefined && index >= 0) effects.splice(index, 1);
+    });
+    if (this.snapshotValue.selectedEffectId === effectInstanceId) this.publish({ selectedEffectId: null });
+  }
+
+  applyEffectPreset(layerId: string, effectInstanceId: string, presetIndex: number): void {
+    this.execute("应用效果预设", (draft) => {
+      const effect = findEffect(findLayer(draft.project, layerId), effectInstanceId);
+      if (effect === undefined) return;
+      const definition = effectDefinition(effect.effectId);
+      const keyframeable = new Set(effectParameterFields(definition)
+        .filter((field) => field.keyframeable).map((field) => field.name));
+      effect.params = Object.fromEntries(Object.entries(presetParams(effect.effectId, presetIndex)).map(([name, value]) => [
+        name,
+        keyframeable.has(name) ? { mode: "constant", value: structuredClone(value) } : structuredClone(value)
+      ]));
+    });
+  }
+
+  updateEffectParameter(
+    layerId: string,
+    effectInstanceId: string,
+    field: EffectParameterField,
+    rawValue: JsonValue
+  ): void {
+    this.execute(`修改 ${field.label}`, (draft) => {
+      const layer = findLayer(draft.project, layerId);
+      const effect = findEffect(layer, effectInstanceId);
+      if (layer === undefined || effect === undefined) return;
+      let value = structuredClone(rawValue);
+      if (field.type === "number") {
+        if (typeof value !== "number" || !Number.isFinite(value)) throw new TypeError(`${field.label} must be finite.`);
+        const numeric = value as number;
+        value = Math.min(field.maximum ?? numeric, Math.max(field.minimum ?? numeric, numeric));
+      } else if (field.type === "string") {
+        if (typeof value !== "string") throw new TypeError(`${field.label} must be text.`);
+        value = value.slice(0, field.maxLength ?? value.length);
+      } else if (field.type === "boolean" && typeof value !== "boolean") {
+        throw new TypeError(`${field.label} must be boolean.`);
+      } else if (field.type === "array") {
+        if (!Array.isArray(value) || value.length !== 2 || value.some((item) => typeof item !== "number" || !Number.isFinite(item))) {
+          throw new TypeError(`${field.label} must be a finite vector2.`);
+        }
+        value = value.map((item) => {
+          const numeric = item as number;
+          return Math.min(field.maximum ?? numeric, Math.max(field.minimum ?? numeric, numeric));
+        }) as JsonValue;
+      }
+      const current = effect.params[field.name];
+      if (isAnimatableValue(current)) {
+        if (current.mode === "constant") current.value = value;
+        else if (current.mode === "keyframes" && current.keyframes) {
+          const time = effectEvaluation(draft.project, layer, effect, this.snapshotValue.currentTime).effect.effectTime;
+          const frame = current.keyframes.find((item) => Math.abs(item.time - time) < 0.0001);
+          if (frame) frame.value = value;
+          else current.keyframes.push({ time, value });
+          current.keyframes.sort((left, right) => left.time - right.time);
+        }
+      } else effect.params[field.name] = field.keyframeable ? { mode: "constant", value } : value;
+    });
+  }
+
+  effectParameterValue(
+    layerId: string,
+    effectInstanceId: string,
+    field: EffectParameterField
+  ): JsonValue {
+    const project = this.history.state.project;
+    const layer = findLayer(project, layerId);
+    const effect = findEffect(layer, effectInstanceId);
+    if (layer === undefined || effect === undefined) return "";
+    const value = effect.params[field.name];
+    if (!isAnimatableValue(value)) return structuredClone(value as JsonValue);
+    return evaluateAnimatableAt(value as never, "effect", effectEvaluation(
+      project,
+      layer,
+      effect,
+      this.snapshotValue.currentTime
+    )) as JsonValue;
+  }
+
+  addEffectKeyframe(layerId: string, effectInstanceId: string, field: EffectParameterField): void {
+    if (!field.keyframeable) return;
+    this.execute(`添加 ${field.label} 关键帧`, (draft) => {
+      const layer = findLayer(draft.project, layerId);
+      const effect = findEffect(layer, effectInstanceId);
+      if (layer === undefined || effect === undefined) return;
+      const current = effect.params[field.name];
+      const times = effectEvaluation(draft.project, layer, effect, this.snapshotValue.currentTime);
+      const value = isAnimatableValue(current)
+        ? evaluateAnimatableAt(current as never, "effect", times) as JsonValue
+        : structuredClone(current as JsonValue);
+      const time = times.effect.effectTime;
+      if (!isAnimatableValue(current) || current.mode === "constant") {
+        effect.params[field.name] = { mode: "keyframes", keyframes: [{ time, value, interpolation: "linear" }] };
+      } else if (current.mode === "keyframes" && current.keyframes) {
+        const frame = current.keyframes.find((item) => Math.abs(item.time - time) < 0.0001);
+        if (frame) frame.value = value;
+        else current.keyframes.push({ time, value });
+        current.keyframes.sort((left, right) => left.time - right.time);
+      }
     });
   }
 

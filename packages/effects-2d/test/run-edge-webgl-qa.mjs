@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
@@ -68,11 +68,16 @@ try {
   }
 
   if (process.argv.includes("--capture")) {
-    console.log(`WEBGL_GOLDENS=${JSON.stringify({
-      schemaVersion: "1.0.0",
+    const captured = {
+      schemaVersion: "1.1.0",
+      inputFixtureVersion: "real-raster-1.0.0",
+      baselineReason: "EffectTimeSample 1.1 explicit effect-instance random isolation and real raster inputs",
       runtime: outcome.result.runtime,
       frames: outcome.result.goldens
-    })}`);
+    };
+    const target = resolve(import.meta.dirname, "fixtures/webgl-golden-frames.json");
+    await writeFile(target, `${JSON.stringify(captured, null, 2)}\n`, "utf8");
+    console.log(`WEBGL_GOLDENS_WRITTEN=${target}`);
   } else {
     const fixture = JSON.parse(await readFile(
       resolve(import.meta.dirname, "fixtures/webgl-golden-frames.json"),
@@ -84,7 +89,8 @@ try {
   }
 
   const medians = Object.values(outcome.result.performance).map((entry) => entry.medianMs);
-  console.log(JSON.stringify({
+  const report = {
+    schemaVersion: "1.1.0",
     browser: outcome.result.runtime.userAgent,
     webgl: outcome.result.runtime.webglVersion,
     renderer: outcome.result.runtime.renderer,
@@ -97,13 +103,34 @@ try {
     maskChecks: outcome.result.masks.checked,
     alphaChecks: outcome.result.alpha.checked,
     deterministicChecks: outcome.result.deterministic.checked,
+    instanceRandomChecks: outcome.result.instanceRandom.checked,
+    instanceRandomThreeRunDeterministic:
+      outcome.result.instanceRandom.threeRunDeterministic,
+    instanceRandomStreamsDistinct: outcome.result.instanceRandom.streamsDistinct,
+    colorSpaceChecks: outcome.result.colorSpaces,
     qualityChecks: Object.keys(outcome.result.quality).length * 3,
     resourceKinds: Object.keys(outcome.result.resources).length,
     resourcesBalanced: Object.values(outcome.result.resources).every(
       (entry) => entry.created === entry.deleted && entry.duplicateDeletes === 0
     ),
-    benchmarkMedianMaxMs: Math.max(...medians)
-  }, null, 2));
+    benchmarkMedianMaxMs: Math.max(...medians),
+    gpuMedianMaxMs: Math.max(...Object.values(outcome.result.performance).map((entry) => entry.gpuMedianMs)),
+    onePercentLowFpsMin: Math.min(...Object.values(outcome.result.performance).map((entry) => entry.onePercentLowFps)),
+    drawCallsMax: Math.max(...Object.values(outcome.result.performance).map((entry) => entry.drawCalls)),
+    textureAllocationsMax: Math.max(...Object.values(outcome.result.performance).map((entry) => entry.textureAllocations)),
+    estimatedVramMaxBytes: Math.max(...Object.values(outcome.result.performance).map((entry) => entry.estimatedVramBytes)),
+    peakHeapMaxBytes: Math.max(...Object.values(outcome.result.performance).map((entry) => entry.peakHeapBytes)),
+    firstFrameMaxMs: Math.max(...Object.values(outcome.result.performance).map((entry) => entry.firstFrameMs)),
+    shaderCompileMaxMs: Math.max(...Object.values(outcome.result.performance).map((entry) => entry.shaderCompileMs)),
+    performance: outcome.result.performance,
+    resources: outcome.result.resources
+  };
+  await writeFile(
+    resolve(import.meta.dirname, "fixtures/webgl-evidence.json"),
+    `${JSON.stringify(report, null, 2)}\n`,
+    "utf8"
+  );
+  console.log(JSON.stringify(report, null, 2));
 } finally {
   await browser?.close();
   vite.kill();

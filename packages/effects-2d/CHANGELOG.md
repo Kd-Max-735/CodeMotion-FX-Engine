@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.1.0 - 2026-07-29
+
+Migrated all 39 Group 2 effects to G1's versioned `EffectTimeSample` and
+`TemporalEffectRenderContext`. Removed the private elapsed-time field and all
+project-duration/absolute-frame inference. Seeded motion, text, draw, light, and
+transition paths now obtain deterministic streams through `createEffectRandom`.
+Transition/composite WebGL renders validate and consume `DualInputTextures`.
+
+Updated the 40-item aggregate's T08 consumers for G3's strict interface. Catalog
+tests, CPU Golden capture, benchmark and Edge preview now resolve official
+`EffectTimeSample` 1.1.0 values from explicit effect and instance IDs and render
+G3's reviewed glyph-backed `TextRasterSource`. Removed the deprecated generic
+`makeTextExtrudePreviewInput` re-export; the 39 G2 effects and their 195 Golden
+hashes are unchanged.
+
+Added strict real-input provenance: multilingual glyph coverage, parsed SVG/contour
+geometry, brush coverage, decoded RGBA media, independent A/B inputs, matte and
+displacement inputs. String hashes no longer stand in for paths, text, brush assets,
+matte references, or displacement maps; unresolved or malformed inputs fail.
+
+CPU processing now uses linear-sRGB internally with sRGB, linear-sRGB, and Display-P3
+conversion, straight/premultiplied Alpha, feathered/inverted/translated masks, and
+real antialiased edges. The real Edge WebGL2 gate adds linear-sRGB execution, GPU
+timer queries, FPS and 1% Low, draw/texture/VRAM/heap, first-frame and shader-compile
+evidence. Added 156 independently addressable SVG covers and a 1.0.0 to 1.1.0
+migration that preserves parameter values while requiring the versioned time and
+raster-input channels.
+
+Added a machine-validated 39-by-20 S5R evidence matrix and durable CPU/Edge
+performance reports. Vector paths are flattened once per render and deterministically
+resampled by quality tier; this removes V02's per-pixel path reconstruction while
+preserving real parsed-SVG semantics. Its CPU Golden baseline was updated only after
+all parameter, Alpha, mask, color, determinism, and multi-quality semantic checks
+passed, with the resampling reason recorded in the fixture.
+
+Completed the G1 time-contract 1.1 audit. All G2 time fixtures now require explicit,
+non-empty `effectId` and `effectInstanceId`; CPU, Canvas2D and WebGL entry points
+validate both identities. Official `resolveEffectTimeSample` results render directly
+for all 39 effects. Six effects with observable random semantics verify distinct
+same-type instance streams and three-run determinism on both CPU and real Edge
+WebGL2. Random-dependent CPU/WebGL Goldens and performance evidence were regenerated
+only after these semantic checks passed.
+
+## 1.0.1 - 2026-07-29
+
+Corrected time-unit semantics without changing Effect Definition, Core, Schema, or
+Renderer APIs. The main Canvas2D and WebGL2 paths now carry elapsed timeline seconds
+separately from normalized progress. M01 `duration=1` therefore completes at one
+second and holds its final Alpha for the remainder of a six-second effect range.
+
+The same audit corrected all other Group 2 parameters declared in seconds or rates:
+M05 gravity, M06 period, M07/M08 frequency, T01/T06 glyph speed, T02 stagger, and L02
+cycle speed. Golden changes were accepted only after foreground-shape Alpha timing,
+all-parameter semantics, real Edge WebGL2, determinism, Alpha, mask, resource, and
+performance checks passed.
+
 ## 1.0.0 - 2026-07-28
 
 Initial Group 2 P0 release. Every item below adds its Effect Definition, parameter/UI

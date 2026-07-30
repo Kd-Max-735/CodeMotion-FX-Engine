@@ -66,7 +66,12 @@ try {
   const empty = report.filter((entry) => !entry.nonEmpty);
   if (empty.length > 0) throw new Error(`Empty previews: ${empty.map((entry) => entry.sourceId).join(",")}`);
   if (new Set(report.map((entry) => entry.hash)).size !== 40) {
-    throw new Error("The 40 Edge preview fingerprints are not pairwise distinct.");
+    const groups = Object.groupBy(report, (entry) => entry.hash);
+    const collisions = Object.entries(groups)
+      .filter(([, entries]) => entries.length > 1)
+      .map(([hash, entries]) => `${hash}:${entries.map((entry) => entry.sourceId).join(",")}`)
+      .join(";");
+    throw new Error(`The 40 Edge preview fingerprints are not pairwise distinct: ${collisions}`);
   }
   console.log(JSON.stringify({
     browser: await page.evaluate(() => navigator.userAgent),

@@ -1,9 +1,15 @@
 import type {
+  EffectTimeSample,
   EffectDefinition,
   JsonObject,
   RenderQuality
 } from "@codemotion/core";
-import type { RegisteredEffectDefinition } from "@codemotion/renderer-api";
+import type {
+  CoverageBuffer,
+  DualInputTextures,
+  LayerRasterizationInput,
+  RegisteredTemporalEffectDefinition
+} from "@codemotion/renderer-api";
 
 export type P0SourceId =
   | "M01" | "M02" | "M03" | "M04" | "M05" | "M06" | "M07" | "M08"
@@ -34,9 +40,16 @@ export interface PixelSurface {
 }
 
 export interface EffectRuntimeOptions {
-  readonly progress: number;
+  readonly time: EffectTimeSample;
+  /** @deprecated Compatibility input only; P0 1.1 runtimes require `time`. */
+  readonly progress?: number;
   readonly seed: number;
   readonly quality: RenderQuality;
+  readonly rasterInput: LayerRasterizationInput;
+  readonly secondaryRasterInput?: LayerRasterizationInput;
+  readonly dualInputTextures?: DualInputTextures;
+  readonly brushCoverage?: CoverageBuffer;
+  readonly brushAssetId?: string;
   readonly secondary?: PixelSurface;
   readonly mask?: PixelSurface;
 }
@@ -44,7 +57,7 @@ export interface EffectRuntimeOptions {
 export interface EffectPreset {
   readonly presetId: string;
   readonly effectId: string;
-  readonly version: "1.0.0";
+  readonly version: "1.1.0";
   readonly name: string;
   readonly tags: readonly string[];
   readonly params: JsonObject;
@@ -55,11 +68,11 @@ export interface PreviewDescriptor {
   readonly asset: string;
   readonly width: 160;
   readonly height: 90;
-  readonly frameProgress: 0.5;
+  readonly frameProgress: number;
   readonly alt: string;
 }
 
-export interface P0EffectDefinition extends RegisteredEffectDefinition {
+export interface P0EffectDefinition extends RegisteredTemporalEffectDefinition {
   readonly sourceId: P0SourceId;
   readonly implementationOwner: "Group 2";
   readonly presets: readonly [EffectPreset, EffectPreset, EffectPreset];

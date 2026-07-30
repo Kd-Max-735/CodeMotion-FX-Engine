@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "1.1.0",
+  "owner": "Group 3",
+  "scope": "T08 fx.text.textExtrude3D only",
+  "dimensions": [
+    "identity-version",
+    "schema-ui",
+    "presets",
+    "effect-time",
+    "translation-invariance",
+    "real-input",
+    "cpu-golden",
+    "webgl-golden",
+    "straight-alpha",
+    "premultiplied-alpha",
+    "srgb",
+    "linear-srgb",
+    "display-p3",
+    "mask-matte",
+    "determinism",
+    "size-seed-quality",
+    "performance",
+    "resources-dispose",
+    "preview-cover",
+    "documentation-migration"
+  ],
+  "rows": [
+    {
+      "sourceId": "T08",
+      "effectId": "fx.text.textExtrude3D",
+      "version": "1.0.0",
+      "checks": {
+        "identity-version": { "status": "PASS", "evidence": "T08 definition ID and effect instance ID validated independently" },
+        "schema-ui": { "status": "PASS", "evidence": "7 bounded properties and matching UI fields; progress removed" },
+        "presets": { "status": "PASS", "evidence": "3 named material/light presets without fixed time" },
+        "effect-time": { "status": "PASS", "evidence": "EffectTimeSample 1.1.0 from official resolver renders directly" },
+        "translation-invariance": { "status": "PASS", "evidence": "equal local progress across 0.8/3.2/11.75s, 24/60/120 FPS and translated project clocks" },
+        "real-input": { "status": "PASS", "evidence": "reviewed FX, 立体 and AΩ glyph coverage with immutable font provenance; generic pixels reject" },
+        "cpu-golden": { "status": "PASS", "evidence": "official-time 0/25/50/75/100 fixture" },
+        "webgl-golden": { "status": "PASS", "evidence": "WebGL2 indexed glyph geometry pass and reviewed preview fingerprint" },
+        "straight-alpha": { "status": "PASS", "evidence": "unassociated shading path and transparent RGB-zero rule" },
+        "premultiplied-alpha": { "status": "PASS", "evidence": "real raster fixture and output use premultiplied Alpha" },
+        "srgb": { "status": "PASS", "evidence": "sRGB raster target and output verified" },
+        "linear-srgb": { "status": "PASS", "evidence": "linear-sRGB provenance accepted without substitution" },
+        "display-p3": { "status": "PASS", "evidence": "Display-P3 provenance accepted without substitution" },
+        "mask-matte": { "status": "PASS", "evidence": "zero mask clears Alpha/RGB on CPU and WebGL mask stack executes" },
+        "determinism": { "status": "PASS", "evidence": "three executions per instance and extreme case are byte-identical" },
+        "size-seed-quality": { "status": "PASS", "evidence": "multiple sizes/seeds and draft/preview/final indexed geometry" },
+        "performance": { "status": "PASS", "evidence": "64x36 preview benchmark against 35 ms budget" },
+        "resources-dispose": { "status": "PASS", "evidence": "textures/framebuffers released once and effect dispose terminal" },
+        "preview-cover": { "status": "PASS", "evidence": "official resolver drives Unicode live preview at arbitrary progress" },
+        "documentation-migration": { "status": "PASS", "evidence": "README/CHANGELOG/S5R record and 0.9.0 to 1.0.0 parameter migration" }
+      }
+    }
+  ],
+  "totals": {
+    "effects": 1,
+    "dimensions": 20,
+    "checks": 20,
+    "passed": 20
+  }
+}

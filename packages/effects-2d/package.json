@@ -1,6 +1,6 @@
 {
   "name": "@codemotion/effects-2d",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -18,16 +18,21 @@
     "dist/**/*.d.ts.map",
     "README.md",
     "CHANGELOG.md",
-    "preview.html"
+    "preview.html",
+    "previews/*.svg"
   ],
   "scripts": {
     "benchmark": "node ./benchmark.mjs",
+    "capture:cpu-golden": "node ./test/capture-cpu-goldens.mjs",
+    "evidence:s5r": "node ./test/generate-s5r-matrix.mjs",
+    "generate:previews": "node ./generate-previews.mjs",
     "qa:webgl": "node ./test/run-edge-webgl-qa.mjs",
     "qa:preview": "node ./test/run-edge-preview-qa.mjs"
   },
   "dependencies": {
     "@codemotion/core": "0.3.0",
     "@codemotion/effects-3d": "1.0.0",
-    "@codemotion/renderer-api": "0.2.0"
+    "@codemotion/renderer-api": "0.2.0",
+    "@codemotion/timeline": "0.1.0"
   }
 }

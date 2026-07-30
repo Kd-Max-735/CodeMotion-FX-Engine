@@ -42,9 +42,16 @@ import {
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type DragEvent } from "react";
 import { evaluateAnimatable } from "@codemotion/timeline";
 import type { JsonValue, LayerDefinition, MotionProject, Vector3 } from "@codemotion/core";
-import { EFFECT_DRAG_MIME, LAB_PIPELINE_EFFECT_ID, isLabPipelineEffect } from "./lab-effect.js";
+import { EFFECT_DRAG_MIME, isLabPipelineEffect } from "./lab-effect.js";
+import {
+  P0_EDITOR_EFFECTS,
+  effectDefinition,
+  effectParameterFields,
+  projectResourceIds,
+  type EffectParameterField
+} from "./effect-catalog.js";
 import { findLayer, LAYER_PROPERTY_SCHEMA, locateProjectError, mainLayers, pipelineEffect, type PropertyFieldSchema } from "./model.js";
-import { CorePreviewRenderer, type PreviewStats } from "./preview-renderer.js";
+import { CorePreviewRenderer, ProjectPreviewRenderer, type PreviewStats } from "./preview-renderer.js";
 import { RenderCenter } from "./RenderCenter.js";
 import { AiPlanner } from "./AiPlanner.js";
 import { EditorStore } from "./store.js";
@@ -207,9 +214,15 @@ function LayerPanel({ store }: AppProps) {
   const [tab, setTab] = useState<"layers" | "effects">("layers");
   const [search, setSearch] = useState("");
   const layers = [...mainLayers(snapshot.document.project)].sort((a, b) => b.zIndex - a.zIndex);
+  const selectedLayerId = snapshot.document.selectedLayerId;
+  const catalog = P0_EDITOR_EFFECTS.filter((effect) =>
+    `${effect.sourceId} ${effect.displayName} ${effect.category} ${effect.tags.join(" ")}`
+      .toLowerCase().includes(search.toLowerCase())
+  );
   const dropEffect = (event: DragEvent, layerId: string) => {
     event.preventDefault();
-    if (event.dataTransfer.getData(EFFECT_DRAG_MIME) === LAB_PIPELINE_EFFECT_ID) store.addPipelineEffect(layerId);
+    const effectId = event.dataTransfer.getData(EFFECT_DRAG_MIME);
+    if (P0_EDITOR_EFFECTS.some((effect) => effect.effectId === effectId)) store.addEffect(layerId, effectId);
   };
   return (
     <aside className="left-panel panel-surface">
@@ -229,8 +242,16 @@ function LayerPanel({ store }: AppProps) {
         ))}</div>
       </> : <>
         <label className="search-box"><Search size={15} /><input placeholder="搜索效果" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
-        {"WebGL 管线校验".toLowerCase().includes(search.toLowerCase()) && <div className="effect-item" draggable onDragStart={(event) => event.dataTransfer.setData(EFFECT_DRAG_MIME, LAB_PIPELINE_EFFECT_ID)}><span className="effect-icon"><Zap size={16} /></span><span><b>WebGL 管线校验</b><small>Renderer · Preview</small></span><span className="status-chip">真实</span></div>}
-        <div className="catalog-note"><span>效果目录</span><b>0 / 40</b><small>阶段 5 接入正式效果 ID</small></div>
+        <div className="effect-catalog">{catalog.map((effect) => <button
+          key={effect.effectId}
+          className="effect-item"
+          draggable
+          disabled={!selectedLayerId}
+          title={selectedLayerId ? `添加到 ${selectedLayerId}` : "请先选择图层"}
+          onClick={() => selectedLayerId && store.addEffect(selectedLayerId, effect.effectId)}
+          onDragStart={(event) => event.dataTransfer.setData(EFFECT_DRAG_MIME, effect.effectId)}
+        ><span className="effect-icon"><Zap size={16} /></span><span><b>{effect.displayName}</b><small>{effect.sourceId} · {effect.category}</small></span><span className="status-chip">P0</span></button>)}</div>
+        <div className="catalog-note"><span>效果目录</span><b>{P0_EDITOR_EFFECTS.length} / 40</b><small>点击或拖拽添加正式 P0 效果</small></div>
       </>}
     </aside>
   );
@@ -239,14 +260,22 @@ function LayerPanel({ store }: AppProps) {
 function CanvasViewport({ store }: AppProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const renderer = useMemo(() => new CorePreviewRenderer(), []);
+  const renderer = useMemo(() => new ProjectPreviewRenderer(), []);
   const [stats, setStats] = useState<PreviewStats>({ backend: "Unavailable", cpuMs: 0, drawCalls: 0, textures: 0, width: 0, height: 0 });
   const project = snapshot.document.project;
   const selected = findLayer(project, snapshot.document.selectedLayerId);
   useEffect(() => {
     let active = true;
     const frame = requestAnimationFrame(() => {
-      if (active && canvas.current) setStats(renderer.render(project, snapshot.currentTime, canvas.current));
+      if (active && canvas.current) {
+        void renderer.render(project, snapshot.currentTime, canvas.current)
+          .then((next) => { if (active) setStats(next); })
+          .catch((cause) => {
+            if (active && (!(cause instanceof DOMException) || cause.name !== "AbortError")) {
+              setStats({ backend: "Unavailable", cpuMs: 0, drawCalls: 0, textures: 0, width: 0, height: 0, error: String(cause) });
+            }
+          });
+      }
     });
     return () => {
       active = false;
@@ -258,11 +287,12 @@ function CanvasViewport({ store }: AppProps) {
   const scale = selected ? evaluateAnimatable(selected.transform.scale, snapshot.currentTime) : undefined;
   const dropEffect = (event: DragEvent) => {
     event.preventDefault();
-    if (selected && event.dataTransfer.getData(EFFECT_DRAG_MIME) === LAB_PIPELINE_EFFECT_ID) store.addPipelineEffect(selected.id);
+    const effectId = event.dataTransfer.getData(EFFECT_DRAG_MIME);
+    if (selected && P0_EDITOR_EFFECTS.some((effect) => effect.effectId === effectId)) store.addEffect(selected.id, effectId);
   };
   return (
     <section className="canvas-workspace" onDragOver={(event) => event.preventDefault()} onDrop={dropEffect}>
-      <div className="canvas-toolbar"><div className="tool-segment"><IconButton label="选择工具" active><MousePointer2 size={16} /></IconButton><IconButton label="框选工具"><Square size={16} /></IconButton><IconButton label="网格"><Grid3X3 size={16} /></IconButton></div><span className={`backend-status ${stats.backend === "WebGL2" ? "ok" : "fail"}`}><i />{stats.backend}{stats.backend === "WebGL2" && " · Core 0.3"}</span><div className="zoom-control"><IconButton label="适合画布" onClick={() => store.setZoom(52)}><Maximize2 size={15} /></IconButton><input aria-label="画布缩放" type="range" min="15" max="100" value={snapshot.zoom} onChange={(event) => store.setZoom(Number(event.target.value))} /><b>{snapshot.zoom}%</b></div></div>
+      <div className="canvas-toolbar"><div className="tool-segment"><IconButton label="选择工具" active><MousePointer2 size={16} /></IconButton><IconButton label="框选工具"><Square size={16} /></IconButton><IconButton label="网格"><Grid3X3 size={16} /></IconButton></div><span className={`backend-status ${stats.backend === "G5 Shared" ? "ok" : "fail"}`}><i />{stats.backend}{stats.timeContract && ` · Time ${stats.timeContract}`}</span><div className="zoom-control"><IconButton label="适合画布" onClick={() => store.setZoom(52)}><Maximize2 size={15} /></IconButton><input aria-label="画布缩放" type="range" min="15" max="200" value={snapshot.zoom} onChange={(event) => store.setZoom(Number(event.target.value))} /><b>{snapshot.zoom}%</b></div></div>
       <div className="canvas-stage">
         <div className="canvas-frame" style={{ width: `${snapshot.zoom}%`, aspectRatio: `${project.width}/${project.height}` }}>
           <canvas ref={canvas} aria-label="WebGL 合成预览" />
@@ -280,15 +310,70 @@ function PropertyPanel({ store }: AppProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const selected = findLayer(snapshot.document.project, snapshot.document.selectedLayerId);
   if (!selected) return <aside className="right-panel panel-surface empty-panel"><Settings2 /><span>未选择图层</span></aside>;
+  const selectedEffect = selected.effects.find((effect) => effect.id === snapshot.selectedEffectId);
   return (
     <aside className="right-panel panel-surface">
       <div className="inspector-head"><div><span className="layer-icon">{selected.type === "text" ? "T" : <Box size={15} />}</span><span><b>{selected.name}</b><small>{selected.id}</small></span></div><IconButton label="属性面板设置"><Settings2 size={15} /></IconButton></div>
       <div className="inspector-scroll">
         {LAYER_PROPERTY_SCHEMA.sections.map((section) => <details key={section.title} open><summary>{section.title}<ChevronDown size={14} /></summary><div className="schema-fields">{section.fields.map((field) => <PropertyField key={`${field.path}-${field.component ?? ""}`} field={field} store={store} />)}</div></details>)}
-        <details open><summary>效果栈 <span className="count">{selected.effects.length}</span><ChevronDown size={14} /></summary><div className="effect-stack">{selected.effects.length === 0 ? <span className="empty-state">暂无效果</span> : selected.effects.map((effect, index) => <div className="stack-row" key={effect.id}><Zap size={14} /><span><b>WebGL 管线校验</b><small>{effect.id}</small></span><IconButton label="效果上移" disabled={index === 0} onClick={() => store.reorderEffect(selected.id, effect.id, -1)}><ArrowUp size={13} /></IconButton><IconButton label="效果下移" disabled={index === selected.effects.length - 1} onClick={() => store.reorderEffect(selected.id, effect.id, 1)}><ArrowDown size={13} /></IconButton></div>)}</div></details>
+        <details open><summary>效果栈 <span className="count">{selected.effects.length}</span><ChevronDown size={14} /></summary><div className="effect-stack">{selected.effects.length === 0 ? <span className="empty-state">暂无效果</span> : selected.effects.map((effect, index) => {
+          const definition = P0_EDITOR_EFFECTS.find((entry) => entry.effectId === effect.effectId);
+          return <div className={`stack-row${snapshot.selectedEffectId === effect.id ? " selected" : ""}`} key={effect.id} onClick={() => store.selectEffect(effect.id)}>
+            <IconButton label={effect.enabled ? "停用效果" : "启用效果"} active={effect.enabled} onClick={() => store.toggleEffect(selected.id, effect.id)}>{effect.enabled ? <Eye size={13} /> : <EyeOff size={13} />}</IconButton>
+            <span><b>{definition?.displayName ?? effect.effectId}</b><small>{definition?.sourceId ?? effect.version} · {effect.id}</small></span>
+            <IconButton label="效果上移" disabled={index === 0} onClick={() => store.reorderEffect(selected.id, effect.id, -1)}><ArrowUp size={13} /></IconButton>
+            <IconButton label="效果下移" disabled={index === selected.effects.length - 1} onClick={() => store.reorderEffect(selected.id, effect.id, 1)}><ArrowDown size={13} /></IconButton>
+            <IconButton label="删除效果" onClick={() => store.deleteEffect(selected.id, effect.id)}><Trash2 size={13} /></IconButton>
+          </div>;
+        })}</div></details>
+        {selectedEffect && <EffectInspector layerId={selected.id} effectId={selectedEffect.id} store={store} />}
       </div>
     </aside>
   );
+}
+
+function EffectInspector({ layerId, effectId, store }: { layerId: string; effectId: string; store: EditorStore }) {
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const layer = findLayer(snapshot.document.project, layerId);
+  const effect = layer?.effects.find((entry) => entry.id === effectId);
+  if (effect === undefined || isLabPipelineEffect(effect)) return null;
+  const definition = effectDefinition(effect.effectId);
+  const fields = effectParameterFields(definition);
+  return <details className="effect-inspector" open>
+    <summary>{definition.displayName}<span className="count">Schema</span><ChevronDown size={14} /></summary>
+    <div className="preset-buttons" aria-label={`${definition.displayName} 预设`}>
+      {definition.presets.map((preset, index) => <button key={preset.presetId} onClick={() => store.applyEffectPreset(layerId, effectId, index)}>{preset.name.replace(`${definition.displayName} `, "")}</button>)}
+    </div>
+    <div className="schema-fields">{fields.map((field) => <EffectField key={field.name} layerId={layerId} effectId={effectId} field={field} store={store} />)}</div>
+  </details>;
+}
+
+function EffectField({ layerId, effectId, field, store }: {
+  layerId: string;
+  effectId: string;
+  field: EffectParameterField;
+  store: EditorStore;
+}) {
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const value = store.effectParameterValue(layerId, effectId, field);
+  const update = (next: JsonValue): void => store.updateEffectParameter(layerId, effectId, field, next);
+  let input;
+  if (field.control === "select") {
+    input = <select value={String(value)} onChange={(event) => update(event.target.value)}>{field.options?.map((option) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}</select>;
+  } else if (field.control === "toggle") {
+    input = <input type="checkbox" checked={value === true} onChange={(event) => update(event.target.checked)} />;
+  } else if (field.control === "color") {
+    input = <input type="color" value={typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : "#ffffff"} onChange={(event) => update(event.target.value)} />;
+  } else if (field.control === "resource") {
+    const resources = projectResourceIds(snapshot.document.project);
+    input = <select value={String(value)} onChange={(event) => update(event.target.value)}>{!resources.includes(String(value)) && <option>{String(value)}</option>}{resources.map((resource) => <option key={resource}>{resource}</option>)}</select>;
+  } else if (field.control === "vector2") {
+    const vector = Array.isArray(value) ? value : [0, 0];
+    input = <span className="vector-input">{[0, 1].map((component) => <input key={component} aria-label={`${field.label} ${component === 0 ? "X" : "Y"}`} type="number" min={field.minimum} max={field.maximum} step={field.step} value={Number(vector[component] ?? 0)} onChange={(event) => update(vector.map((item, index) => index === component ? event.target.valueAsNumber : item) as JsonValue)} />)}</span>;
+  } else {
+    input = <input type={field.control === "number" ? "number" : "text"} value={typeof value === "string" || typeof value === "number" ? value : ""} min={field.minimum} max={field.maximum} step={field.step} minLength={field.minLength} maxLength={field.maxLength} onChange={(event) => update(field.control === "number" ? event.target.valueAsNumber : event.target.value)} />;
+  }
+  return <label className="schema-field effect-field"><span>{field.label}{field.unit && <small>{field.unit}</small>}</span><span className="field-control">{input}{field.keyframeable && <IconButton label={`在 ${formatTime(snapshot.currentTime, snapshot.document.project.fps)} 添加 ${field.label} 关键帧`} onClick={() => store.addEffectKeyframe(layerId, effectId, field)}><KeyRound size={13} /></IconButton>}</span></label>;
 }
 
 function PropertyField({ field, store }: { field: PropertyFieldSchema; store: EditorStore }) {
@@ -319,6 +404,18 @@ function TimelineRow({ layer, duration, selected, onSelect }: { layer: LayerDefi
   const keyframeTimes: number[] = [];
   for (const item of [layer.opacity, layer.transform.position, layer.transform.scale, layer.transform.rotation]) {
     if (item.mode === "keyframes") item.keyframes.forEach((frame) => keyframeTimes.push(frame.time));
+  }
+  for (const effect of layer.effects) {
+    for (const value of Object.values(effect.params)) {
+      if (typeof value === "object" && value !== null && !Array.isArray(value)
+        && "mode" in value && value.mode === "keyframes" && "keyframes" in value && Array.isArray(value.keyframes)) {
+        value.keyframes.forEach((frame) => {
+          if (typeof frame === "object" && frame !== null && "time" in frame && typeof frame.time === "number") {
+            keyframeTimes.push(layer.startTime + (effect.startTime ?? 0) + frame.time);
+          }
+        });
+      }
+    }
   }
   return <><button className={`timeline-layer-label${selected ? " selected" : ""}`} onClick={onSelect}><span className={`layer-color color-${layer.zIndex % 3}`} /><span>{layer.name}</span></button><div className="track"><span className="clip" style={{ left: `${layer.startTime / duration * 100}%`, width: `${(layer.endTime - layer.startTime) / duration * 100}%` }} />{keyframeTimes.map((time, index) => <i key={`${time}-${index}`} className="keyframe" title={`${time.toFixed(2)}s`} style={{ left: `${time / duration * 100}%` }} />)}</div></>;
 }

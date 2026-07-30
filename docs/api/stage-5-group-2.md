@@ -1,6 +1,76 @@
 # Stage 5 Group 2 effect delivery
 
-Status: **G2-S5 PASS**
+Status: **G2-S5R-T08-CONSUMER PASS / S5R BLOCKED — Group 2 implementation slice 39/39 PASS**
+
+## S5R remediation result (2026-07-29)
+
+All 39 Group 2 effects pass the G1 temporal/raster contract and the complete
+39-by-20 self-check matrix (`packages/effects-2d/test/fixtures/s5r-self-check.json`):
+780/780 checks are PASS. The package no longer contains `__cmfxElapsedSeconds`.
+Every runtime consumes `EffectTimeSample`; seeded behavior uses
+`createEffectRandom`; transition/composite WebGL paths consume
+`DualInputTextures`. Missing temporal or real raster provenance rejects explicitly.
+
+Reviewed evidence:
+
+- G2 unit suite: 450/450 tests, including all 156 declared parameter perturbations,
+  arbitrary project start/FPS/duration translation invariance, real multilingual
+  glyph/SVG/RGBA/A-B inputs, Alpha, masks, three-run determinism, sizes, seeds and
+  quality grades;
+- CPU Golden: 200/200 aggregate frames (195 G2 plus unchanged five-frame T08);
+- Edge 150 WebGL2/ANGLE D3D11: 195/195 G2 `readPixels` Goldens, 156/156 parameter
+  perturbations, 39 semantic sequences, 39 Alpha, 39 mask, 39 deterministic and
+  117 quality executions;
+- colors: 39 sRGB and 39 linear-sRGB GPU checks, 39 Display-P3 CPU checks with the
+  G1 renderer's explicit Display-P3 fallback exercised;
+- Edge performance: maximum render/readback median 3.2 ms, GPU median 0.037 ms,
+  minimum 1% Low 117.65 FPS, maximum two draw calls/two textures/55,296 bytes
+  estimated VRAM, 34,622,482-byte peak heap, 48.5 ms first frame and 3.3 ms shader
+  compile; five resource kinds balanced with no duplicate delete;
+- CPU benchmark: 40/40 aggregate effects within declared budgets; V02 path geometry
+  is precomputed and deterministically resampled by quality tier;
+- Edge previews: 40/40 non-empty and pairwise-distinct; 156 effect/preset SVG cover
+  paths are independently addressable without hash anchors.
+
+The full repository gate remains blocked: `npm test` passes 645/646 tests. The
+remaining G5 exporter consumer still sends T08 a generic surface and legacy
+`progress` at `packages/exporter/src/project.ts:633`, then calls `renderPixels` at
+line 635 instead of supplying the required `TextExtrude3DRasterInput`. G2 is not
+authorized to modify the Group 5 exporter,
+so the Stage 5R aggregate is not reported PASS.
+
+### Time contract 1.1 identity closure
+
+Every G2 `EffectTimeSample` construction now explicitly receives the real Effect
+Definition ID and a unique caller-owned `EffectInstance.id`; no helper infers an
+instance identity and no common fixed instance ID is shared between effects. CPU,
+Canvas2D and WebGL consumers reject a missing, empty, wrong-version or wrong-type
+identity.
+
+The additional tests render all 39 effects directly from the official
+`resolveEffectTimeSample` output. M08, T06, T07, D02, D04 and L01 additionally use
+two instances of the same effect type: A and B produce distinct random streams, while
+each instance reproduces the same result across three runs. The real Edge gate repeats
+all six instance-isolation checks, with three-run determinism and distinct streams.
+
+### T08 aggregate consumer closure
+
+The G2 aggregate no longer re-exports or calls the removed
+`makeTextExtrudePreviewInput` compatibility path. Catalog tests, CPU Golden capture,
+benchmark and Edge preview now explicitly pass `fx.text.textExtrude3D`, a
+caller-owned `effectInstanceId`, effect-local seconds, duration, FPS and project
+start into the official `resolveProjectTimeSample` / `resolveLayerTimeSample` /
+`resolveEffectTimeSample` chain. The resulting time drives G3's reviewed
+`makeTextExtrudeRasterFixture`, which supplies real font identity, glyph metrics and
+non-empty coverage rather than a generic pixel surface.
+
+The aggregate suite passes 451/451 tests, including direct T08 CPU rendering and
+all 40 registered WebGL paths with balanced release. The T08 five-frame CPU Golden
+was recaptured only after semantic validation. The G2 39-effect / 195-frame subset
+retained SHA-256
+`5d422022de5f2c4a7e6b322d74ce12ff77d9738663a317ff4ffc859f34379577`
+before and after capture. Edge 150 renders 40/40 non-empty and pairwise-distinct
+aggregate previews.
 
 ## Scope
 
@@ -13,7 +83,7 @@ contracts without changing public Core, Schema, compositor or renderer APIs.
 
 Each Group 2 effect provides:
 
-- unique source/effect ID and version `1.0.0`;
+- unique source/effect ID and version `1.1.0`;
 - bounded parameter JSON Schema, UI Schema, defaults and three valid presets;
 - deterministic CPU/Canvas2D implementation and WebGL2 shader execution;
 - preferred/fallback backend, performance class and three quality levels;
@@ -36,6 +106,7 @@ npm test
 npm run benchmark -w @codemotion/effects-2d
 npm run qa:webgl -w @codemotion/effects-2d
 npm run qa:preview -w @codemotion/effects-2d
+npm run evidence:s5r -w @codemotion/effects-2d
 ```
 
 Verified on 2026-07-28:
@@ -81,6 +152,26 @@ CPU Golden changes were recorded only after both the exhaustive CPU/fallback
 perturbation gate and the real Edge WebGL2 gate passed. The reason is the repaired
 parameter, edge-mode, composite-mask and Alpha semantics; the independent WebGL
 fixture was captured from real `readPixels`, not from FakeGL draw-call counting.
+
+## S7R time-unit regression closure
+
+On 2026-07-29, G2 separated elapsed timeline seconds from normalized effect progress
+inside both Canvas2D and WebGL2 paths. For M01 on a six-second range, `duration=1`
+with linear easing now produces foreground-shape Alpha at 0, 0.25, 1, 3, and 5.9
+seconds of 0%, 25%, 100%, 100%, and 100% respectively.
+
+The first 40 effects contain nine G2 parameters with seconds or rate units and no
+frame/fps/millisecond parameter. The audit covers M01 duration, M05 gravity, M06
+period, M07/M08 frequency, T01/T06 glyph speed, T02 stagger, and L02 cycle speed.
+Their declarations and UI units remain unchanged; their CPU/fallback and WebGL
+implementations now consume elapsed seconds. No AI, editor, exporter, T08, Core,
+Schema, or Renderer API file changed.
+
+Final S7R verification passed the repository typecheck, 18 files / 413 tests,
+40/40 CPU benchmarks, 200 CPU Golden Frames, and the real Edge WebGL2 suite:
+195 pixel-readback Golden Frames, 156 parameter perturbations, 39 Alpha checks,
+39 zero-mask checks, 39 deterministic reruns, 117 quality-tier executions,
+balanced resource disposal, and 39/39 GPU benchmark budgets.
 
 ## T08 seam closure
 

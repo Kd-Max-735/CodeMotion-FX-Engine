@@ -137,13 +137,36 @@ await desktop.locator("input[aria-label='时间轴播放头']").fill("2");
 await desktop.waitForFunction(() => typeof window.__cmfxQa?.timeline === "number");
 const timelineLatency = await desktop.evaluate(() => window.__cmfxQa.timeline);
 assert(timelineLatency < 200, `Timeline feedback took ${timelineLatency.toFixed(1)}ms.`);
+const halfSecondRender = desktop.waitForResponse((response) =>
+  response.url().endsWith("/api/editor-preview")
+  && response.status() === 200
+  && response.headers()["x-cmfx-time"] === "0.5"
+);
+await desktop.locator("input[aria-label='时间轴播放头']").fill("0.5");
+await halfSecondRender;
+const canvasBeforeP0 = await canvasFingerprint(desktop);
 await desktop.locator(".panel-tabs button").filter({ hasText: "特效" }).click();
-await desktop.locator(".effect-item").dragTo(desktop.locator(".canvas-stage"));
+const addedP0 = desktop.waitForResponse((response) =>
+  response.url().endsWith("/api/editor-preview")
+  && response.status() === 200
+  && response.headers()["x-cmfx-time"] === "0.5"
+  && (response.request().postData() ?? "").includes('"effectId":"fx.motion.fade"')
+);
+await desktop.locator(".effect-item").filter({ hasText: "M01" }).dragTo(desktop.locator(".canvas-stage"));
+await addedP0;
 assert(await desktop.locator(".stack-row").count() === 1, "Effect drag-and-drop did not update the selected layer stack.");
-await desktop.locator(".save-indicator").filter({ hasText: "有改动" }).waitFor();
-await desktop.waitForFunction(() => document.querySelector(".canvas-footer span:nth-child(2)")?.textContent?.includes("6 Draw Calls"));
+await desktop.waitForFunction(() => document.querySelector(".canvas-footer span:nth-child(2)")?.textContent?.includes("3 Draw Calls"));
+await desktop.waitForFunction((before) => {
+  const canvas = document.querySelector("canvas[aria-label='WebGL 合成预览']");
+  const context = canvas?.getContext("2d");
+  if (!canvas || !context) return false;
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let hash = 2166136261;
+  for (let offset = 0; offset < pixels.length; offset += 97) hash = Math.imul(hash ^ pixels[offset], 16777619);
+  return (hash >>> 0) !== before;
+}, canvasBeforeP0);
 const canvasAfterEffect = await canvasFingerprint(desktop);
-assert(canvasAfterEffect !== canvasBeforeEffect, "The project wrapper was not mapped to the internal WebGL validation pass.");
+assert(canvasAfterEffect !== canvasBeforeP0, "M01 did not change the real project preview.");
 await desktop.locator(".save-indicator").filter({ hasText: "已自动保存" }).waitFor({ timeout: 10_000 });
 const savedProjectJson = await desktop.evaluate(() => {
   const envelope = JSON.parse(localStorage.getItem("codemotion.editor.autosave.v1"));
@@ -153,8 +176,11 @@ const savedProject = loadProject(savedProjectJson);
 const savedAccentLayer = savedProject.compositions[0].layers.find((layer) => layer.id === "layer.accent");
 const savedEffect = savedAccentLayer.effects[0];
 assert(savedAccentLayer.visible === true, "Autosave retained a temporarily hidden core layer.");
-assert(savedEffect?.effectId === "fx.lab.pipelineValidation", `Unexpected autosaved effect ID: ${savedEffect?.effectId}`);
-assert(savedEffect?.enabled === true && savedEffect?.params?.strength?.value === 1, "Autosaved pipeline effect lost state.");
+assert(savedEffect?.effectId === "fx.motion.fade", `Unexpected autosaved effect ID: ${savedEffect?.effectId}`);
+assert(savedEffect?.enabled === true
+  && savedEffect?.params?.from?.value === 0
+  && savedEffect?.params?.to?.value === 1,
+"Autosaved M01 effect lost state.");
 
 await desktop.reload({ waitUntil: "networkidle" });
 await desktop.locator(".recovery-bar").waitFor();
@@ -166,15 +192,24 @@ await desktop.locator(".save-indicator.saved").waitFor({ timeout: 10_000 });
 const recoveredSaveText = await desktop.locator(".save-indicator").textContent();
 const recoveredErrorText = await desktop.locator(".error-strip").count() > 0 ? await desktop.locator(".error-strip").textContent() : "none";
 assert(recoveredSaveText?.includes("已自动保存"), `Recovered editor save state was ${JSON.stringify(recoveredSaveText)}; error: ${recoveredErrorText}`);
-await desktop.locator("input[aria-label='时间轴播放头']").fill("2");
-await desktop.waitForFunction(() => document.querySelector(".transport b")?.textContent === "00:02:00");
+const recoveredHalfSecond = desktop.waitForResponse((response) =>
+  response.url().endsWith("/api/editor-preview")
+  && response.status() === 200
+  && response.headers()["x-cmfx-time"] === "0.5"
+  && (response.request().postData() ?? "").includes('"effectId":"fx.motion.fade"')
+);
+await desktop.locator("input[aria-label='时间轴播放头']").fill("0.5");
+await recoveredHalfSecond;
 await desktop.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 const recoveredDrawCalls = await desktop.locator(".canvas-footer span:nth-child(2)").textContent();
 const recoveredBackend = await desktop.locator(".backend-status").first().textContent();
 const recoveredCanvasError = await desktop.locator(".canvas-error").count() > 0 ? await desktop.locator(".canvas-error").textContent() : "none";
-assert(recoveredDrawCalls?.includes("6 Draw Calls"), `Recovered preview reported ${JSON.stringify(recoveredDrawCalls)}; backend: ${recoveredBackend}; error: ${recoveredCanvasError}`);
+assert(recoveredDrawCalls?.includes("3 Draw Calls"), `Recovered preview reported ${JSON.stringify(recoveredDrawCalls)}; backend: ${recoveredBackend}; error: ${recoveredCanvasError}`);
 const canvasAfterRecovery = await canvasFingerprint(desktop);
-assert(canvasAfterRecovery === canvasAfterEffect, "Recovered pipeline preview differs from the autosaved preview.");
+assert(
+  canvasAfterRecovery === canvasAfterEffect,
+  `Recovered pipeline preview differs from the autosaved preview: before=${canvasAfterEffect}, after=${canvasAfterRecovery}.`
+);
 assert(await desktop.locator(".error-strip").count() === 0, "Recovered editor displayed an unexpected error strip.");
 const downloadPromise = desktop.waitForEvent("download");
 await desktop.locator(".export-button").click();
@@ -183,7 +218,7 @@ const downloadPath = await download.path();
 assert(downloadPath, "Project download did not produce a file.");
 const downloadedJson = await readFile(downloadPath, "utf8");
 const downloadedProject = loadProject(downloadedJson);
-assert(downloadedProject.compositions[0].layers.find((layer) => layer.id === "layer.accent").effects[0]?.effectId === "fx.lab.pipelineValidation", "Downloaded project lost the pipeline effect.");
+assert(downloadedProject.compositions[0].layers.find((layer) => layer.id === "layer.accent").effects[0]?.effectId === "fx.motion.fade", "Downloaded project lost M01.");
 assert(saveProject(downloadedProject) === downloadedJson, "Downloaded project serialization is not deterministic.");
 await desktop.screenshot({ path: resolve(outputDir, "editor-desktop.png"), fullPage: true });
 await desktop.getByTitle("特效实验室").click();

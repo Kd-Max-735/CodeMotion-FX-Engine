@@ -1,18 +1,33 @@
-import type {
-  EffectDefinition,
-  JsonObject,
-  JsonValue
+import {
+  TIME_CONTRACT_VERSION,
+  type EffectDefinition,
+  type EffectInstance,
+  type JsonObject,
+  type JsonValue,
+  type TextLayer,
+  type TransformDefinition
 } from "@codemotion/core";
-import type {
-  EffectRenderContext,
-  RenderOutput,
-  TextureHandle
+import {
+  assertDualInputTextures,
+  assertLayerRasterizationInput,
+  assertTemporalEffectContext,
+  type CoverageBuffer,
+  type DualInputTextures,
+  type LayerRasterizationInput,
+  type RenderOutput,
+  type TemporalEffectRenderContext,
+  type TextureHandle
 } from "@codemotion/renderer-api";
 import {
   TEXT_EXTRUDE_3D,
-  makeTextExtrudePreviewInput,
+  makeTextExtrudeRasterFixture,
   type TextExtrude3DEffectDefinition
 } from "@codemotion/effects-3d";
+import {
+  resolveEffectTimeSample,
+  resolveLayerTimeSample,
+  resolveProjectTimeSample
+} from "@codemotion/timeline";
 import {
   GROUP_2_BLUEPRINTS,
   GROUP_3_REQUIRED_EFFECT_ID
@@ -140,11 +155,11 @@ function makePreset(
   return Object.freeze({
     presetId: `preset.${blueprint.sourceId.toLowerCase()}.${names[index].toLowerCase()}`,
     effectId: blueprint.effectId,
-    version: "1.0.0",
+    version: "1.1.0",
     name: `${blueprint.displayName} ${names[index]}`,
     tags: Object.freeze([blueprint.category, names[index].toLowerCase(), "p0"]),
     params: Object.freeze(params),
-    previewAsset: `./preview.html#${blueprint.sourceId}-${names[index].toLowerCase()}`
+    previewAsset: `./previews/${blueprint.sourceId}-${names[index].toLowerCase()}.svg`
   });
 }
 
@@ -153,8 +168,10 @@ function parseSurface(value: unknown): PixelSurface | undefined {
   const candidate = value as Record<string, unknown>;
   if (!Number.isInteger(candidate.width) || !Number.isInteger(candidate.height)
     || typeof candidate.width !== "number" || typeof candidate.height !== "number"
-    || !Array.isArray(candidate.data)) return undefined;
-  if (candidate.data.some((byte) => typeof byte !== "number" || !Number.isFinite(byte))) return undefined;
+    || (!Array.isArray(candidate.data) && !(candidate.data instanceof Uint8Array)
+      && !(candidate.data instanceof Uint8ClampedArray))) return undefined;
+  if (Array.from(candidate.data as ArrayLike<unknown>)
+    .some((byte) => typeof byte !== "number" || !Number.isFinite(byte))) return undefined;
   const colorSpace = candidate.colorSpace === "display-p3" || candidate.colorSpace === "linear-srgb"
     ? candidate.colorSpace : "srgb";
   const alphaMode = candidate.alphaMode === "none" || candidate.alphaMode === "premultiplied"
@@ -162,10 +179,41 @@ function parseSurface(value: unknown): PixelSurface | undefined {
   return {
     width: candidate.width,
     height: candidate.height,
-    data: new Uint8ClampedArray(candidate.data),
+    data: new Uint8ClampedArray(candidate.data as ArrayLike<number>),
     colorSpace,
     alphaMode
   };
+}
+
+function parseRasterInput(value: unknown, name: string): LayerRasterizationInput {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError(`${name} requires LayerRasterizationInput.`);
+  }
+  const input = value as LayerRasterizationInput;
+  assertLayerRasterizationInput(input);
+  return input;
+}
+
+function parseDualInputs(value: unknown): DualInputTextures {
+  if (typeof value !== "object" || value === null) {
+    throw new TypeError("Transition/composite effects require DualInputTextures.");
+  }
+  const inputs = value as DualInputTextures;
+  assertDualInputTextures(inputs);
+  return inputs;
+}
+
+function parseBrushCoverage(value: unknown): CoverageBuffer | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as CoverageBuffer;
+  if (!Number.isInteger(candidate.width) || candidate.width < 1
+    || !Number.isInteger(candidate.height) || candidate.height < 1
+    || !(candidate.data instanceof Uint8Array)
+    || candidate.data.length !== candidate.width * candidate.height
+    || candidate.rowOrder !== "top-to-bottom") {
+    throw new TypeError("brushCoverage must be an exact top-to-bottom CoverageBuffer.");
+  }
+  return candidate;
 }
 
 function frameOutput(surface: PixelSurface, effectId: string): RenderOutput {
@@ -194,7 +242,7 @@ function definitionFields(blueprint: EffectBlueprint): EffectDefinition {
   return {
     schemaVersion: "1.0.0",
     effectId: blueprint.effectId,
-    version: "1.0.0",
+    version: "1.1.0",
     displayName: blueprint.displayName,
     category: blueprint.category,
     description: blueprint.description,
@@ -243,12 +291,20 @@ function definitionFields(blueprint: EffectBlueprint): EffectDefinition {
         config: { action: "reject" }
       }
     ],
-    migrations: [{ fromVersion: "0.9.0", toVersion: "1.0.0" }]
+    migrations: [
+      { fromVersion: "0.9.0", toVersion: "1.0.0" },
+      { fromVersion: "1.0.0", toVersion: "1.1.0" }
+    ]
   };
 }
 
 function createEffect(blueprint: EffectBlueprint): P0EffectDefinition {
   let disposed = false;
+  const previewOrdinal = GROUP_2_BLUEPRINTS.findIndex(
+    (candidate) => candidate.sourceId === blueprint.sourceId
+  );
+  const previewProgress = 0.28 + (((previewOrdinal * 7) % GROUP_2_BLUEPRINTS.length)
+    / (GROUP_2_BLUEPRINTS.length - 1)) * 0.54;
   const presets = Object.freeze([
     makePreset(blueprint, 0),
     makePreset(blueprint, 1),
@@ -261,10 +317,10 @@ function createEffect(blueprint: EffectBlueprint): P0EffectDefinition {
     implementationOwner: "Group 2",
     presets,
     preview: Object.freeze({
-      asset: `./preview.html#${blueprint.sourceId}`,
+      asset: `./previews/${blueprint.sourceId}.svg`,
       width: 160,
       height: 90,
-      frameProgress: 0.5,
+      frameProgress: previewProgress,
       alt: `${blueprint.displayName} deterministic P0 preview`
     }),
     alphaBehavior: blueprint.category === "vector" || blueprint.category === "draw"
@@ -281,23 +337,68 @@ function createEffect(blueprint: EffectBlueprint): P0EffectDefinition {
       readme: `README.md#${blueprint.sourceId.toLowerCase()}-${blueprint.effectId.replaceAll(".", "").toLowerCase()}`,
       changelog: `CHANGELOG.md#${blueprint.sourceId.toLowerCase()}`
     }),
-    migrationHandlers: Object.freeze([{
-      fromVersion: "0.9.0",
-      toVersion: "1.0.0",
-      migrate(params: JsonObject): JsonObject {
-        return normalizeEffectParams(blueprint.effectId, params);
+    migrationHandlers: Object.freeze([
+      {
+        fromVersion: "0.9.0",
+        toVersion: "1.0.0",
+        migrate(params: JsonObject): JsonObject {
+          return normalizeEffectParams(blueprint.effectId, params);
+        }
+      },
+      {
+        fromVersion: "1.0.0",
+        toVersion: "1.1.0",
+        migrate(params: JsonObject): JsonObject {
+          return normalizeEffectParams(blueprint.effectId, params);
+        }
       }
-    }]),
-    async render(context: EffectRenderContext): Promise<RenderOutput> {
+    ]),
+    async render(context: TemporalEffectRenderContext): Promise<RenderOutput> {
       if (disposed) throw new Error(`${blueprint.effectId} has been disposed.`);
+      assertTemporalEffectContext(context.timing);
+      if (context.timing.effectTime.contractVersion !== TIME_CONTRACT_VERSION) {
+        throw new TypeError(`Temporal context requires EffectTimeSample ${TIME_CONTRACT_VERSION}.`);
+      }
+      if (context.timing.effectTime.effectId !== blueprint.effectId) {
+        throw new TypeError(`Temporal context effectId must equal ${blueprint.effectId}.`);
+      }
+      if (context.timing.effectTime.effectInstanceId.length === 0) {
+        throw new TypeError("Temporal context requires an explicit effectInstanceId.");
+      }
+      const rasterInput = parseRasterInput(context.data?.rasterInput, blueprint.effectId);
       const params = normalizeEffectParams(blueprint.effectId, context.params);
-      const progress = typeof params.progress === "number"
-        ? params.progress : Math.min(1, Math.max(0, context.time - Math.floor(context.time)));
+      const progress = context.timing.effectTime.progress;
+      const dualInputs = blueprint.category === "transition" || blueprint.category === "composite"
+        ? parseDualInputs(context.data?.dualInputTextures)
+        : undefined;
+      const secondaryRasterInput = dualInputs
+        ? parseRasterInput(context.data?.secondaryRasterInput, `${blueprint.effectId} secondary`)
+        : undefined;
+      const reference = blueprint.sourceId === "H01" ? ["mask", "context://mask"] as const
+        : blueprint.sourceId === "H02" ? ["matteLayer", "context://secondary"] as const
+          : blueprint.sourceId === "H04" ? ["map", "context://secondary"] as const
+            : undefined;
+      if (reference) {
+        const value = typeof params[reference[0]] === "string" ? params[reference[0]] : reference[1];
+        if (value !== reference[1] && value !== secondaryRasterInput?.layerId) {
+          throw new TypeError(`Unresolved input reference ${value}.`);
+        }
+      }
+      const brushCoverage = parseBrushCoverage(context.data?.brushCoverage);
+      if (blueprint.sourceId === "D02") {
+        if (!brushCoverage) throw new TypeError("Brush Reveal requires real brush coverage.");
+        const requestedBrush = typeof params.brushTexture === "string"
+          ? params.brushTexture : "builtin://brush/round";
+        const resolvedBrush = typeof context.data?.brushAssetId === "string"
+          ? context.data.brushAssetId : "builtin://brush/round";
+        if (requestedBrush !== resolvedBrush) {
+          throw new TypeError(`Unresolved brushTexture ${requestedBrush}.`);
+        }
+      }
       if (context.renderer.backend === "webgl" && context.inputTextures[0] && hasEffectStack(context.renderer)) {
-        let source = context.inputTextures[0];
+        let source = dualInputs?.source.texture ?? context.inputTextures[0];
         let compositeIntermediate: TextureHandle | undefined;
-        if ((blueprint.category === "transition" || blueprint.category === "composite")
-          && context.inputTextures[1]) {
+        if (dualInputs) {
           const opacity = blueprint.category === "transition"
             ? progress
             : blueprint.sourceId === "H03"
@@ -305,7 +406,7 @@ function createEffect(blueprint: EffectBlueprint): P0EffectDefinition {
                 * (typeof params.mix === "number" ? params.mix : 1)
               : 1;
           source = await context.renderer.composite(
-            [source, context.inputTextures[1]],
+            [source, dualInputs.secondary.texture],
             {
               blendMode: blueprint.sourceId === "H03" && typeof params.mode === "string"
                 ? params.mode : "normal",
@@ -315,18 +416,17 @@ function createEffect(blueprint: EffectBlueprint): P0EffectDefinition {
           );
           compositeIntermediate = source;
         }
-        const result = context.renderer.applyEffectStack(
-          source,
-          [createCatalogWebGLPass(
-            blueprint,
-            params,
-            progress,
-            context.seed,
-            context.quality,
-            context.width,
-            context.height
-          )]
+        const pass = createCatalogWebGLPass(
+          blueprint,
+          params,
+          context.timing.effectTime,
+          context.seed,
+          context.quality,
+          context.width,
+          context.height,
+          rasterInput
         );
+        const result = context.renderer.applyEffectStack(source, [pass]);
         if (compositeIntermediate) context.renderer.releaseTexture(compositeIntermediate);
         if (result.failures[0]) throw result.failures[0].error;
         const output = context.mask && hasMaskStack(context.renderer)
@@ -345,13 +445,22 @@ function createEffect(blueprint: EffectBlueprint): P0EffectDefinition {
       }
       const secondary = parseSurface(context.data?.secondarySurface);
       const mask = parseSurface(context.data?.maskSurface);
-      const output = renderEffectPixels(blueprint.effectId, source, params, {
-        progress,
+      const runtimeOptions = {
+        time: context.timing.effectTime,
         seed: context.seed,
         quality: context.quality,
+        rasterInput,
+        ...(secondaryRasterInput ? { secondaryRasterInput } : {}),
+        ...(dualInputs ? { dualInputTextures: dualInputs } : {}),
+        ...(brushCoverage ? { brushCoverage } : {}),
+        ...(blueprint.sourceId === "D02"
+          ? { brushAssetId: typeof context.data?.brushAssetId === "string"
+            ? context.data.brushAssetId : "builtin://brush/round" }
+          : {}),
         ...(secondary ? { secondary } : {}),
         ...(mask ? { mask } : {})
-      });
+      };
+      const output = renderEffectPixels(blueprint.effectId, source, params, runtimeOptions);
       return frameOutput(output, blueprint.effectId);
     },
     renderPixels(
@@ -391,7 +500,92 @@ export const P0_EFFECTS: readonly P0CatalogEffectDefinition[] = Object.freeze([
 export const P0_EFFECTS_BY_ID: ReadonlyMap<string, P0CatalogEffectDefinition> =
   new Map(P0_EFFECTS.map((effect) => [effect.effectId, effect]));
 
-export { makeTextExtrudePreviewInput };
+export interface TextExtrudeCatalogFixtureOptions {
+  readonly effectId: typeof GROUP_3_REQUIRED_EFFECT_ID;
+  readonly effectInstanceId: string;
+  readonly text: string;
+  readonly width: number;
+  readonly height: number;
+  readonly effectTime: number;
+  readonly duration: number;
+  readonly fps: number;
+  readonly projectStart: number;
+}
+
+const TEXT_EXTRUDE_FIXTURE_TRANSFORM = Object.freeze<TransformDefinition>({
+  anchorPoint: { mode: "constant", value: { x: 0, y: 0, z: 0 } },
+  position: { mode: "constant", value: { x: 0, y: 0, z: 0 } },
+  scale: { mode: "constant", value: { x: 100, y: 100, z: 100 } },
+  rotation: { mode: "constant", value: { x: 0, y: 0, z: 0 } }
+});
+
+export function makeTextExtrudeCatalogFixture(
+  options: TextExtrudeCatalogFixtureOptions
+) {
+  if (options.effectId !== TEXT_EXTRUDE_3D.effectId) {
+    throw new TypeError("T08 aggregate fixture requires the explicit fx.text.textExtrude3D effectId.");
+  }
+  if (options.effectInstanceId.length === 0) {
+    throw new TypeError("T08 aggregate fixture requires an explicit effectInstanceId.");
+  }
+  if (!Number.isFinite(options.effectTime) || options.effectTime < 0
+    || !Number.isFinite(options.duration) || options.duration <= 0
+    || !Number.isFinite(options.projectStart)) {
+    throw new RangeError("T08 aggregate fixture requires finite non-negative time and positive duration.");
+  }
+  const instance: EffectInstance = {
+    id: options.effectInstanceId,
+    effectId: options.effectId,
+    version: TEXT_EXTRUDE_3D.version,
+    enabled: true,
+    startTime: 0,
+    endTime: options.duration,
+    mix: { mode: "constant", value: 1 },
+    params: TEXT_EXTRUDE_3D.defaultPreset
+  };
+  const layer: TextLayer = {
+    id: `layer.${options.effectInstanceId}`,
+    type: "text",
+    name: "T08 aggregate text raster",
+    visible: true,
+    locked: false,
+    solo: false,
+    startTime: options.projectStart,
+    endTime: options.projectStart + options.duration,
+    inPoint: 0,
+    outPoint: options.duration,
+    zIndex: 0,
+    transform: TEXT_EXTRUDE_FIXTURE_TRANSFORM,
+    opacity: { mode: "constant", value: 1 },
+    blendMode: "normal",
+    masks: [],
+    effects: [instance],
+    properties: {
+      text: options.text,
+      fontFamily: "Noto Sans Fixture",
+      fontSize: Math.max(1, Math.floor(options.height * 0.58))
+    }
+  };
+  const projectTime = options.projectStart + options.effectTime;
+  const project = resolveProjectTimeSample({
+    projectTime,
+    previousProjectTime: options.projectStart
+      + Math.max(0, options.effectTime - 1 / options.fps),
+    fps: options.fps
+  });
+  const layerTime = resolveLayerTimeSample(layer, project);
+  const time = resolveEffectTimeSample(instance, layerTime, project, options.duration);
+  return Object.freeze({
+    time,
+    layerTime,
+    input: makeTextExtrudeRasterFixture(
+      options.text,
+      options.width,
+      options.height,
+      layerTime
+    )
+  });
+}
 
 export interface ExternalEffectInterfaceReport {
   readonly effectId: typeof GROUP_3_REQUIRED_EFFECT_ID;

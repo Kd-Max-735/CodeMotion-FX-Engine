@@ -3,3 +3,4 @@ export * from "./media.js";
 export * from "./presets.js";
 export * from "./process.js";
 export * from "./project.js";
+export * from "./raster.js";

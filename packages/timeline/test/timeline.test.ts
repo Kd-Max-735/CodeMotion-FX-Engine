@@ -4,21 +4,29 @@ import {
   type Animatable,
   type CompositionLayer,
   type EasingDefinition,
+  type EffectInstance,
   type NullLayer,
   type TransformDefinition
 } from "@codemotion/core";
 import {
   bakeAnimatable,
   bakeKeyframes,
+  createEffectRandom,
   evaluateAnimatable,
+  evaluateAnimatableAt,
   evaluateEasing,
   evaluateKeyframes,
   fixedFrameRange,
   frameTime,
   frameToSeconds,
   mapLoopTime,
+  migrateEffectTimeSampleV1,
+  migrateLegacyAbsoluteEffectTiming,
+  resolveEffectTimeSample,
   resolveLayerTime,
+  resolveLayerTimeSample,
   resolveNestedTime,
+  resolveProjectTimeSample,
   secondsToFrame
 } from "../src/index.js";
 
@@ -62,6 +70,37 @@ function compositionLayer(overrides: Partial<CompositionLayer> = {}): Compositio
   };
 }
 
+function effect(
+  id: string,
+  effectId: string,
+  overrides: Partial<EffectInstance> = {}
+): EffectInstance {
+  return {
+    id,
+    effectId,
+    version: "1.0.0",
+    enabled: true,
+    mix: { mode: "constant", value: 1 },
+    params: {},
+    ...overrides
+  };
+}
+
+function pseudoRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+}
+
+function generatedId(random: () => number): string {
+  return [
+    Math.floor(random() * 0x1_0000_0000).toString(36),
+    Math.floor(random() * 0x1_0000_0000).toString(36)
+  ].join(".");
+}
+
 describe("fixed logical time", () => {
   it("converts only from explicit frame, seconds, and fps", () => {
     expect(frameToSeconds(75, 30)).toBe(2.5);
@@ -103,6 +142,169 @@ describe("fixed logical time", () => {
       expect(fold).toBeGreaterThan(after!);
       expect(before).toBe(after);
     }
+  });
+});
+
+describe("versioned time contract", () => {
+  it("keeps effect-local time and random streams invariant under randomized timeline translation", () => {
+    const random = pseudoRandom(0x5a17c0de);
+    for (let iteration = 0; iteration < 64; iteration += 1) {
+      const shift = random() * 500;
+      const layerDuration = 0.5 + random() * 20;
+      const effectStart = random() * layerDuration * 0.4;
+      const effectEnd = effectStart + (layerDuration - effectStart) * (0.2 + random() * 0.8);
+      const localSample = effectStart + (effectEnd - effectStart) * random();
+      const delta = random() * Math.min(0.1, localSample);
+      const fps = 12 + random() * 108;
+      const shiftedFps = 12 + random() * 108;
+      const baseLayer = nullLayer({ startTime: 0, endTime: layerDuration, outPoint: layerDuration });
+      const shiftedLayer = nullLayer({
+        startTime: shift,
+        endTime: shift + layerDuration,
+        outPoint: layerDuration
+      });
+      const instance = effect(generatedId(random), generatedId(random), {
+        startTime: effectStart,
+        endTime: effectEnd
+      });
+      const baseProject = resolveProjectTimeSample({
+        projectTime: localSample,
+        previousProjectTime: localSample - delta,
+        fps
+      });
+      const shiftedProject = resolveProjectTimeSample({
+        projectTime: shift + localSample,
+        previousProjectTime: shift + localSample - delta,
+        fps: shiftedFps
+      });
+      const baseEffect = resolveEffectTimeSample(
+        instance,
+        resolveLayerTimeSample(baseLayer, baseProject),
+        baseProject,
+        layerDuration
+      );
+      const shiftedEffect = resolveEffectTimeSample(
+        instance,
+        resolveLayerTimeSample(shiftedLayer, shiftedProject),
+        shiftedProject,
+        layerDuration
+      );
+
+      expect(shiftedEffect.effectTime).toBeCloseTo(baseEffect.effectTime, 10);
+      expect(baseEffect.effectId).toBe(instance.effectId);
+      expect(baseEffect.effectInstanceId).toBe(instance.id);
+      expect(shiftedEffect.progress).toBeCloseTo(baseEffect.progress, 10);
+      expect(shiftedEffect.deltaTime).toBeCloseTo(baseEffect.deltaTime, 10);
+      expect(createEffectRandom(987654321, shiftedEffect, "jitter", 37).nextUint32())
+        .toBe(createEffectRandom(987654321, baseEffect, "jitter", 37).nextUint32());
+    }
+  });
+
+  it("defines deltaTime from explicit samples and evaluates Animatable values in their owner time space", () => {
+    const random = pseudoRandom(0x711ec7ed);
+    const project = resolveProjectTimeSample({ projectTime: 12.75, previousProjectTime: 12.6, fps: 48 });
+    const layerDefinition = nullLayer({ startTime: 10, endTime: 20, outPoint: 10 });
+    const layer = resolveLayerTimeSample(layerDefinition, project);
+    const currentEffect = resolveEffectTimeSample(
+      effect(generatedId(random), generatedId(random), { startTime: 1.25, endTime: 4.25 }),
+      layer,
+      project,
+      10
+    );
+    const animatable: Animatable<number> = {
+      mode: "keyframes",
+      keyframes: [{ time: 0, value: 0 }, { time: 20, value: 20 }]
+    };
+    const times = { project, layer, effect: currentEffect };
+
+    expect(project.deltaTime).toBeCloseTo(0.15);
+    expect(layer.localTime).toBeCloseTo(2.75);
+    expect(currentEffect.effectTime).toBeCloseTo(1.5);
+    expect(evaluateAnimatableAt(animatable, "project", times)).toBeCloseTo(12.75);
+    expect(evaluateAnimatableAt(animatable, "layer", times)).toBeCloseTo(2.75);
+    expect(evaluateAnimatableAt(animatable, "effect", times)).toBeCloseTo(1.5);
+  });
+
+  it("outputs runtime-ready type IDs while isolating repeatable random streams by instance ID", () => {
+    const random = pseudoRandom(0x19d5b4a1);
+    const effectTypeId = generatedId(random);
+    const firstInstance = effect(generatedId(random), effectTypeId);
+    const secondInstance = effect(generatedId(random), effectTypeId);
+    const project = resolveProjectTimeSample({ projectTime: 3.4, previousProjectTime: 3.35, fps: 50 });
+    const layer = resolveLayerTimeSample(nullLayer(), project);
+    const firstTime = resolveEffectTimeSample(firstInstance, layer, project, 10);
+    const secondTime = resolveEffectTimeSample(secondInstance, layer, project, 10);
+    const streamName = generatedId(pseudoRandom(0x234fa113));
+    const sample = (timeSample: typeof firstTime): number[] => {
+      const stream = createEffectRandom(0x79ab31cf, timeSample, streamName, 40);
+      return [stream.nextUint32(), stream.nextUint32(), stream.nextUint32(), stream.nextUint32()];
+    };
+
+    expect(firstInstance.id).not.toBe(secondInstance.id);
+    expect(firstTime.effectId).toBe(firstInstance.effectId);
+    expect(firstTime.effectInstanceId).toBe(firstInstance.id);
+    expect(secondTime.effectId).toBe(secondInstance.effectId);
+    expect(secondTime.effectInstanceId).toBe(secondInstance.id);
+    expect(sample(firstTime)).toEqual(sample(firstTime));
+    expect(sample(secondTime)).toEqual(sample(secondTime));
+    expect(sample(firstTime)).not.toEqual(sample(secondTime));
+
+    const firstChunk = generatedId(random);
+    const secondChunk = generatedId(random);
+    const thirdChunk = generatedId(random);
+    const delimiterFirst = resolveEffectTimeSample(
+      effect(thirdChunk, `${firstChunk}\u0000${secondChunk}`),
+      layer,
+      project,
+      10
+    );
+    const delimiterSecond = resolveEffectTimeSample(
+      effect(`${secondChunk}\u0000${thirdChunk}`, firstChunk),
+      layer,
+      project,
+      10
+    );
+    expect(sample(delimiterFirst)).not.toEqual(sample(delimiterSecond));
+  });
+
+  it("migrates 1.0 samples only with their matching original EffectInstance", () => {
+    const random = pseudoRandom(0xc73a59e1);
+    const instance = effect(generatedId(random), generatedId(random));
+    const project = resolveProjectTimeSample({ projectTime: 2, previousProjectTime: 1.9, fps: 30 });
+    const current = resolveEffectTimeSample(instance, resolveLayerTimeSample(nullLayer(), project), project, 10);
+    const legacy = {
+      contractVersion: "1.0.0" as const,
+      effectId: instance.id,
+      active: current.active,
+      projectTime: current.projectTime,
+      layerTime: current.layerTime,
+      effectTime: current.effectTime,
+      progress: current.progress,
+      deltaTime: current.deltaTime,
+      fps: current.fps,
+      frame: current.frame
+    };
+
+    expect(migrateEffectTimeSampleV1(legacy, instance)).toMatchObject({
+      contractVersion: "1.1.0",
+      effectId: instance.effectId,
+      effectInstanceId: instance.id
+    });
+    const unrelated = effect(generatedId(random), generatedId(random));
+    expect(() => migrateEffectTimeSampleV1(legacy, unrelated)).toThrow(/does not match/);
+  });
+
+  it("migrates legacy absolute effect windows without changing their local placement", () => {
+    const migrated = migrateLegacyAbsoluteEffectTiming({
+      contractVersion: "0.0.0",
+      startTime: 103.25,
+      endTime: 108.75
+    }, 100);
+    expect(migrated).toEqual({
+      contractVersion: "1.1.0",
+      startTime: 3.25,
+      endTime: 8.75
+    });
   });
 });
 
