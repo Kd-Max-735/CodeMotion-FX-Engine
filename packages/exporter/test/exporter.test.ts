@@ -184,7 +184,7 @@ describe("fixed frame export", () => {
     })).toThrow(/libvpx/);
     expect(() => validateExportPreset(testPreset("gif", 30, 64, 36, false, true))).toThrow(/audio/);
     expect(() => validateExportPreset(testPreset("mp4", 30, 8192, 8192, false, false))).toThrow(/render budget/);
-    expect(DOCUMENT_EXPORT_PRESETS).toHaveLength(4);
+    expect(DOCUMENT_EXPORT_PRESETS).toHaveLength(10);
   });
 
   it("resumes PNG at an exact frame and rejects compressed midstream resume", async () => {
