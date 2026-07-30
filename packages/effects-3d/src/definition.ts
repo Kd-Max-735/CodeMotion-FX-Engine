@@ -140,13 +140,13 @@ function definitionFields(): EffectDefinition {
       type: "object",
       required: ["depth", "bevel", "material", "light", "rotationX", "rotationY", "perspective"],
       properties: {
-        depth: { type: "number", default: defaults.depth, minimum: 0, maximum: 1, multipleOf: 0.01 },
-        bevel: { type: "number", default: defaults.bevel, minimum: 0, maximum: 0.25, multipleOf: 0.01 },
+        depth: { type: "number", default: defaults.depth, minimum: 0, maximum: 1 },
+        bevel: { type: "number", default: defaults.bevel, minimum: 0, maximum: 0.25 },
         material: { type: "string", default: defaults.material, enum: ["matte", "metal", "glass"] },
         light: { type: "string", default: defaults.light, enum: ["studio", "rim", "top"] },
         rotationX: { type: "number", default: defaults.rotationX, minimum: -60, maximum: 60, multipleOf: 1 },
         rotationY: { type: "number", default: defaults.rotationY, minimum: -90, maximum: 90, multipleOf: 1 },
-        perspective: { type: "number", default: defaults.perspective, minimum: 0, maximum: 1, multipleOf: 0.01 }
+        perspective: { type: "number", default: defaults.perspective, minimum: 0, maximum: 1 }
       },
       additionalProperties: false
     },

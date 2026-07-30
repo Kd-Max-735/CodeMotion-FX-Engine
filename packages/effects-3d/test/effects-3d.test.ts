@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import type {
   EffectDefinition,
@@ -12,6 +13,7 @@ import type {
   TemporalEffectRenderContext,
   TextureHandle
 } from "@codemotion/renderer-api";
+import { P0_EFFECTS, P0_EFFECTS_BY_ID } from "@codemotion/effects-2d";
 import { WebGLRendererAdapter } from "@codemotion/renderer-webgl";
 import { validateContract } from "@codemotion/schema";
 import {
@@ -220,6 +222,50 @@ describe("Group 3 Stage 5R T08", () => {
       expect(normalizeTextExtrude3DParams(preset.params)).toEqual(preset.params);
       expect("progress" in preset.params).toBe(false);
     }
+  });
+
+  it("is consumable from the sole frozen 40-item catalog with valid AI parameters and fallback metadata", () => {
+    const catalogEntry = P0_EFFECTS_BY_ID.get("fx.text.textExtrude3D");
+    expect(P0_EFFECTS).toHaveLength(40);
+    expect(P0_EFFECTS[15]).toBe(catalogEntry);
+    expect(catalogEntry).toMatchObject({
+      sourceId: "T08",
+      effectId: TEXT_EXTRUDE_3D.effectId,
+      version: TEXT_EXTRUDE_3D.version,
+      parameterSchema: TEXT_EXTRUDE_3D.parameterSchema,
+      defaultPreset: TEXT_EXTRUDE_3D.defaultPreset,
+      presets: TEXT_EXTRUDE_3D.presets,
+      fallbackBackend: "canvas2d",
+      fallbackBehavior: TEXT_EXTRUDE_3D.fallbackBehavior
+    });
+    if (!catalogEntry || catalogEntry.sourceId !== "T08") {
+      throw new Error("T08 is missing from the frozen aggregate catalog.");
+    }
+
+    const validateParams = new Ajv2020({ allErrors: true, strict: true })
+      .compile(catalogEntry.parameterSchema);
+    expect(validateParams(catalogEntry.defaultPreset), JSON.stringify(validateParams.errors)).toBe(true);
+    const schemaProperties = (catalogEntry.parameterSchema as JsonObject).properties as JsonObject;
+    for (const [name, value] of Object.entries(catalogEntry.defaultPreset)) {
+      expect((schemaProperties[name] as JsonObject).default, name).toBe(value);
+    }
+    for (const preset of catalogEntry.presets) {
+      expect(preset.effectId).toBe(catalogEntry.effectId);
+      expect(preset.version).toBe(catalogEntry.version);
+      expect(validateParams(preset.params), `${preset.presetId}: ${JSON.stringify(validateParams.errors)}`).toBe(true);
+    }
+    expect(validateParams({
+      ...catalogEntry.defaultPreset,
+      depth: 0.29,
+      material: "glass"
+    }), JSON.stringify(validateParams.errors)).toBe(true);
+    expect(validateParams({
+      ...catalogEntry.defaultPreset,
+      depth: 1.01,
+      material: "unsupported"
+    })).toBe(false);
+
+    expect(catalogEntry.fallbackBehavior).toContain("degradation is explicit");
   });
 
   it("renders official resolveEffectTimeSample output directly and preserves both identities", async () => {
