@@ -13,7 +13,11 @@ import {
   type MotionProject,
   type TransformDefinition
 } from "@codemotion/core";
-import { GROUP_2_P0_EFFECTS, type P0EffectDefinition } from "@codemotion/effects-2d";
+import {
+  P0_EFFECTS,
+  P0_EFFECTS_BY_ID,
+  type P0CatalogEffectDefinition
+} from "@codemotion/effects-2d";
 import {
   createProjectFrameProducer,
   decodeMediaFrame,
@@ -23,22 +27,34 @@ import {
 import type { CoverageBuffer, LayerRasterSource } from "@codemotion/renderer-api";
 import { validateContract } from "@codemotion/schema";
 import type {
+  BrandConstraint,
   LocalResourceInput,
+  ModelEffectSelection,
+  ModelStoryboard,
   NormalizedUnderstanding,
   TimeRange,
   UnderstandingResult
 } from "./provider.js";
 import { coverageAsset, textRasterSource, vectorRasterSource } from "./raster-sources.js";
 
-export interface StoryboardLayer extends JsonObject {
+interface StoryboardLayerBase extends JsonObject {
   id: string;
-  type: "text" | "svg" | "image" | "video";
-  localAssetId?: string;
   description: string;
 }
 
+export type StoryboardLayer =
+  | (StoryboardLayerBase & { type: "text"; text: string; localAssetId?: never })
+  | (StoryboardLayerBase & { type: "svg"; text?: never; localAssetId?: never })
+  | (StoryboardLayerBase & {
+    type: "image" | "video";
+    text?: never;
+    localAssetId: string;
+  });
+
 export interface StoryboardEffect extends JsonObject {
+  sourceId: string;
   effectId: string;
+  effectVersion: string;
   targetLayerId: string;
   params: JsonObject;
 }
@@ -52,10 +68,13 @@ export interface StoryboardShot extends JsonObject {
 }
 
 export interface Storyboard extends JsonObject {
+  intent: string;
   duration: number;
   width: number;
   height: number;
   fps: number;
+  style: string[];
+  brand: ModelStoryboard["brand"];
   requirements: string[];
   constraints: string[];
   shots: StoryboardShot[];
@@ -93,6 +112,8 @@ export interface PlanningOptions {
   readonly height?: number;
   readonly fps?: number;
   readonly duration?: number;
+  readonly style?: readonly string[];
+  readonly brand?: BrandConstraint;
   readonly maxHeavyEffects?: number;
   readonly text?: string;
   readonly transform?: TransformDefinition;
@@ -121,21 +142,24 @@ function defaultTransform(duration: number, width: number): TransformDefinition 
 }
 
 function semanticTerms(value: NormalizedUnderstanding): string[] {
+  const ignored = new Set(["with", "from", "this", "that", "the", "and", "for", "create", "make"]);
   return [
     ...value.text.requirements,
     ...value.text.constraints,
     ...value.images.flatMap((image) => [...image.subjects, ...image.style, ...image.colors]),
     ...value.audio.flatMap((audio) => [...audio.emotion, audio.bgm, audio.rhythm]),
     ...value.video.flatMap((video) => video.shots.flatMap((shot) => [shot.action, shot.event]))
-  ].join(" ").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((term) => term.length > 1);
+  ].join(" ").toLowerCase().split(/[^\p{L}\p{N}]+/u)
+    .map((term) => term.replace(/(?:ing|ed|es|s)$/u, ""))
+    .filter((term) => term.length > 1 && !ignored.has(term));
 }
 
 export function retrieveP0Effects(
   understanding: NormalizedUnderstanding,
   limit = 3
-): readonly P0EffectDefinition[] {
+): readonly P0CatalogEffectDefinition[] {
   const terms = new Set(semanticTerms(understanding));
-  return [...GROUP_2_P0_EFFECTS].map((effect, index) => {
+  return [...P0_EFFECTS].map((effect, index) => {
     const searchable = [
       effect.effectId,
       effect.displayName,
@@ -148,12 +172,12 @@ export function retrieveP0Effects(
     if (effect.performanceClass === "light") score += 0.25;
     return { effect, score, index };
   }).sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, Math.max(1, Math.min(limit, GROUP_2_P0_EFFECTS.length)))
+    .slice(0, Math.max(1, Math.min(limit, P0_EFFECTS.length)))
     .map((entry) => entry.effect);
 }
 
 function effectCanRender(
-  effect: P0EffectDefinition,
+  effect: P0CatalogEffectDefinition,
   resources: readonly LocalResourceInput[]
 ): boolean {
   const visualResources = resources.filter((item) => item.modality === "image" || item.modality === "video");
@@ -164,70 +188,8 @@ function effectCanRender(
   return true;
 }
 
-function selectEffects(
-  understanding: NormalizedUnderstanding,
-  resources: readonly LocalResourceInput[],
-  requestedIds: readonly string[] | undefined
-): readonly P0EffectDefinition[] {
-  const byId = new Map(GROUP_2_P0_EFFECTS.map((effect) => [effect.effectId, effect]));
-  if (requestedIds !== undefined) {
-    if (requestedIds.length === 0) throw new RangeError("Planning effectIds must not be empty.");
-    return requestedIds.map((effectId) => {
-      const effect = byId.get(effectId);
-      if (effect === undefined) throw new RangeError(`Unknown planning effect ${effectId}.`);
-      if (!effectCanRender(effect, resources)) {
-        throw new RangeError(`Effect ${effectId} requires visual media that was not supplied.`);
-      }
-      return effect;
-    });
-  }
-  const compatible = retrieveP0Effects(understanding, GROUP_2_P0_EFFECTS.length)
-    .filter((effect) => effectCanRender(effect, resources))
-    .slice(0, 3);
-  if (compatible.length === 0) throw new Error("No P0 effect is compatible with the planned layers.");
-  return compatible;
-}
-
-function safeDuration(understanding: NormalizedUnderstanding, resources: readonly LocalResourceInput[], requested?: number): number {
-  if (requested !== undefined) return Math.min(60, Math.max(0.5, requested));
-  const mediaDuration = Math.max(0, ...resources.map((item) => {
-    const duration = item.asset.metadata.duration;
-    return typeof duration === "number" && Number.isFinite(duration) ? duration : 0;
-  }));
-  const videoEnd = Math.max(0, ...understanding.video.flatMap((video) => video.shots.map((shot) => shot.range.end)));
-  return Math.min(60, Math.max(3, mediaDuration, videoEnd));
-}
-
-function storyboardLayers(
-  resources: readonly LocalResourceInput[],
-  understanding: NormalizedUnderstanding,
-  effects: readonly P0EffectDefinition[],
-  options: PlanningOptions
-): StoryboardLayer[] {
-  const layers: StoryboardLayer[] = [];
-  for (const resource of resources) {
-    if (resource.modality === "audio") continue;
-    layers.push({
-      id: `layer_${resource.localAssetId.slice(6)}`,
-      type: resource.modality,
-      localAssetId: resource.localAssetId,
-      description: resource.modality === "image"
-        ? (understanding.images.find((item) => item.localAssetId === resource.localAssetId)?.composition ?? "Reference image")
-        : (understanding.video.find((item) => item.localAssetId === resource.localAssetId)?.shots[0]?.event ?? "Reference video")
-    });
-  }
-  const text = options.text ?? understanding.text.requirements[0] ?? "";
-  if (text.length > 0 || layers.length === 0) {
-    layers.push({ id: "layer_title", type: "text", description: text || "Generated title" });
-  }
-  if (effects.some((effect) => effect.category === "vector" || effect.category === "draw")) {
-    layers.push({ id: "layer_vector", type: "svg", description: `Vector content for ${text || "planned scene"}` });
-  }
-  return layers;
-}
-
 function targetLayer(
-  effect: P0EffectDefinition,
+  effect: P0CatalogEffectDefinition,
   layers: readonly StoryboardLayer[]
 ): StoryboardLayer {
   const matching = effect.category === "text"
@@ -246,56 +208,251 @@ function targetLayer(
   return matching;
 }
 
-function makeStoryboard(
-  understanding: NormalizedUnderstanding,
-  effects: readonly P0EffectDefinition[],
+const MAX_SCHEMA_REPAIRS = 3;
+
+function exactIds(label: string, expected: readonly string[], actual: readonly string[]): void {
+  if (actual.length !== expected.length || new Set(actual).size !== actual.length) {
+    throw new Error(`${label} contains duplicate, missing, or extra localAssetId values.`);
+  }
+  const expectedSet = new Set(expected);
+  if (actual.some((id) => !expectedSet.has(id)) || expected.some((id) => !actual.includes(id))) {
+    throw new Error(`${label} contains an unknown or missing localAssetId.`);
+  }
+}
+
+function forbiddenModelValue(value: unknown): boolean {
+  if (typeof value === "string") {
+    return /(?:https?|file):\/\//iu.test(value)
+      || /(?:^|[\s"'(])(?:[A-Za-z]:\\|\/(?:etc|home|Users|var|tmp)\/)/u.test(value)
+      || /(?:bearer|api[_-]?key|secret)\s+[A-Za-z0-9._-]{12,}/iu.test(value);
+  }
+  if (Array.isArray(value)) return value.some(forbiddenModelValue);
+  return typeof value === "object" && value !== null && Object.values(value).some(forbiddenModelValue);
+}
+
+function effectMatchesLayer(
+  definition: P0CatalogEffectDefinition,
+  layer: StoryboardLayer
+): boolean {
+  if (definition.category === "text") return layer.type === "text";
+  if (definition.category === "vector" || definition.category === "draw") return layer.type === "svg";
+  if (definition.category === "light" || definition.category === "post"
+    || definition.category === "transition" || definition.category === "composite") {
+    return layer.type === "image" || layer.type === "video";
+  }
+  return true;
+}
+
+function mergeValidatedParams(
+  definition: P0CatalogEffectDefinition,
+  ...overrides: readonly (JsonObject | undefined)[]
+): JsonObject {
+  const validate = new Ajv2020({ allErrors: true, strict: false }).compile(definition.parameterSchema);
+  let params = structuredClone(definition.defaultPreset);
+  if (!parameterSnapshots(params).every((snapshot) => validate(snapshot))) {
+    throw new Error(`Authoritative defaults failed parameter Schema for ${definition.effectId}.`);
+  }
+  let repairs = 0;
+  for (const override of overrides) {
+    for (const [name, value] of Object.entries(override ?? {})) {
+      const candidate = { ...params, [name]: value };
+      if (parameterSnapshots(candidate).every((snapshot) => validate(snapshot))) {
+        params = candidate;
+      } else {
+        repairs += 1;
+        if (repairs > MAX_SCHEMA_REPAIRS) {
+          throw new Error(`AI parameter schema repair limit exceeded for ${definition.effectId}.`);
+        }
+      }
+    }
+  }
+  return params;
+}
+
+function effectSelection(
+  selection: ModelEffectSelection,
+  layers: readonly StoryboardLayer[],
+  shotLayerIds: ReadonlySet<string>,
+  optionParams: PlanningOptions["effectParams"]
+): StoryboardEffect {
+  const definition = P0_EFFECTS_BY_ID.get(selection.effectId);
+  if (definition === undefined
+    || definition.sourceId !== selection.sourceId
+    || definition.version !== selection.effectVersion) {
+    throw new Error(`Model effect selection ${selection.effectId} does not match the authoritative P0 definition.`);
+  }
+  const layer = layers.find((candidate) => candidate.id === selection.targetLayerId);
+  if (layer === undefined || !shotLayerIds.has(layer.id)) {
+    throw new Error(`Model effect ${selection.effectId} targets an undeclared shot layer.`);
+  }
+  if (!effectMatchesLayer(definition, layer)) {
+    throw new Error(`Model effect ${selection.effectId} is incompatible with layer ${layer.id}.`);
+  }
+  return {
+    sourceId: definition.sourceId,
+    effectId: definition.effectId,
+    effectVersion: definition.version,
+    targetLayerId: layer.id,
+    params: mergeValidatedParams(definition, selection.params, optionParams?.[definition.effectId])
+  };
+}
+
+function validatedStoryboard(
+  result: UnderstandingResult,
   resources: readonly LocalResourceInput[],
   options: PlanningOptions
 ): Storyboard {
-  const duration = safeDuration(understanding, resources, options.duration);
-  const layers = storyboardLayers(resources, understanding, effects, options);
-  const videoRanges = understanding.video.flatMap((video) => video.shots.map((shot) => ({
-    range: shot.range,
-    description: `${shot.event}: ${shot.action}`.trim()
-  })));
-  const shots = (videoRanges.length > 0 ? videoRanges : [{
-    range: { start: 0, end: duration },
-    description: understanding.text.requirements.join("; ") || "Generated motion scene"
-  }]).map((shot, index): StoryboardShot => {
-    const start = Math.max(0, Math.min(duration, shot.range.start));
-    const end = Math.max(start, Math.min(duration, shot.range.end));
-    const shotEffects = options.effectIds === undefined
-      ? [effects[index % effects.length]!]
-      : effects;
+  if (result.contract !== "ai-task/v1" || result.storyboard === undefined) {
+    throw new Error("AI provider did not return the required ai-task/v1 Storyboard.");
+  }
+  if (forbiddenModelValue(result.storyboard)) {
+    throw new Error("AI Storyboard contains a forbidden external identity or credential-like value.");
+  }
+  const retrieved = retrieveP0Effects(result.understanding, P0_EFFECTS.length);
+  if (retrieved.length !== 40 || retrieved.length !== P0_EFFECTS.length
+    || retrieved.some((entry) => P0_EFFECTS_BY_ID.get(entry.effectId) !== entry)) {
+    throw new Error("AI retrieval did not use the complete authoritative P0 catalog.");
+  }
+  const expectedByModality = {
+    image: resources.filter((item) => item.modality === "image").map((item) => item.localAssetId),
+    audio: resources.filter((item) => item.modality === "audio").map((item) => item.localAssetId),
+    video: resources.filter((item) => item.modality === "video").map((item) => item.localAssetId)
+  };
+  exactIds("Image understanding", expectedByModality.image, result.understanding.images.map((item) => item.localAssetId));
+  exactIds("Audio understanding", expectedByModality.audio, result.understanding.audio.map((item) => item.localAssetId));
+  exactIds("Video understanding", expectedByModality.video, result.understanding.video.map((item) => item.localAssetId));
+
+  const model = result.storyboard;
+  const layers: StoryboardLayer[] = model.layers.map((layer) => ({ ...layer }));
+  const layerIds = layers.map((layer) => layer.id);
+  if (new Set(layerIds).size !== layerIds.length) throw new Error("AI Storyboard contains duplicate layer IDs.");
+  const visualLayers = layers.filter((layer) => layer.type === "image" || layer.type === "video");
+  const visualIds = visualLayers.map((layer) => layer.localAssetId).filter((id): id is string => id !== undefined);
+  exactIds("Storyboard visual layers", [...expectedByModality.image, ...expectedByModality.video], visualIds);
+  for (const layer of layers) {
+    if ((layer.type === "image" || layer.type === "video") !== (layer.localAssetId !== undefined)) {
+      throw new Error(`Storyboard layer ${layer.id} has an invalid localAssetId binding.`);
+    }
+    if (layer.localAssetId !== undefined) {
+      const resource = resources.find((item) => item.localAssetId === layer.localAssetId);
+      if (resource === undefined || resource.modality !== layer.type) {
+        throw new Error(`Storyboard layer ${layer.id} has an unknown or mismatched localAssetId.`);
+      }
+    }
+  }
+  const expectedStyle = options.style;
+  if (expectedStyle !== undefined && JSON.stringify(model.style) !== JSON.stringify(expectedStyle)) {
+    throw new Error("AI Storyboard did not preserve the requested style constraints.");
+  }
+  if (options.brand !== undefined && JSON.stringify(model.brand) !== JSON.stringify(options.brand)) {
+    throw new Error("AI Storyboard did not preserve the requested brand constraints.");
+  }
+  const authorizedLogos = new Set(resources
+    .filter((item) => item.modality === "image")
+    .map((item) => item.localAssetId));
+  if (model.brand.logoAssetIds.some((id) => !authorizedLogos.has(id))) {
+    throw new Error("AI Storyboard brand references an unauthorized logo asset.");
+  }
+  const displayTexts = layers
+    .filter((layer): layer is Extract<StoryboardLayer, { type: "text" }> => layer.type === "text")
+    .map((layer) => layer.text);
+  if (displayTexts.some((text) => text.trim().length === 0)) {
+    throw new Error("AI Storyboard contains an empty text layer display value.");
+  }
+  if (model.brand.requiredText.some((required) =>
+    !displayTexts.some((displayText) => displayText.includes(required)))) {
+    throw new Error("AI Storyboard omitted required brand text from its visible text layers.");
+  }
+  const plannedContent = [
+    model.intent,
+    ...layers.flatMap((layer) => layer.type === "text"
+      ? [layer.description, layer.text]
+      : [layer.description]),
+    ...model.shots.map((shot) => shot.description)
+  ].join("\n");
+  if (model.brand.forbiddenContent.some((text) =>
+    text.length > 0 && plannedContent.toLowerCase().includes(text.toLowerCase()))) {
+    throw new Error("AI Storyboard contains forbidden brand content.");
+  }
+
+  const duration = options.duration ?? model.duration;
+  const width = options.width ?? model.width;
+  const height = options.height ?? model.height;
+  const fps = options.fps ?? model.fps;
+  if (!Number.isFinite(duration) || duration < 0.5 || duration > 60
+    || !Number.isInteger(width) || width < 2 || width > 8192
+    || !Number.isInteger(height) || height < 2 || height > 8192
+    || width * height > 33_554_432
+    || !Number.isInteger(fps) || fps < 1 || fps > 60) {
+    throw new Error("AI Storyboard canvas, fps, or duration is outside ai-task/v1 limits.");
+  }
+  const scale = duration / model.duration;
+  const shotIds = model.shots.map((shot) => shot.id);
+  if (new Set(shotIds).size !== shotIds.length) throw new Error("AI Storyboard contains duplicate shot IDs.");
+  const requestedDefinitions = options.effectIds?.map((effectId) => {
+    const definition = P0_EFFECTS_BY_ID.get(effectId);
+    if (definition === undefined) throw new RangeError(`Unknown planning effect ${effectId}.`);
+    if (!effectCanRender(definition, resources)) {
+      throw new RangeError(`Effect ${effectId} requires visual media that was not supplied.`);
+    }
+    return definition;
+  });
+  if (requestedDefinitions !== undefined
+    && (requestedDefinitions.length === 0
+      || new Set(requestedDefinitions.map((item) => item.effectId)).size !== requestedDefinitions.length)) {
+    throw new RangeError("Planning effectIds must be non-empty and unique.");
+  }
+  const shots = model.shots.map((shot): StoryboardShot => {
+    if (shot.end <= shot.start || shot.end > model.duration) {
+      throw new Error(`AI Storyboard shot ${shot.id} has an invalid range.`);
+    }
+    const shotLayerIds = new Set(shot.layerIds);
+    if (shotLayerIds.size !== shot.layerIds.length
+      || shot.layerIds.some((id) => !layerIds.includes(id))) {
+      throw new Error(`AI Storyboard shot ${shot.id} references duplicate or unknown layers.`);
+    }
+    const effects = requestedDefinitions === undefined
+      ? shot.effects.map((selection) => effectSelection(selection, layers, shotLayerIds, options.effectParams))
+      : requestedDefinitions.map((definition): StoryboardEffect => {
+        const layer = targetLayer(definition, layers.filter((item) => shotLayerIds.has(item.id)));
+        return {
+          sourceId: definition.sourceId,
+          effectId: definition.effectId,
+          effectVersion: definition.version,
+          targetLayerId: layer.id,
+          params: mergeValidatedParams(definition, options.effectParams?.[definition.effectId])
+        };
+      });
+    if (effects.length === 0) throw new Error(`AI Storyboard shot ${shot.id} has no model-planned effect.`);
     return {
-      id: `shot_${index + 1}`,
-      range: { start, end },
+      id: shot.id,
+      range: { start: shot.start * scale, end: shot.end * scale },
       description: shot.description,
-      layers,
-      effects: shotEffects.map((effect) => ({
-        effectId: effect.effectId,
-        targetLayerId: targetLayer(effect, layers).id,
-        params: {
-          ...effect.defaultPreset,
-          ...(options.effectParams?.[effect.effectId] ?? {})
-        }
-      }))
+      layers: layers.filter((layer) => shotLayerIds.has(layer.id)),
+      effects
     };
   });
   return {
+    intent: model.intent,
     duration,
-    width: options.width ?? 1280,
-    height: options.height ?? 720,
-    fps: options.fps ?? 24,
-    requirements: understanding.text.requirements,
-    constraints: understanding.text.constraints,
+    width,
+    height,
+    fps,
+    style: [...model.style],
+    brand: structuredClone(model.brand),
+    requirements: result.understanding.text.requirements,
+    constraints: result.understanding.text.constraints,
     shots
   };
 }
 
 function effectInstance(effect: StoryboardEffect, range: TimeRange, identity: string): EffectInstance {
-  const definition = GROUP_2_P0_EFFECTS.find((candidate) => candidate.effectId === effect.effectId);
-  if (definition === undefined) throw new RangeError(`Unknown planned effect ${effect.effectId}.`);
+  const definition = P0_EFFECTS_BY_ID.get(effect.effectId);
+  if (definition === undefined
+    || effect.sourceId !== definition.sourceId
+    || effect.effectVersion !== definition.version) {
+    throw new RangeError(`Unknown or stale planned effect ${effect.effectId}.`);
+  }
   return {
     id: `effect_${identity}`,
     effectId: effect.effectId,
@@ -378,10 +535,12 @@ function toLayer(
     zIndex,
     options.transform ?? defaultTransform(storyboard.duration, storyboard.width)
   );
-  if (layer.type === "image" && asset) {
+  if (layer.type === "image") {
+    if (asset === undefined) throw new Error(`Storyboard image layer ${layer.id} has no verified asset.`);
     return { ...base, type: "image", source: { assetId: asset.id }, properties: { fit: "contain" } };
   }
-  if (layer.type === "video" && asset) {
+  if (layer.type === "video") {
+    if (asset === undefined) throw new Error(`Storyboard video layer ${layer.id} has no verified asset.`);
     return { ...base, type: "video", source: { assetId: asset.id }, properties: { loop: false, muted: false } };
   }
   if (layer.type === "svg") {
@@ -393,15 +552,16 @@ function toLayer(
       }
     };
   }
-  return {
+  if (layer.type === "text") return {
     ...base,
     type: "text",
     properties: {
-      text: options.text ?? storyboard.requirements[0] ?? layer.description,
+      text: layer.text,
       fontFamily: "Codemotion Planner Unicode Bitmap",
       fontSize: 64
     }
   };
+  throw new Error(`Storyboard layer ${layer.id} has an unsupported type.`);
 }
 
 function toDsl(
@@ -412,7 +572,10 @@ function toDsl(
 ): MotionProject {
   const assets = resources.map((resource) => resource.asset);
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
-  const layers = storyboard.shots[0]!.layers.map((layer, index) =>
+  const storyboardLayers = [...new Map(storyboard.shots
+    .flatMap((shot) => shot.layers)
+    .map((layer) => [layer.id, layer])).values()];
+  const layers = storyboardLayers.map((layer, index) =>
     toLayer(
       layer,
       layer.localAssetId === undefined ? undefined : assetById.get(layer.localAssetId),
@@ -473,6 +636,20 @@ function toDsl(
   };
 }
 
+function assertFinalBrandText(project: MotionProject, brand: BrandConstraint): void {
+  const displayTexts = project.compositions.flatMap((composition) => composition.layers
+    .filter((layer): layer is Extract<LayerDefinition, { type: "text" }> => layer.type === "text")
+    .map((layer) => layer.properties.text));
+  if (brand.requiredText.some((required) =>
+    !displayTexts.some((displayText) => displayText.includes(required)))) {
+    throw new Error("Final AI DSL omitted required brand text from its visible text layers.");
+  }
+  if (brand.forbiddenContent.some((forbidden) => forbidden.length > 0
+    && displayTexts.some((displayText) => displayText.toLowerCase().includes(forbidden.toLowerCase())))) {
+    throw new Error("Final AI DSL contains forbidden brand content in a visible text layer.");
+  }
+}
+
 function isAnimatableValue(value: unknown): value is Animatable {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     && "mode" in value
@@ -513,7 +690,7 @@ export function validatePlannedDsl(project: MotionProject, maxHeavyEffects = 3):
     }
   }
   const assets = new Set(project.assets.map((asset) => asset.id));
-  const effects = new Map(GROUP_2_P0_EFFECTS.map((effect) => [effect.effectId, effect]));
+  const effects = P0_EFFECTS_BY_ID;
   let heavy = 0;
   if (project.metadata.timeContractVersion !== TIME_CONTRACT_VERSION) {
     issues.push({ code: "time-contract", severity: "error", message: `AI projects require time contract ${TIME_CONTRACT_VERSION}.` });
@@ -723,9 +900,9 @@ export async function planAnimation(
   options: PlanningOptions = {}
 ): Promise<PlannedAnimation> {
   const resources = options.resources ?? [];
-  const effects = selectEffects(result.understanding, resources, options.effectIds);
-  const storyboard = makeStoryboard(result.understanding, effects, resources, options);
+  const storyboard = validatedStoryboard(result, resources, options);
   const dsl = toDsl(storyboard, resources, result, options);
+  assertFinalBrandText(dsl, storyboard.brand);
   const issues = validatePlannedDsl(dsl, options.maxHeavyEffects);
   if (issues.some((issue) => issue.severity === "error")) {
     throw new Error(`AI planning static validation failed: ${issues.map((issue) => issue.code).join(", ")}`);

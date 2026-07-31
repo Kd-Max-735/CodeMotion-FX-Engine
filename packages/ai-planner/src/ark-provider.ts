@@ -4,12 +4,15 @@ import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { P0_EFFECTS } from "@codemotion/effects-2d";
 import { verifyStoredMediaAsset, type VerifiedStoredMedia } from "@codemotion/exporter";
 import {
   ARK_V1_MODEL,
   ProviderError,
+  type AiTaskPrincipal,
   type LocalResourceInput,
   type ModelProvider,
+  type ModelStoryboard,
   type NormalizedUnderstanding,
   type ProviderAuditRecord,
   type ProviderAuditSink,
@@ -18,7 +21,7 @@ import {
   type UnderstandingRequest,
   type UnderstandingResult
 } from "./provider.js";
-import { STRUCTURE_INSTRUCTION, UNDERSTANDING_JSON_SCHEMA } from "./understanding-schema.js";
+import { MODEL_PLANNING_JSON_SCHEMA, STRUCTURE_INSTRUCTION } from "./understanding-schema.js";
 import { fingerprintProviderRequestId, sanitizeUserText } from "./security.js";
 
 const DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
@@ -34,6 +37,12 @@ interface ArkProviderOptions {
   readonly fetchImpl?: typeof fetch;
   readonly maxConcurrency?: number;
   readonly requestsPerMinute?: number;
+  readonly maxTenantConcurrency?: number;
+  readonly tenantRequestsPerMinute?: number;
+  readonly maxUserConcurrency?: number;
+  readonly userRequestsPerMinute?: number;
+  readonly tenantCostCnyPerMinute?: number;
+  readonly userCostCnyPerMinute?: number;
   readonly maxRetries?: number;
   readonly processingPollMs?: number;
 }
@@ -57,46 +66,216 @@ interface HttpResult {
   readonly requestFingerprint: string;
 }
 
+interface AuditScope {
+  readonly ownerFingerprint: string;
+  readonly taskFingerprint: string;
+}
+
 interface PreparedResource {
   readonly input: LocalResourceInput;
   readonly imported: VerifiedStoredMedia;
+  readonly transferPath: string;
+  readonly transferBytes: number;
+  readonly transferMime: string;
+  readonly transferHash: string;
+}
+
+interface GateState {
+  active: number;
+  readonly starts: number[];
+  readonly costs: Array<{ readonly at: number; readonly value: number }>;
+}
+
+interface GatePrincipal {
+  readonly tenantId: string;
+  readonly userId: string;
 }
 
 class RequestGate {
-  private active = 0;
-  private readonly waiters: Array<() => void> = [];
-  private readonly starts: number[] = [];
+  private readonly global: GateState = { active: 0, starts: [], costs: [] };
+  private readonly tenants = new Map<string, GateState>();
+  private readonly users = new Map<string, GateState>();
+  private readonly waiters: Array<{
+    readonly principal: GatePrincipal;
+    readonly signal: AbortSignal;
+    readonly resolve: () => void;
+    readonly reject: (error: ProviderError) => void;
+    readonly onAbort: () => void;
+  }> = [];
+  constructor(private readonly limits: {
+    readonly globalConcurrency: number;
+    readonly globalPerMinute: number;
+    readonly tenantConcurrency: number;
+    readonly tenantPerMinute: number;
+    readonly userConcurrency: number;
+    readonly userPerMinute: number;
+    readonly tenantCostPerMinute: number;
+    readonly userCostPerMinute: number;
+  }) {}
 
-  constructor(private readonly concurrency: number, private readonly perMinute: number) {}
-
-  async run<T>(signal: AbortSignal, task: () => Promise<T>): Promise<T> {
-    await this.enter(signal);
+  async run<T>(
+    principal: GatePrincipal,
+    signal: AbortSignal,
+    task: () => Promise<T>,
+    costOf: (value: T) => number
+  ): Promise<T> {
+    await this.enter(principal, signal);
+    let cost = 0;
     try {
-      return await task();
+      const value = await task();
+      cost = Math.max(0, costOf(value));
+      return value;
     } finally {
-      this.active -= 1;
-      this.waiters.shift()?.();
+      this.release(principal, cost);
     }
   }
 
-  private async enter(signal: AbortSignal): Promise<void> {
-    while (this.active >= this.concurrency) {
-      await new Promise<void>((resolve, reject) => {
-        const onAbort = (): void => reject(new ProviderError("cancelled", "Provider request was cancelled."));
-        signal.addEventListener("abort", onAbort, { once: true });
-        this.waiters.push(() => {
-          signal.removeEventListener("abort", onAbort);
-          resolve();
-        });
-      });
-    }
+  private async enter(principal: GatePrincipal, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) throw new ProviderError("cancelled", "Provider request was cancelled.");
     const now = Date.now();
-    while (this.starts[0] !== undefined && this.starts[0] <= now - 60_000) this.starts.shift();
-    if (this.starts.length >= this.perMinute) {
-      throw new ProviderError("rate_limited", "Server-side provider rate limit exceeded.", { retryable: true });
+    this.reapAll(now);
+    this.assertRateAndCost(principal);
+    if (this.canAcquire(principal)) {
+      this.acquire(principal, now);
+      return;
     }
-    this.starts.push(now);
-    this.active += 1;
+    await new Promise<void>((resolve, reject) => {
+      const waiter = {
+        principal,
+        signal,
+        resolve: (): void => {
+          signal.removeEventListener("abort", waiter.onAbort);
+          resolve();
+        },
+        reject,
+        onAbort: (): void => {
+          const index = this.waiters.indexOf(waiter);
+          if (index >= 0) this.waiters.splice(index, 1);
+          reject(new ProviderError("cancelled", "Provider request was cancelled."));
+          this.cleanup(Date.now());
+        }
+      };
+      signal.addEventListener("abort", waiter.onAbort, { once: true });
+      this.waiters.push(waiter);
+    });
+  }
+
+  private tenant(principal: GatePrincipal): GateState {
+    return this.state(this.tenants, principal.tenantId);
+  }
+
+  private user(principal: GatePrincipal): GateState {
+    return this.state(this.users, JSON.stringify([principal.tenantId, principal.userId]));
+  }
+
+  private state(map: Map<string, GateState>, key: string): GateState {
+    let state = map.get(key);
+    if (state === undefined) {
+      state = { active: 0, starts: [], costs: [] };
+      map.set(key, state);
+    }
+    return state;
+  }
+
+  private canAcquire(principal: GatePrincipal): boolean {
+    return this.global.active < this.limits.globalConcurrency
+      && this.tenant(principal).active < this.limits.tenantConcurrency
+      && this.user(principal).active < this.limits.userConcurrency;
+  }
+
+  private acquire(principal: GatePrincipal, now: number): void {
+    for (const state of [this.global, this.tenant(principal), this.user(principal)]) {
+      state.active += 1;
+      state.starts.push(now);
+    }
+  }
+
+  private release(principal: GatePrincipal, cost: number): void {
+    const now = Date.now();
+    const tenant = this.tenant(principal);
+    const user = this.user(principal);
+    for (const state of [this.global, tenant, user]) state.active -= 1;
+    if (Number.isFinite(cost) && cost > 0) {
+      tenant.costs.push({ at: now, value: cost });
+      user.costs.push({ at: now, value: cost });
+    }
+    this.reapAll(now);
+    this.wakeEligible(now);
+    this.cleanup(now);
+  }
+
+  private assertRateAndCost(principal: GatePrincipal): void {
+    const tenant = this.tenant(principal);
+    const user = this.user(principal);
+    if (this.global.starts.length >= this.limits.globalPerMinute
+      || tenant.starts.length >= this.limits.tenantPerMinute
+      || user.starts.length >= this.limits.userPerMinute
+      || this.totalCost(tenant) >= this.limits.tenantCostPerMinute
+      || this.totalCost(user) >= this.limits.userCostPerMinute) {
+      throw new ProviderError("rate_limited", "Server-side provider quota exceeded.", { retryable: true });
+    }
+  }
+
+  private wakeEligible(now: number): void {
+    let advanced = true;
+    while (advanced && this.global.active < this.limits.globalConcurrency) {
+      advanced = false;
+      for (let index = 0; index < this.waiters.length; index += 1) {
+        const waiter = this.waiters[index]!;
+        if (waiter.signal.aborted) {
+          waiter.signal.removeEventListener("abort", waiter.onAbort);
+          this.waiters.splice(index, 1);
+          index -= 1;
+          continue;
+        }
+        try {
+          this.assertRateAndCost(waiter.principal);
+        } catch (error) {
+          this.waiters.splice(index, 1);
+          waiter.signal.removeEventListener("abort", waiter.onAbort);
+          waiter.reject(error as ProviderError);
+          advanced = true;
+          break;
+        }
+        if (!this.canAcquire(waiter.principal)) continue;
+        this.waiters.splice(index, 1);
+        this.acquire(waiter.principal, now);
+        waiter.resolve();
+        advanced = true;
+        break;
+      }
+    }
+  }
+
+  private reapAll(now: number): void {
+    this.reap(this.global, now);
+    for (const state of this.tenants.values()) this.reap(state, now);
+    for (const state of this.users.values()) this.reap(state, now);
+  }
+
+  private reap(state: GateState, now: number): void {
+    while (state.starts[0] !== undefined && state.starts[0] <= now - 60_000) state.starts.shift();
+    while (state.costs[0] !== undefined && state.costs[0].at <= now - 60_000) state.costs.shift();
+  }
+
+  private totalCost(state: GateState): number {
+    return state.costs.reduce((sum, entry) => sum + entry.value, 0);
+  }
+
+  private cleanup(now: number): void {
+    const waitingTenants = new Set(this.waiters.map((waiter) => waiter.principal.tenantId));
+    const waitingUsers = new Set(this.waiters.map((waiter) =>
+      JSON.stringify([waiter.principal.tenantId, waiter.principal.userId])));
+    for (const [key, state] of this.tenants) {
+      this.reap(state, now);
+      if (state.active === 0 && state.starts.length === 0 && state.costs.length === 0
+        && !waitingTenants.has(key)) this.tenants.delete(key);
+    }
+    for (const [key, state] of this.users) {
+      this.reap(state, now);
+      if (state.active === 0 && state.starts.length === 0 && state.costs.length === 0
+        && !waitingUsers.has(key)) this.users.delete(key);
+    }
   }
 }
 
@@ -128,6 +307,19 @@ function requestFingerprint(headers: Headers, body: unknown): string {
     return fingerprintProviderRequestId(body.id);
   }
   return fingerprintProviderRequestId(`local-${randomUUID()}`);
+}
+
+function auditScope(principal: AiTaskPrincipal): AuditScope {
+  const digest = (domain: string, value: string) =>
+    `sha256:${createHash("sha256").update(domain).update("\0").update(value).digest("hex").slice(0, 32)}`;
+  return {
+    ownerFingerprint: digest("codemotion-ai-owner", JSON.stringify([principal.tenantId, principal.userId])),
+    taskFingerprint: digest("codemotion-ai-task", JSON.stringify([
+      principal.tenantId,
+      principal.userId,
+      principal.taskId
+    ]))
+  };
 }
 
 function stripResponseIdentifier(body: unknown): unknown {
@@ -226,6 +418,15 @@ function combineSignal(parent: AbortSignal | undefined, timeoutMs: number): { si
 }
 
 function assertInput(request: UnderstandingRequest): void {
+  const principal = request.principal;
+  if (typeof principal !== "object" || principal === null
+    || !/^[\s\S]{1,256}$/.test(principal.tenantId)
+    || !/^[\s\S]{1,256}$/.test(principal.userId)
+    || !/^[\s\S]{1,256}$/.test(principal.taskId)
+    || !Array.isArray(principal.scopes)
+    || !principal.scopes.includes("ai:plan")) {
+    throw new ProviderError("security", "A trusted ai:plan task principal is required.");
+  }
   if (request.prompt.length === 0 || request.prompt.length > 20_000) {
     throw new ProviderError("invalid_input", "Prompt length must be between 1 and 20000 characters.");
   }
@@ -237,12 +438,60 @@ function assertInput(request: UnderstandingRequest): void {
     }
     if (ids.has(resource.localAssetId)) throw new ProviderError("invalid_input", "Duplicate local resource ID.");
     ids.add(resource.localAssetId);
-    if (resource.asset.type !== resource.modality) throw new ProviderError("invalid_input", "Resource modality and asset type disagree.");
+    if (resource.asset.type !== resource.modality
+      && !(resource.modality === "image" && resource.asset.type === "svg")) {
+      throw new ProviderError("invalid_input", "Resource modality and asset type disagree.");
+    }
     if (resource.videoFps !== undefined && (resource.modality !== "video"
       || resource.videoFps < 0.2 || resource.videoFps > 5)) {
       throw new ProviderError("invalid_input", "Video fps must be in [0.2, 5].");
     }
   }
+  const planning = request.planning;
+  if (planning !== undefined) {
+    if (!Number.isInteger(planning.width) || planning.width < 2 || planning.width > 8192
+      || !Number.isInteger(planning.height) || planning.height < 2 || planning.height > 8192
+      || planning.width * planning.height > 33_554_432
+      || !Number.isInteger(planning.fps) || planning.fps < 1 || planning.fps > 60
+      || !Number.isFinite(planning.durationSeconds)
+      || planning.durationSeconds < 0.5 || planning.durationSeconds > 60) {
+      throw new ProviderError("invalid_input", "Planning canvas, fps, or duration is outside ai-task/v1 limits.");
+    }
+  }
+}
+
+const MODEL_EFFECT_CATALOG = Object.freeze(P0_EFFECTS.map((effect) => Object.freeze({
+  sourceId: effect.sourceId,
+  effectId: effect.effectId,
+  effectVersion: effect.version,
+  displayName: effect.displayName,
+  description: effect.description,
+  category: effect.category,
+  tags: effect.tags,
+  inputTypes: effect.inputTypes,
+  parameterSchema: effect.parameterSchema,
+  defaultPreset: effect.defaultPreset
+})));
+
+function planningInstruction(request: UnderstandingRequest): string {
+  const planning = request.planning ?? {
+    width: 1280,
+    height: 720,
+    fps: 24,
+    durationSeconds: 6,
+    style: [],
+    brand: {
+      colors: [],
+      tone: [],
+      requiredText: [],
+      forbiddenContent: [],
+      logoAssetIds: []
+    }
+  };
+  return [
+    `Planning constraints: ${JSON.stringify(planning)}`,
+    `Authoritative ordered 40-effect catalog: ${JSON.stringify(MODEL_EFFECT_CATALOG)}`
+  ].join("\n");
 }
 
 function emit(callback: UnderstandingRequest["onProgress"], event: ProviderProgress): void {
@@ -309,10 +558,23 @@ export class VolcengineArkProvider implements ModelProvider {
 
   constructor(private readonly options: ArkProviderOptions) {
     if (options.apiKey.trim().length < 10) throw new ProviderError("authentication", "A server-side Ark API key is required.");
+    const limits = {
+      globalConcurrency: options.maxConcurrency ?? 4,
+      globalPerMinute: options.requestsPerMinute ?? 20,
+      tenantConcurrency: options.maxTenantConcurrency ?? 3,
+      tenantPerMinute: options.tenantRequestsPerMinute ?? 12,
+      userConcurrency: options.maxUserConcurrency ?? 2,
+      userPerMinute: options.userRequestsPerMinute ?? 8,
+      tenantCostPerMinute: options.tenantCostCnyPerMinute ?? 5,
+      userCostPerMinute: options.userCostCnyPerMinute ?? 2
+    };
+    if (Object.values(limits).some((value) => !Number.isFinite(value) || value <= 0)) {
+      throw new ProviderError("invalid_input", "Provider quota limits must be finite positive numbers.");
+    }
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.audit = options.audit;
-    this.gate = new RequestGate(options.maxConcurrency ?? 4, options.requestsPerMinute ?? 20);
+    this.gate = new RequestGate(limits);
     this.maxRetries = options.maxRetries ?? 2;
     this.processingPollMs = options.processingPollMs ?? 2_000;
   }
@@ -320,7 +582,8 @@ export class VolcengineArkProvider implements ModelProvider {
   async understand(request: UnderstandingRequest): Promise<UnderstandingResult> {
     assertInput(request);
     const linked = combineSignal(request.signal, request.timeoutMs ?? 120_000);
-    return this.gate.run(linked.signal, async () => {
+    const scope = auditScope(request.principal);
+    const operation = this.gate.run<UnderstandingResult>(request.principal, linked.signal, async () => {
       const started = Date.now();
       const prepared: PreparedResource[] = [];
       const remoteByLocalId = new Map<string, string>();
@@ -332,12 +595,13 @@ export class VolcengineArkProvider implements ModelProvider {
             storageDirectory: input.storageDirectory,
             signal: linked.signal
           });
-          this.enforceLimits(input, imported);
-          prepared.push({ input, imported });
+          const preparedResource = await this.prepareResource(input, imported, linked.signal);
+          this.enforceLimits(preparedResource);
+          prepared.push(preparedResource);
         }
         const content: Array<Record<string, unknown>> = [{
           type: "input_text",
-          text: `${STRUCTURE_INSTRUCTION}\nUser request: ${sanitizeUserText(request.prompt)}`
+          text: `${STRUCTURE_INSTRUCTION}\n${planningInstruction(request)}\nUser request: ${sanitizeUserText(request.prompt)}`
         }];
         for (const resource of prepared) {
           content.push({
@@ -345,20 +609,21 @@ export class VolcengineArkProvider implements ModelProvider {
             text: `Direct ${resource.input.modality} input localAssetId: ${resource.input.localAssetId}`
           });
           if (resource.input.modality === "image") {
-            const bytes = await readFile(resource.imported.storedPath, { signal: linked.signal });
-            if (bytes.byteLength !== resource.imported.trustedBytes) {
+            const bytes = await readFile(resource.transferPath, { signal: linked.signal });
+            if (bytes.byteLength !== resource.transferBytes) {
               throw new ProviderError("security", "Verified image changed before request construction.");
             }
             if (bytes.byteLength > IMAGE_LIMIT) {
               throw new ProviderError("invalid_input", "Image exceeds the server-side size limit.");
             }
-            const expectedHash = resource.input.asset.hash?.replace(/^sha256:/, "");
             const actualHash = createHash("sha256").update(bytes).digest("hex");
-            if (expectedHash === undefined || actualHash !== expectedHash) {
+            if (actualHash !== resource.transferHash) {
               throw new ProviderError("security", "Verified image content changed before request construction.");
             }
-            const mime = String(resource.input.asset.metadata.mime);
-            content.push({ type: "input_image", image_url: `data:${mime};base64,${bytes.toString("base64")}` });
+            content.push({
+              type: "input_image",
+              image_url: `data:${resource.transferMime};base64,${bytes.toString("base64")}`
+            });
           } else {
             const remote = await this.uploadAndWait(resource, request, linked.signal, remoteByLocalId);
             content.push({
@@ -376,14 +641,14 @@ export class VolcengineArkProvider implements ModelProvider {
             text: {
               format: {
                 type: "json_schema",
-                name: "codemotion_understanding",
+                name: "codemotion_ai_task_v1",
                 strict: true,
-                schema: UNDERSTANDING_JSON_SCHEMA
+                schema: MODEL_PLANNING_JSON_SCHEMA
               }
             }
           }),
           headers: { "content-type": "application/json" }
-        }, linked.signal, ARK_V1_MODEL);
+        }, linked.signal, scope, ARK_V1_MODEL);
         const text = extractOutputText(response.body);
         let parsed: unknown;
         try {
@@ -391,12 +656,14 @@ export class VolcengineArkProvider implements ModelProvider {
         } catch {
           throw new ProviderError("provider_response", "Model output was not valid JSON.");
         }
-        const understanding = this.validateUnderstanding(parsed, prepared);
+        const planned = this.validatePlanning(parsed, prepared, request);
         const model = typeof response.body === "object" && response.body !== null && "model" in response.body
           ? response.body.model : undefined;
         if (model !== ARK_V1_MODEL) throw new ProviderError("security", "Provider response model did not match the V1 model.");
         return {
-          understanding,
+          contract: "ai-task/v1",
+          understanding: planned.understanding,
+          storyboard: planned.storyboard,
           trace: {
             provider: this.id,
             modelId: ARK_V1_MODEL,
@@ -411,22 +678,66 @@ export class VolcengineArkProvider implements ModelProvider {
         for (const localAssetId of remoteByLocalId.keys()) {
           emit(request.onProgress, { phase: "cleanup", localAssetId });
           try {
-            await this.deleteRemote(localAssetId, remoteByLocalId, cleanupSignal);
+            await this.deleteRemote(localAssetId, remoteByLocalId, cleanupSignal, scope);
           } catch {
             // Cleanup failure is audited without exposing the remote identifier.
           }
         }
-        linked.dispose();
       }
-    });
+    }, (result) => result.trace.usage.estimatedCostCny.upperBound);
+    return operation.finally(() => linked.dispose());
   }
 
-  private enforceLimits(input: LocalResourceInput, imported: VerifiedStoredMedia): void {
-    const bytes = imported.trustedBytes;
+  private async prepareResource(
+    input: LocalResourceInput,
+    imported: VerifiedStoredMedia,
+    signal: AbortSignal
+  ): Promise<PreparedResource> {
+    if (input.modality === "image" && imported.asset.type === "svg") {
+      const proxyPath = imported.rasterProxyPath;
+      const proxyHash = imported.asset.metadata.rasterProxyHash;
+      if (imported.asset.metadata.sanitized !== true
+        || proxyPath === undefined
+        || typeof proxyHash !== "string"
+        || !/^sha256:[a-f0-9]{64}$/i.test(proxyHash)) {
+        throw new ProviderError("security", "SVG image input requires a verified sanitized PNG raster proxy.");
+      }
+      const bytes = await readFile(proxyPath, { signal });
+      const actualHash = createHash("sha256").update(bytes).digest("hex");
+      if (actualHash !== proxyHash.slice(7).toLowerCase()) {
+        throw new ProviderError("security", "SVG raster proxy failed transfer integrity verification.");
+      }
+      return {
+        input,
+        imported,
+        transferPath: proxyPath,
+        transferBytes: bytes.byteLength,
+        transferMime: "image/png",
+        transferHash: actualHash
+      };
+    }
+    const hash = imported.asset.hash?.replace(/^sha256:/, "");
+    const mime = imported.asset.metadata.mime;
+    if (typeof hash !== "string" || typeof mime !== "string") {
+      throw new ProviderError("security", "Verified media transfer metadata is incomplete.");
+    }
+    return {
+      input,
+      imported,
+      transferPath: imported.storedPath,
+      transferBytes: imported.trustedBytes,
+      transferMime: mime,
+      transferHash: hash
+    };
+  }
+
+  private enforceLimits(resource: PreparedResource): void {
+    const { input, imported } = resource;
+    const bytes = resource.transferBytes;
     const duration = Number(imported.asset.metadata.duration ?? 0);
     const width = Number(imported.asset.metadata.width ?? 0);
     const height = Number(imported.asset.metadata.height ?? 0);
-    const mime = imported.asset.metadata.mime;
+    const mime = resource.transferMime;
     if (!Number.isFinite(bytes) || bytes <= 0 || typeof mime !== "string") {
       throw new ProviderError("invalid_input", "Verified media metadata is incomplete.");
     }
@@ -452,12 +763,12 @@ export class VolcengineArkProvider implements ModelProvider {
       fields["preprocess_configs[video][model]"] = ARK_V1_MODEL;
       fields["preprocess_configs[video][fps]"] = String(resource.input.videoFps ?? 1);
     }
-    const mime = String(resource.input.asset.metadata.mime);
+    const scope = auditScope(request.principal);
     const multipart = await multipartFileBody(
-      resource.imported.storedPath,
-      mime,
+      resource.transferPath,
+      resource.transferMime,
       fields,
-      resource.imported.trustedBytes,
+      resource.transferBytes,
       signal,
       (loaded, total) => emit(request.onProgress, {
         phase: "upload",
@@ -473,7 +784,7 @@ export class VolcengineArkProvider implements ModelProvider {
         "content-length": String(multipart.contentLength)
       },
       duplex: "half"
-    } as RequestInit, signal, undefined, resource.input.localAssetId, () => multipart.body() as never);
+    } as RequestInit, signal, scope, undefined, resource.input.localAssetId, () => multipart.body() as never);
     let file = parseArkFile(created.body);
     remoteByLocalId.set(resource.input.localAssetId, file.id);
     while (file.status === PROCESSING) {
@@ -484,6 +795,7 @@ export class VolcengineArkProvider implements ModelProvider {
         `${this.baseUrl}/files/${encodeURIComponent(file.id)}`,
         { method: "GET" },
         signal,
+        scope,
         undefined,
         resource.input.localAssetId
       );
@@ -496,7 +808,8 @@ export class VolcengineArkProvider implements ModelProvider {
   private async deleteRemote(
     localAssetId: string,
     remoteByLocalId: Map<string, string>,
-    signal: AbortSignal
+    signal: AbortSignal,
+    scope: AuditScope
   ): Promise<void> {
     const remote = remoteByLocalId.get(localAssetId);
     if (!remote) return;
@@ -506,6 +819,7 @@ export class VolcengineArkProvider implements ModelProvider {
         `${this.baseUrl}/files/${encodeURIComponent(remote)}`,
         { method: "DELETE" },
         signal,
+        scope,
         undefined,
         localAssetId
       );
@@ -523,6 +837,7 @@ export class VolcengineArkProvider implements ModelProvider {
     url: string,
     init: RequestInit,
     signal: AbortSignal,
+    scope: AuditScope,
     modelId?: typeof ARK_V1_MODEL,
     localAssetId?: string,
     bodyFactory?: () => NonNullable<RequestInit["body"]>
@@ -548,6 +863,7 @@ export class VolcengineArkProvider implements ModelProvider {
         if (response.ok) {
           const publicBody = endpoint === "responses.create" ? stripResponseIdentifier(body) : body;
           this.audit?.({
+            ...scope,
             endpoint,
             status: response.status,
             latencyMs,
@@ -564,6 +880,7 @@ export class VolcengineArkProvider implements ModelProvider {
         }
         const code = errorCode(response.status);
         this.audit?.({
+          ...scope,
           endpoint,
           status: response.status,
           latencyMs,
@@ -599,28 +916,62 @@ export class VolcengineArkProvider implements ModelProvider {
     throw new ProviderError("provider_unavailable", "Provider network request failed.", { cause: lastCause });
   }
 
-  private validateUnderstanding(value: unknown, resources: readonly PreparedResource[]): NormalizedUnderstanding {
+  private validatePlanning(
+    value: unknown,
+    resources: readonly PreparedResource[],
+    request: UnderstandingRequest
+  ): { understanding: NormalizedUnderstanding; storyboard: ModelStoryboard } {
     const ajv = new Ajv2020({ allErrors: true, strict: true });
-    const validate = ajv.compile(UNDERSTANDING_JSON_SCHEMA);
-    if (!validate(value)) throw new ProviderError("provider_response", "Structured understanding failed schema validation.");
-    const result = value as NormalizedUnderstanding;
+    const validate = ajv.compile(MODEL_PLANNING_JSON_SCHEMA);
+    if (!validate(value)) throw new ProviderError("provider_response", "Structured AI plan failed schema validation.");
+    const envelope = value as {
+      contract: "ai-task/v1";
+      understanding: NormalizedUnderstanding;
+      storyboard: ModelStoryboard;
+    };
+    const result = envelope.understanding;
     const expectedImages = resources.filter((item) => item.input.modality === "image").map((item) => item.input.localAssetId);
     const expectedAudio = resources.filter((item) => item.input.modality === "audio").map((item) => item.input.localAssetId);
     const expectedVideo = resources.filter((item) => item.input.modality === "video").map((item) => item.input.localAssetId);
-    if (result.images.length !== expectedImages.length
-      || result.audio.length !== expectedAudio.length
-      || result.video.length !== expectedVideo.length) {
-      throw new ProviderError("security", "Model output modality counts did not match the verified inputs.");
+    this.assertExactAssetIds("image", expectedImages, result.images.map((item) => item.localAssetId));
+    this.assertExactAssetIds("audio", expectedAudio, result.audio.map((item) => item.localAssetId));
+    this.assertExactAssetIds("video", expectedVideo, result.video.map((item) => item.localAssetId));
+    const expectedVisual = new Set([...expectedImages, ...expectedVideo]);
+    const storyboardAssetIds = envelope.storyboard.layers
+      .filter((layer) => layer.type === "image" || layer.type === "video")
+      .map((layer) => layer.localAssetId);
+    if (storyboardAssetIds.some((id) => id === undefined)
+      || new Set(storyboardAssetIds).size !== storyboardAssetIds.length
+      || storyboardAssetIds.some((id) => !expectedVisual.has(id!))
+      || [...expectedVisual].some((id) => !storyboardAssetIds.includes(id))) {
+      throw new ProviderError("security", "Storyboard asset bindings did not exactly match verified visual inputs.");
     }
-    const images = result.images.map((image, index) => ({ ...image, localAssetId: expectedImages[index]! }));
-    const audio = result.audio.map((item, index) => ({ ...item, localAssetId: expectedAudio[index]! }));
-    const video = result.video.map((item, index) => ({ ...item, localAssetId: expectedVideo[index]! }));
-    for (const item of video) {
+    const requestedPlanning = request.planning;
+    if (requestedPlanning !== undefined
+      && (envelope.storyboard.width !== requestedPlanning.width
+        || envelope.storyboard.height !== requestedPlanning.height
+        || envelope.storyboard.fps !== requestedPlanning.fps
+        || envelope.storyboard.duration !== requestedPlanning.durationSeconds
+        || JSON.stringify(envelope.storyboard.style) !== JSON.stringify(requestedPlanning.style)
+        || JSON.stringify(envelope.storyboard.brand) !== JSON.stringify(requestedPlanning.brand))) {
+      throw new ProviderError("provider_response", "Model Storyboard did not preserve planning constraints.");
+    }
+    for (const item of result.video) {
       for (const shot of item.shots) {
         if (shot.range.end < shot.range.start) throw new ProviderError("provider_response", "Video time range is reversed.");
       }
     }
-    return { ...result, images, audio, video };
+    return { understanding: result, storyboard: envelope.storyboard };
+  }
+
+  private assertExactAssetIds(modality: string, expected: readonly string[], actual: readonly string[]): void {
+    if (actual.length !== expected.length || new Set(actual).size !== actual.length) {
+      throw new ProviderError("security", `Model output ${modality} IDs were duplicate, missing, or extra.`);
+    }
+    const expectedSet = new Set(expected);
+    if (actual.some((id) => !expectedSet.has(id)) || expected.some((id) => !actual.includes(id))) {
+      throw new ProviderError("security", `Model output ${modality} IDs did not match verified inputs.`);
+    }
   }
 
   private inputHash(request: UnderstandingRequest, resources: readonly PreparedResource[]): string {

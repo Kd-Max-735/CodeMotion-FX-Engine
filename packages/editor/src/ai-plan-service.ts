@@ -1,24 +1,42 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
-import type { MotionProject } from "@codemotion/core";
-import { loadProject } from "@codemotion/schema";
+import { dirname, resolve } from "node:path";
+import {
+  OwnedTaskStore,
+  TenantMediaStore,
+  type OwnerContext,
+  type VerifiedStoredMedia
+} from "@codemotion/exporter";
 import {
   ProviderError,
   VolcengineArkProvider,
+  parseAiPlanningInputV1,
   planAnimation,
+  type AiAssetReference,
+  type AiPlanningInputV1,
+  type AiTaskPrincipal,
   type LocalResourceInput,
   type ModelProvider,
   type ProviderErrorCode,
   type ProviderProgress
 } from "@codemotion/ai-planner";
-import type { AiPlanSettings, AiPlanTaskView } from "./ai-plan-client.js";
+import type { AiPlanTaskView } from "./ai-plan-client.js";
+
+export interface AiSessionPrincipal {
+  readonly tenantId: string;
+  readonly userId: string;
+  readonly scopes: readonly string[];
+}
+
+export interface AiAssetResolver {
+  resolve(owner: OwnerContext, assetId: string, signal?: AbortSignal): Promise<VerifiedStoredMedia>;
+}
 
 interface InternalTask {
   view: AiPlanTaskView;
   controller: AbortController;
-  settings: AiPlanSettings;
-  project: MotionProject;
+  input: AiPlanningInputV1;
+  principal: AiTaskPrincipal;
   resources: readonly LocalResourceInput[];
 }
 
@@ -37,33 +55,40 @@ const safeErrors: Record<ProviderErrorCode | "planning", string> = {
   planning: "Storyboard 或 DSL 未通过静态安全校验。"
 };
 
-function validateSettings(project: MotionProject, settings: AiPlanSettings): void {
-  if (settings.prompt.length > 20_000) throw new Error("文本不能超过 20000 字符。");
-  if (settings.assetIds.length === 0 && settings.prompt.trim().length === 0) throw new Error("请输入文本或选择至少一个素材。");
-  if (settings.assetIds.length > 8 || new Set(settings.assetIds).size !== settings.assetIds.length) throw new Error("素材必须唯一且不超过 8 个。");
-  if (!Number.isInteger(settings.width) || settings.width < 2 || !Number.isInteger(settings.height) || settings.height < 2) throw new Error("画布尺寸必须是大于 1 的整数。");
-  if (!Number.isInteger(settings.fps) || settings.fps < 1 || settings.fps > 120) throw new Error("帧率必须是 1 至 120 的整数。");
-  if (!Number.isFinite(settings.duration) || settings.duration < 0.5 || settings.duration > 60) throw new Error("规划时长必须在 0.5 至 60 秒之间。");
-  if (!Number.isInteger(settings.timeoutMs) || settings.timeoutMs < 10_000 || settings.timeoutMs > 300_000) throw new Error("超时必须在 10 至 300 秒之间。");
-  for (const id of settings.assetIds) {
-    const asset = project.assets.find((item) => item.id === id);
-    if (!asset || (asset.type !== "image" && asset.type !== "audio" && asset.type !== "video")) throw new Error("选择的素材不属于当前工程。");
-    if (asset.metadata.decodeVerified !== true) throw new Error("选择的素材未通过 Stage 6 解码验证。");
+class AiAuthorizationError extends Error {
+  constructor(readonly status: 401 | 403, message: string) {
+    super(message);
   }
 }
 
-function resourceInputs(project: MotionProject, ids: readonly string[], storageDirectory: string): LocalResourceInput[] {
-  return ids.map((id) => {
-    const asset = project.assets.find((item) => item.id === id)!;
-    const modality = asset.type as "image" | "audio" | "video";
-    return {
-      modality,
-      localAssetId: id,
-      asset,
-      storageDirectory,
-      ...(modality === "video" ? { videoFps: 0.3 } : {})
-    };
-  });
+function authorizedPrincipal(value: unknown): AiSessionPrincipal {
+  if (typeof value !== "object" || value === null) {
+    throw new AiAuthorizationError(401, "Authenticated AI principal is required.");
+  }
+  const principal = value as Partial<AiSessionPrincipal>;
+  if (typeof principal.tenantId !== "string" || principal.tenantId.length < 1 || principal.tenantId.length > 256
+    || typeof principal.userId !== "string" || principal.userId.length < 1 || principal.userId.length > 256
+    || !Array.isArray(principal.scopes) || principal.scopes.some((scope) => typeof scope !== "string")) {
+    throw new AiAuthorizationError(401, "Authenticated AI principal is invalid.");
+  }
+  if (!principal.scopes.includes("ai:plan")) {
+    throw new AiAuthorizationError(403, "The ai:plan scope is required.");
+  }
+  return {
+    tenantId: principal.tenantId,
+    userId: principal.userId,
+    scopes: [...principal.scopes]
+  };
+}
+
+function ownerOf(principal: AiSessionPrincipal): OwnerContext {
+  return { tenantId: principal.tenantId, userId: principal.userId };
+}
+
+function expectedAssetTypes(reference: AiAssetReference): readonly string[] {
+  if (reference.purpose === "reference-image" || reference.purpose === "logo") return ["image", "svg"];
+  if (reference.purpose === "reference-video") return ["video"];
+  return ["audio"];
 }
 
 function errorView(error: unknown): NonNullable<AiPlanTaskView["error"]> {
@@ -81,30 +106,46 @@ function errorView(error: unknown): NonNullable<AiPlanTaskView["error"]> {
 }
 
 export class AiPlanService {
-  private readonly tasks = new Map<string, InternalTask>();
+  private readonly tasks = new OwnedTaskStore<InternalTask>();
 
-  constructor(private readonly provider: ModelProvider | undefined, private readonly mediaRoot: string) {}
+  constructor(
+    private readonly provider: ModelProvider | undefined,
+    private readonly assets: AiAssetResolver
+  ) {}
 
   get configured(): boolean { return this.provider !== undefined; }
 
-  list(): AiPlanTaskView[] {
-    return [...this.tasks.values()].map(({ view }) => structuredClone(view)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  list(rawPrincipal: AiSessionPrincipal): AiPlanTaskView[] {
+    const owner = ownerOf(authorizedPrincipal(rawPrincipal));
+    return this.tasks.list(owner).map(({ value }) => structuredClone(value.view))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  create(rawProject: unknown, settings: AiPlanSettings): AiPlanTaskView {
+  get(rawPrincipal: AiSessionPrincipal, id: string): AiPlanTaskView {
+    const owner = ownerOf(authorizedPrincipal(rawPrincipal));
+    return structuredClone(this.tasks.get(owner, id).value.view);
+  }
+
+  async create(rawPrincipal: AiSessionPrincipal, rawInput: unknown): Promise<AiPlanTaskView> {
+    const session = authorizedPrincipal(rawPrincipal);
     if (!this.provider) throw new Error("服务端 Provider 未配置。");
-    const project = loadProject(JSON.stringify(rawProject));
-    validateSettings(project, settings);
-    const resources = resourceInputs(project, settings.assetIds, this.mediaRoot);
+    const input = parseAiPlanningInputV1(rawInput);
     const id = randomUUID();
+    const principal: AiTaskPrincipal = {
+      tenantId: session.tenantId,
+      userId: session.userId,
+      taskId: id,
+      scopes: ["ai:plan"]
+    };
+    const resources = await this.resolveResources(ownerOf(session), input.assets);
     const now = new Date().toISOString();
     const modalities = [
-      ...(settings.prompt.trim() ? ["text" as const] : []),
+      ...(input.prompt.trim() ? ["text" as const] : []),
       ...resources.map((item) => item.modality)
     ];
     const task: InternalTask = {
-      settings: structuredClone(settings),
-      project,
+      input,
+      principal,
       resources,
       controller: new AbortController(),
       view: {
@@ -117,18 +158,43 @@ export class AiPlanService {
         modalities
       }
     };
-    this.tasks.set(id, task);
+    this.tasks.put(ownerOf(session), id, task);
     void this.run(task);
     return structuredClone(task.view);
   }
 
-  cancel(id: string): AiPlanTaskView {
-    const task = this.tasks.get(id);
-    if (!task) throw new Error("分析任务不存在。");
+  cancel(rawPrincipal: AiSessionPrincipal, id: string): AiPlanTaskView {
+    const owner = ownerOf(authorizedPrincipal(rawPrincipal));
+    const task = this.tasks.get(owner, id).value;
     if (task.view.status !== "running") throw new Error("只有运行中的任务可以取消。");
     task.view = { ...task.view, status: "cancelling", updatedAt: new Date().toISOString() };
     task.controller.abort(new ProviderError("cancelled", "Provider request was cancelled."));
     return structuredClone(task.view);
+  }
+
+  private async resolveResources(
+    owner: OwnerContext,
+    references: readonly AiAssetReference[]
+  ): Promise<LocalResourceInput[]> {
+    const resources: LocalResourceInput[] = [];
+    for (const reference of references) {
+      const verified = await this.assets.resolve(owner, reference.assetId);
+      if (verified.asset.id !== reference.assetId
+        || !expectedAssetTypes(reference).includes(verified.asset.type)) {
+        throw new ProviderError("security", "Authorized asset type does not match its ai-task/v1 purpose.");
+      }
+      const modality = verified.asset.type === "svg"
+        ? "image"
+        : verified.asset.type as "image" | "audio" | "video";
+      resources.push({
+        modality,
+        localAssetId: reference.assetId,
+        asset: verified.asset,
+        storageDirectory: dirname(verified.storedPath),
+        ...(modality === "video" ? { videoFps: 0.3 } : {})
+      });
+    }
+    return resources;
   }
 
   private async run(task: InternalTask): Promise<void> {
@@ -143,9 +209,18 @@ export class AiPlanService {
     };
     try {
       const result = await this.provider!.understand({
-        prompt: task.settings.prompt.trim() || "请仅依据所选素材生成可编辑动画规划。",
+        principal: task.principal,
+        prompt: task.input.prompt.trim() || "请仅依据所选素材生成可编辑动画规划。",
         resources: task.resources,
-        timeoutMs: task.settings.timeoutMs,
+        planning: {
+          width: task.input.canvas.width,
+          height: task.input.canvas.height,
+          fps: task.input.canvas.fps,
+          durationSeconds: task.input.durationSeconds,
+          style: task.input.style,
+          brand: task.input.brand
+        },
+        timeoutMs: 120_000,
         signal: task.controller.signal,
         onProgress: progress
       });
@@ -153,10 +228,12 @@ export class AiPlanService {
       task.view = { ...viewWithoutProgress, phase: "plan", updatedAt: new Date().toISOString() };
       const planned = await planAnimation(result, {
         resources: task.resources,
-        width: task.settings.width,
-        height: task.settings.height,
-        fps: task.settings.fps,
-        duration: task.settings.duration,
+        width: task.input.canvas.width,
+        height: task.input.canvas.height,
+        fps: task.input.canvas.fps,
+        duration: task.input.durationSeconds,
+        style: task.input.style,
+        brand: task.input.brand,
         signal: task.controller.signal
       });
       task.view = {
@@ -178,11 +255,17 @@ export class AiPlanService {
   }
 }
 
-export function createProductionAiPlanService(mediaRoot: string): AiPlanService {
+export function createProductionAiPlanService(
+  mediaRoot: string,
+  assets: AiAssetResolver = new TenantMediaStore({
+    storageRoot: resolve(mediaRoot),
+    allowedRoots: []
+  })
+): AiPlanService {
   const apiKey = process.env.ARK_API_KEY;
   return new AiPlanService(
     apiKey && apiKey.trim().length >= 10 ? new VolcengineArkProvider({ apiKey }) : undefined,
-    resolve(mediaRoot)
+    assets
   );
 }
 
@@ -204,29 +287,51 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(JSON.stringify(body));
 }
 
-export function createAiPlanApi(service: AiPlanService) {
+export function createAiPlanApi(
+  service: AiPlanService,
+  resolvePrincipal?: (
+    request: IncomingMessage
+  ) => AiSessionPrincipal | Promise<AiSessionPrincipal>
+) {
   return async (request: IncomingMessage, response: ServerResponse, next: () => void): Promise<void> => {
     const url = new URL(request.url ?? "/", "http://localhost");
     if (!url.pathname.startsWith("/api/ai-plans")) return next();
     try {
+      if (resolvePrincipal === undefined) {
+        throw new AiAuthorizationError(401, "Authenticated AI principal resolver is not configured.");
+      }
+      let resolved: unknown;
+      try {
+        resolved = await resolvePrincipal(request);
+      } catch {
+        throw new AiAuthorizationError(401, "AI principal resolution failed.");
+      }
+      const principal = authorizedPrincipal(resolved);
       if (request.method === "GET" && url.pathname === "/api/ai-plans") {
-        sendJson(response, 200, { configured: service.configured, tasks: service.list() });
+        sendJson(response, 200, { configured: service.configured, tasks: service.list(principal) });
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/ai-plans") {
-        const body = await jsonBody(request) as { project?: unknown; settings?: AiPlanSettings };
-        if (!body.settings) throw new Error("缺少规划设置。");
-        sendJson(response, 202, { task: service.create(body.project, body.settings) });
+        const body = await jsonBody(request);
+        sendJson(response, 202, { task: await service.create(principal, body) });
+        return;
+      }
+      const read = /^\/api\/ai-plans\/([^/]+)$/.exec(url.pathname);
+      if (request.method === "GET" && read) {
+        sendJson(response, 200, { task: service.get(principal, decodeURIComponent(read[1]!)) });
         return;
       }
       const cancel = /^\/api\/ai-plans\/([^/]+)\/cancel$/.exec(url.pathname);
       if (request.method === "POST" && cancel) {
-        sendJson(response, 200, { task: service.cancel(decodeURIComponent(cancel[1]!)) });
+        sendJson(response, 200, { task: service.cancel(principal, decodeURIComponent(cancel[1]!)) });
         return;
       }
       sendJson(response, 404, { error: "AI 规划接口不存在。" });
     } catch (error) {
-      sendJson(response, 400, { error: error instanceof Error ? error.message : "AI 规划请求失败。" });
+      const status = error instanceof AiAuthorizationError
+        ? error.status
+        : error instanceof Error && /not found|access denied/i.test(error.message) ? 404 : 400;
+      sendJson(response, status, { error: error instanceof Error ? error.message : "AI 规划请求失败。" });
     }
   };
 }

@@ -12,9 +12,18 @@ export interface LocalResourceInput {
   readonly videoFps?: number;
 }
 
+export interface AiTaskPrincipal {
+  readonly tenantId: string;
+  readonly userId: string;
+  readonly taskId: string;
+  readonly scopes: readonly "ai:plan"[];
+}
+
 export interface UnderstandingRequest {
+  readonly principal: AiTaskPrincipal;
   readonly prompt: string;
   readonly resources?: readonly LocalResourceInput[];
+  readonly planning?: PlanningContext;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly onProgress?: (event: ProviderProgress) => void;
@@ -68,6 +77,66 @@ export interface NormalizedUnderstanding extends JsonObject {
   risks: string[];
 }
 
+export interface BrandConstraint extends JsonObject {
+  colors: string[];
+  tone: string[];
+  requiredText: string[];
+  forbiddenContent: string[];
+  logoAssetIds: string[];
+}
+
+export interface PlanningContext {
+  readonly width: number;
+  readonly height: number;
+  readonly fps: number;
+  readonly durationSeconds: number;
+  readonly style: readonly string[];
+  readonly brand: BrandConstraint;
+}
+
+interface ModelStoryboardLayerBase extends JsonObject {
+  id: string;
+  description: string;
+}
+
+export type ModelStoryboardLayer =
+  | (ModelStoryboardLayerBase & { type: "text"; text: string; localAssetId?: never })
+  | (ModelStoryboardLayerBase & { type: "svg"; text?: never; localAssetId?: never })
+  | (ModelStoryboardLayerBase & {
+    type: "image" | "video";
+    text?: never;
+    localAssetId: string;
+  });
+
+export interface ModelEffectSelection extends JsonObject {
+  sourceId: string;
+  effectId: string;
+  effectVersion: string;
+  targetLayerId: string;
+  params: JsonObject;
+}
+
+export interface ModelStoryboardShot extends JsonObject {
+  id: string;
+  start: number;
+  end: number;
+  description: string;
+  layerIds: string[];
+  effects: ModelEffectSelection[];
+}
+
+export interface ModelStoryboard extends JsonObject {
+  intent: string;
+  duration: number;
+  width: number;
+  height: number;
+  fps: number;
+  style: string[];
+  brand: BrandConstraint;
+  layers: ModelStoryboardLayer[];
+  shots: ModelStoryboardShot[];
+}
+
 export interface ProviderTrace {
   readonly provider: string;
   readonly modelId: typeof ARK_V1_MODEL;
@@ -88,7 +157,9 @@ export interface ProviderTrace {
 }
 
 export interface UnderstandingResult {
+  readonly contract: "ai-task/v1";
   readonly understanding: NormalizedUnderstanding;
+  readonly storyboard: ModelStoryboard;
   readonly trace: ProviderTrace;
 }
 
@@ -129,6 +200,8 @@ export interface ProviderAuditRecord {
   readonly latencyMs: number;
   readonly requestFingerprint?: string;
   readonly localAssetId?: string;
+  readonly ownerFingerprint: string;
+  readonly taskFingerprint: string;
   readonly errorCode?: ProviderErrorCode;
 }
 

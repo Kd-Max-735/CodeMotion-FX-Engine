@@ -55,9 +55,10 @@ export function textRasterSource(
   const lineWidth = visibleCount * (width + 1);
   const startX = Math.max(2, Math.floor((previewWidth - lineWidth) / 2));
   const startY = Math.max(2, Math.floor((previewHeight - height) / 2));
-  const glyphs: RasterGlyph[] = units.slice(0, visibleCount).map((unit, index) => {
+  const glyphs: RasterGlyph[] = units.slice(0, visibleCount).flatMap((unit, index) => {
+    if (/^\s+$/u.test(unit.segment)) return [];
     const coverage = glyphCoverage(unit.segment, width, height);
-    return Object.freeze({
+    return [Object.freeze({
       glyphId: hashNumber(unit.segment),
       cluster: unit.index,
       advance: width + 1,
@@ -70,7 +71,7 @@ export function textRasterSource(
         height
       }),
       coverage
-    });
+    })];
   });
   const fontHash = createHash("sha256")
     .update("codemotion-planner-unicode-bitmap-v1\0")

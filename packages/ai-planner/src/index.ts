@@ -3,4 +3,5 @@ export * from "./mock-provider.js";
 export * from "./pipeline.js";
 export * from "./provider.js";
 export * from "./security.js";
+export * from "./task-input.js";
 export * from "./understanding-schema.js";
