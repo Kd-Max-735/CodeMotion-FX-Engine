@@ -1,9 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 import {
   OwnedTaskStore,
-  TenantMediaStore,
   type OwnerContext,
   type VerifiedStoredMedia
 } from "@codemotion/exporter";
@@ -21,6 +20,7 @@ import {
   type ProviderProgress
 } from "@codemotion/ai-planner";
 import type { AiPlanTaskView } from "./ai-plan-client.js";
+import { AuthHttpError } from "./auth-session-service.js";
 
 export interface AiSessionPrincipal {
   readonly tenantId: string;
@@ -256,11 +256,7 @@ export class AiPlanService {
 }
 
 export function createProductionAiPlanService(
-  mediaRoot: string,
-  assets: AiAssetResolver = new TenantMediaStore({
-    storageRoot: resolve(mediaRoot),
-    allowedRoots: []
-  })
+  assets: AiAssetResolver
 ): AiPlanService {
   const apiKey = process.env.ARK_API_KEY;
   return new AiPlanService(
@@ -284,29 +280,45 @@ async function jsonBody(request: IncomingMessage): Promise<unknown> {
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
   response.statusCode = status;
   response.setHeader("content-type", "application/json; charset=utf-8");
+  response.setHeader("cache-control", "no-store");
   response.end(JSON.stringify(body));
 }
 
 export function createAiPlanApi(
   service: AiPlanService,
   resolvePrincipal?: (
-    request: IncomingMessage
-  ) => AiSessionPrincipal | Promise<AiSessionPrincipal>
+    request: IncomingMessage,
+    response: ServerResponse
+  ) => AiSessionPrincipal | Promise<AiSessionPrincipal>,
+  verifyStateChange?: (
+    request: IncomingMessage,
+    response: ServerResponse,
+    principal: AiSessionPrincipal
+  ) => void | Promise<void>
 ) {
   return async (request: IncomingMessage, response: ServerResponse, next: () => void): Promise<void> => {
     const url = new URL(request.url ?? "/", "http://localhost");
-    if (!url.pathname.startsWith("/api/ai-plans")) return next();
+    const collection = url.pathname === "/api/ai-plans";
+    const item = /^\/api\/ai-plans\/([^/]+)$/.exec(url.pathname);
+    const cancellation = /^\/api\/ai-plans\/([^/]+)\/cancel$/.exec(url.pathname);
+    const matched = request.method === "GET" && (collection || item !== null)
+      || request.method === "POST" && (collection || cancellation !== null);
+    if (!matched) return next();
     try {
       if (resolvePrincipal === undefined) {
         throw new AiAuthorizationError(401, "Authenticated AI principal resolver is not configured.");
       }
       let resolved: unknown;
       try {
-        resolved = await resolvePrincipal(request);
+        resolved = await resolvePrincipal(request, response);
       } catch {
         throw new AiAuthorizationError(401, "AI principal resolution failed.");
       }
       const principal = authorizedPrincipal(resolved);
+      if (request.method === "POST") {
+        if (verifyStateChange === undefined) throw new AuthHttpError(403, "REQUEST_ORIGIN_REJECTED");
+        await verifyStateChange(request, response, principal);
+      }
       if (request.method === "GET" && url.pathname === "/api/ai-plans") {
         sendJson(response, 200, { configured: service.configured, tasks: service.list(principal) });
         return;
@@ -316,22 +328,26 @@ export function createAiPlanApi(
         sendJson(response, 202, { task: await service.create(principal, body) });
         return;
       }
-      const read = /^\/api\/ai-plans\/([^/]+)$/.exec(url.pathname);
-      if (request.method === "GET" && read) {
-        sendJson(response, 200, { task: service.get(principal, decodeURIComponent(read[1]!)) });
+      if (request.method === "GET" && item) {
+        sendJson(response, 200, { task: service.get(principal, decodeURIComponent(item[1]!)) });
         return;
       }
-      const cancel = /^\/api\/ai-plans\/([^/]+)\/cancel$/.exec(url.pathname);
-      if (request.method === "POST" && cancel) {
-        sendJson(response, 200, { task: service.cancel(principal, decodeURIComponent(cancel[1]!)) });
+      if (request.method === "POST" && cancellation) {
+        sendJson(response, 200, { task: service.cancel(principal, decodeURIComponent(cancellation[1]!)) });
         return;
       }
       sendJson(response, 404, { error: "AI 规划接口不存在。" });
     } catch (error) {
       const status = error instanceof AiAuthorizationError
         ? error.status
+        : error instanceof AuthHttpError ? error.status
         : error instanceof Error && /not found|access denied/i.test(error.message) ? 404 : 400;
-      sendJson(response, status, { error: error instanceof Error ? error.message : "AI 规划请求失败。" });
+      const code = error instanceof AiAuthorizationError
+        ? error.status === 401 ? "UNAUTHENTICATED" : "FORBIDDEN"
+        : error instanceof AuthHttpError ? error.code : "AI_PLAN_REQUEST_REJECTED";
+      sendJson(response, status, {
+        error: { code, message: error instanceof Error ? error.message : "AI planning request failed.", retryable: false }
+      });
     }
   };
 }

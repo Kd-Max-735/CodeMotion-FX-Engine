@@ -16,6 +16,7 @@ import {
   type AiAssetResolver,
   type AiSessionPrincipal
 } from "../src/ai-plan-service.js";
+import { AuthHttpError } from "../src/auth-session-service.js";
 
 const ASSET_ID = "asset_aaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER_ASSET_ID = "asset_bbbbbbbbbbbbbbbbbbbbbbbb";
@@ -115,9 +116,10 @@ async function waitForTerminal(service: AiPlanService, owner: AiSessionPrincipal
 async function apiPost(
   service: AiPlanService,
   body: string,
-  resolver?: Parameters<typeof createAiPlanApi>[1]
+  resolver?: Parameters<typeof createAiPlanApi>[1],
+  verifyStateChange?: Parameters<typeof createAiPlanApi>[2]
 ): Promise<Response> {
-  const handler = createAiPlanApi(service, resolver);
+  const handler = createAiPlanApi(service, resolver, verifyStateChange);
   const server = createServer((request, response) => {
     void handler(request, response, () => {
       response.statusCode = 404;
@@ -150,11 +152,26 @@ describe("AI plan server authorization and isolation", () => {
     const missing = await apiPost(service, malformedBody);
     const failed = await apiPost(service, malformedBody, async () => { throw new Error("resolver detail"); });
     const forbidden = await apiPost(service, malformedBody, () => principal("tenant-a", "user-a", []));
+    const originRejected = await apiPost(service, malformedBody, () => principal());
 
-    expect([missing.status, failed.status, forbidden.status]).toEqual([401, 401, 403]);
+    expect([missing.status, failed.status, forbidden.status, originRejected.status]).toEqual([401, 401, 403, 403]);
     expect(assets.calls).toEqual([]);
     expect(assets.diskReads).toBe(0);
     expect(provider.requests).toEqual([]);
+  });
+
+  it("checks session, scope, and request forgery before reading the POST body", async () => {
+    const events: string[] = [];
+    const service = new AiPlanService(new RecordingProvider(), new OwnedAssetResolver());
+    const response = await apiPost(
+      service,
+      "{not-json",
+      () => { events.push("session"); return principal(); },
+      () => { events.push("csrf"); throw new AuthHttpError(403, "REQUEST_ORIGIN_REJECTED"); }
+    );
+    expect(response.status).toBe(403);
+    expect(events).toEqual(["session", "csrf"]);
+    expect(await response.json()).toMatchObject({ error: { code: "REQUEST_ORIGIN_REJECTED" } });
   });
 
   it("accepts only the closed ai-task/v1 body and generates the trusted task principal", async () => {

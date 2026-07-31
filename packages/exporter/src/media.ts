@@ -890,14 +890,24 @@ export interface TenantMediaStoreOptions {
   readonly ffmpegPath?: string;
   readonly svgRasterizerPath?: string;
   readonly limits?: Partial<MediaLimits>;
+  readonly audit?: (event: Readonly<{ event: "media-index-record-rejected" | "media-index-load-failed" }>) => void;
 }
 
-export type TenantMediaImportOptions = Pick<MediaImportOptions, "sourcePath" | "claimedMime" | "signal">;
+export type MediaAssetPurpose = "reference-image" | "reference-video" | "reference-audio" | "logo";
 
-interface OwnedMediaRecord {
+export interface TenantMediaImportOptions extends Pick<MediaImportOptions, "sourcePath" | "claimedMime" | "signal"> {
+  readonly displayName?: string;
+}
+
+export interface TenantMediaRecord {
   readonly owner: OwnerContext;
   readonly imported: ImportedMedia;
+  readonly displayName: string;
+  readonly uploadedAt: string;
+  readonly allowedPurposes: readonly MediaAssetPurpose[];
 }
+
+interface PersistedMediaIndex { readonly version: 1; readonly records: readonly TenantMediaRecord[] }
 
 function ownedAssetKey(owner: OwnerContext, assetId: string): string {
   return JSON.stringify([owner.tenantId, owner.userId, assetId]);
@@ -908,43 +918,186 @@ function tenantStorageSegment(tenantId: string): string {
 }
 
 export class TenantMediaStore {
-  private readonly records = new Map<string, OwnedMediaRecord>();
+  private readonly records = new Map<string, TenantMediaRecord>();
+  private readonly storageRoot: string;
+  private readonly indexPath: string;
+  private readonly hydrated: Promise<void>;
+  private mutation: Promise<void> = Promise.resolve();
+  private hydrationComplete = false;
 
-  constructor(private readonly options: TenantMediaStoreOptions) {}
+  constructor(private readonly options: TenantMediaStoreOptions) {
+    this.storageRoot = resolve(options.storageRoot);
+    this.indexPath = join(this.storageRoot, ".codemotion-owner-media-index-v1.json");
+    this.hydrated = this.rehydrate().finally(() => { this.hydrationComplete = true; });
+  }
+
+  get limits(): MediaLimits { return { ...DEFAULT_MEDIA_LIMITS, ...this.options.limits }; }
+
+  async initialize(): Promise<this> {
+    await this.hydrated;
+    return this;
+  }
 
   async import(owner: OwnerContext, options: TenantMediaImportOptions): Promise<ImportedMedia> {
     assertOwnerContext(owner);
+    if (options.displayName !== undefined && !isSafeDisplayName(options.displayName)) {
+      throw new Error("Media display name is invalid.");
+    }
+    await this.hydrated;
     const imported = await importMedia({
-      ...options,
+      sourcePath: options.sourcePath,
+      claimedMime: options.claimedMime,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
       allowedRoots: this.options.allowedRoots,
-      storageDirectory: join(resolve(this.options.storageRoot), tenantStorageSegment(owner.tenantId)),
+      storageDirectory: this.ownerStorageDirectory(owner),
       ...(this.options.ffprobePath === undefined ? {} : { ffprobePath: this.options.ffprobePath }),
       ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
       ...(this.options.svgRasterizerPath === undefined ? {} : { svgRasterizerPath: this.options.svgRasterizerPath }),
       ...(this.options.limits === undefined ? {} : { limits: this.options.limits })
     });
-    this.records.set(ownedAssetKey(owner, imported.asset.id), {
+    const record: TenantMediaRecord = {
       owner: { tenantId: owner.tenantId, userId: owner.userId },
-      imported
+      imported,
+      displayName: options.displayName ?? imported.asset.id,
+      uploadedAt: new Date().toISOString(),
+      allowedPurposes: purposesFor(imported.asset.type)
+    };
+    await this.mutate(async () => {
+      const key = ownedAssetKey(owner, imported.asset.id);
+      const previous = this.records.get(key);
+      this.records.set(key, record);
+      try {
+        await this.persist();
+      } catch (cause) {
+        if (previous === undefined) this.records.delete(key);
+        else this.records.set(key, previous);
+        throw cause;
+      }
     });
     return imported;
   }
 
   async resolve(owner: OwnerContext, assetId: string, signal?: AbortSignal): Promise<VerifiedStoredMedia> {
     assertOwnerContext(owner);
+    await this.hydrated;
     const record = this.records.get(ownedAssetKey(owner, assetId));
     if (record === undefined) throw new Error("Asset not found or access denied.");
     return verifyStoredMediaAsset({
       asset: record.imported.asset,
-      storageDirectory: join(resolve(this.options.storageRoot), tenantStorageSegment(owner.tenantId)),
+      storageDirectory: this.ownerStorageDirectory(owner),
       ...(signal === undefined ? {} : { signal })
     });
   }
 
   list(owner: OwnerContext): readonly AssetDefinition[] {
     assertOwnerContext(owner);
+    this.assertHydrated();
     return [...this.records.values()]
       .filter((record) => record.owner.tenantId === owner.tenantId && record.owner.userId === owner.userId)
       .map((record) => record.imported.asset);
   }
+
+  listRecords(owner: OwnerContext): readonly TenantMediaRecord[] {
+    assertOwnerContext(owner);
+    this.assertHydrated();
+    return [...this.records.values()]
+      .filter((record) => record.owner.tenantId === owner.tenantId && record.owner.userId === owner.userId)
+      .map((record) => structuredClone(record));
+  }
+
+  private ownerStorageDirectory(owner: OwnerContext): string {
+    return join(this.storageRoot, tenantStorageSegment(owner.tenantId));
+  }
+
+  private assertHydrated(): void {
+    if (!this.hydrationComplete) throw new Error("Tenant media store has not finished initializing.");
+  }
+
+  private async mutate(operation: () => Promise<void>): Promise<void> {
+    const next = this.mutation.then(operation, operation);
+    this.mutation = next.catch(() => undefined);
+    await next;
+  }
+
+  private async persist(): Promise<void> {
+    await mkdir(this.storageRoot, { recursive: true });
+    const tempPath = join(this.storageRoot, `.owner-index.${process.pid}.${randomUUID()}.tmp`);
+    try {
+      const value: PersistedMediaIndex = { version: 1, records: [...this.records.values()] };
+      await writeFile(tempPath, JSON.stringify(value), { encoding: "utf8", flag: "wx" });
+      await rename(tempPath, this.indexPath);
+    } catch (cause) {
+      await cleanupFailedArtifact(tempPath).catch(() => undefined);
+      throw cause;
+    }
+  }
+
+  private async rehydrate(): Promise<void> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(this.indexPath, "utf8"));
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return;
+      this.options.audit?.({ event: "media-index-load-failed" });
+      return;
+    }
+    if (!isPersistedIndexEnvelope(parsed)) {
+      this.options.audit?.({ event: "media-index-load-failed" });
+      return;
+    }
+    for (const value of parsed.records) {
+      try {
+        if (!isPersistedRecord(value)) throw new Error("Persisted media record is malformed.");
+        const candidate = value;
+        assertOwnerContext(candidate.owner);
+        const directory = this.ownerStorageDirectory(candidate.owner);
+        const verified = await verifyStoredMediaAsset({ asset: candidate.imported.asset, storageDirectory: directory });
+        if (resolve(candidate.imported.storedPath) !== resolve(verified.storedPath)
+          || (candidate.imported.rasterProxyPath === undefined) !== (verified.rasterProxyPath === undefined)
+          || (candidate.imported.rasterProxyPath !== undefined
+            && resolve(candidate.imported.rasterProxyPath) !== resolve(verified.rasterProxyPath!))) {
+          throw new Error("Persisted media paths do not match verified storage paths.");
+        }
+        this.records.set(ownedAssetKey(candidate.owner, candidate.imported.asset.id), structuredClone(candidate));
+      } catch {
+        this.options.audit?.({ event: "media-index-record-rejected" });
+      }
+    }
+  }
+}
+
+function purposesFor(type: AssetDefinition["type"]): readonly MediaAssetPurpose[] {
+  if (type === "image" || type === "svg") return ["reference-image", "logo"];
+  if (type === "video") return ["reference-video"];
+  if (type === "audio") return ["reference-audio"];
+  return [];
+}
+
+function isPersistedIndexEnvelope(value: unknown): value is { readonly version: 1; readonly records: readonly unknown[] } {
+  if (typeof value !== "object" || value === null) return false;
+  const index = value as Partial<PersistedMediaIndex>;
+  return index.version === 1 && Array.isArray(index.records);
+}
+
+function isPersistedRecord(record: unknown): record is TenantMediaRecord {
+  if (typeof record !== "object" || record === null) return false;
+  const item = record as Partial<TenantMediaRecord>;
+  return typeof item.displayName === "string" && isSafeDisplayName(item.displayName)
+    && typeof item.uploadedAt === "string" && Number.isFinite(Date.parse(item.uploadedAt))
+    && new Date(item.uploadedAt).toISOString() === item.uploadedAt
+    && Array.isArray(item.allowedPurposes)
+    && item.allowedPurposes.every((purpose) => ["reference-image", "reference-video", "reference-audio", "logo"].includes(purpose))
+    && typeof item.owner === "object" && item.owner !== null
+    && typeof item.imported === "object" && item.imported !== null
+    && typeof item.imported.storedPath === "string"
+    && typeof item.imported.asset === "object" && item.imported.asset !== null
+    && typeof item.imported.asset.id === "string"
+    && ["image", "svg", "audio", "video"].includes(item.imported.asset.type)
+    && JSON.stringify(item.allowedPurposes) === JSON.stringify(purposesFor(item.imported.asset.type))
+    && (item.imported.rasterProxyPath === undefined || typeof item.imported.rasterProxyPath === "string");
+}
+
+function isSafeDisplayName(value: string): boolean {
+  const scalars = [...value];
+  return scalars.length >= 1 && scalars.length <= 128 && !/[\u0000-\u001f\u007f/\\]/.test(value);
 }

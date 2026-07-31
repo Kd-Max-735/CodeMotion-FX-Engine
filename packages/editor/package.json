@@ -30,11 +30,14 @@
     "@codemotion/renderer-webgl": "0.1.0",
     "@codemotion/schema": "0.3.0",
     "@codemotion/timeline": "0.1.0",
+    "busboy": "^1.6.0",
+    "jose": "^6.2.5",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/busboy": "^1.5.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",

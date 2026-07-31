@@ -360,8 +360,9 @@ describe("Stage 7R media ingress", () => {
   }, 60_000);
 
   it("denies cross-tenant asset access before resolving storage", async () => {
+    const tenantStorage = resolve(storage, `tenants-${randomUUID()}`);
     const store = new TenantMediaStore({
-      storageRoot: resolve(storage, "tenants"),
+      storageRoot: tenantStorage,
       allowedRoots: [input]
     });
     const tenantA = { tenantId: "tenant-a", userId: "owner" };
@@ -380,6 +381,17 @@ describe("Stage 7R media ingress", () => {
     await expect(store.resolve(tenantB, importedB.asset.id)).resolves.toMatchObject({
       asset: { id: importedA.asset.id }
     });
+    const restarted = await new TenantMediaStore({
+      storageRoot: tenantStorage,
+      allowedRoots: [input]
+    }).initialize();
+    expect(restarted.list(tenantA).map((asset) => asset.id)).toEqual([importedA.asset.id]);
+    expect(restarted.list(tenantB).map((asset) => asset.id)).toEqual([importedB.asset.id]);
+    await expect(restarted.resolve(tenantA, importedA.asset.id)).resolves.toMatchObject({
+      asset: { id: importedA.asset.id }
+    });
+    await expect(restarted.resolve({ tenantId: "tenant-c", userId: "owner" }, importedA.asset.id))
+      .rejects.toThrow("access denied");
   }, 60_000);
 });
 
