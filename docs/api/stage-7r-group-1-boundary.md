@@ -3,6 +3,11 @@
 Status: **GROUP 1 FROZEN** on 2026-07-30. This record decides contracts only. It
 does not claim that the Group 5 or Group 6 remediation listed below is implemented.
 
+Authentication, browser media ingress, Cookie/CSRF rules, and server composition
+ownership are further frozen by
+`docs/api/stage-7r-group-1-auth-upload-boundary.md`. For those subjects, the newer
+`1-S7R-F0` record as closed by `1-S7R-F0-CORRECTION` is authoritative.
+
 Authority: `1-S7R-A`, Chapter 27, and the requirement document sections 16.4, 17,
 18, 19, 24.8, and 25.4.
 
@@ -315,3 +320,10 @@ count.
 - No later group may change Core, Project Schema, Effect Definition Schema, Renderer
   Adapter API, or the ordered P0 registry under this decision. Any such need returns
   to Group 1 with version, migration, compatibility, and contract-test evidence.
+- Authentication and browser upload follow-up must also stay inside the exact file
+  ownership and protocol frozen by
+  `docs/api/stage-7r-group-1-auth-upload-boundary.md`.
+  That authoritative protocol includes browser-bound pre-login and callback
+  transactions, the fixed 15-entry MIME-to-temporary-suffix table, and
+  non-configurably bounded streaming multipart parsing; follow-up groups have no
+  discretion to replace or enlarge those boundaries.
