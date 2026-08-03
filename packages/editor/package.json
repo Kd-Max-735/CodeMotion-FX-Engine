@@ -18,7 +18,8 @@
     "qa:visual": "node test/visual-smoke.mjs",
     "qa:s5r": "node test/run-edge-s5r-qa.mjs",
     "qa:render": "node test/render-center-smoke.mjs",
-    "qa:ai-live": "node test/ai-planner-live-smoke.mjs"
+    "qa:ai-live": "node test/ai-planner-live-smoke.mjs",
+    "qa:s7r-f": "node test/s7r-f-visual.mjs"
   },
   "dependencies": {
     "@codemotion/ai-planner": "0.3.0",

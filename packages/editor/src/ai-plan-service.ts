@@ -17,7 +17,8 @@ import {
   type LocalResourceInput,
   type ModelProvider,
   type ProviderErrorCode,
-  type ProviderProgress
+  type ProviderProgress,
+  type UnderstandingResult
 } from "@codemotion/ai-planner";
 import type { AiPlanTaskView } from "./ai-plan-client.js";
 import { AuthHttpError } from "./auth-session-service.js";
@@ -107,10 +108,15 @@ function errorView(error: unknown): NonNullable<AiPlanTaskView["error"]> {
 
 export class AiPlanService {
   private readonly tasks = new OwnedTaskStore<InternalTask>();
+  private readonly pendingCreations = new Map<AbortController, Promise<void>>();
+  private readonly activeRuns = new Map<InternalTask, Promise<void>>();
+  private closing = false;
+  private closePromise: Promise<void> | undefined;
 
   constructor(
     private readonly provider: ModelProvider | undefined,
-    private readonly assets: AiAssetResolver
+    private readonly assets: AiAssetResolver,
+    private readonly planner: typeof planAnimation = planAnimation
   ) {}
 
   get configured(): boolean { return this.provider !== undefined; }
@@ -127,6 +133,7 @@ export class AiPlanService {
   }
 
   async create(rawPrincipal: AiSessionPrincipal, rawInput: unknown): Promise<AiPlanTaskView> {
+    this.assertAccepting();
     const session = authorizedPrincipal(rawPrincipal);
     if (!this.provider) throw new Error("服务端 Provider 未配置。");
     const input = parseAiPlanningInputV1(rawInput);
@@ -137,31 +144,50 @@ export class AiPlanService {
       taskId: id,
       scopes: ["ai:plan"]
     };
-    const resources = await this.resolveResources(ownerOf(session), input.assets);
-    const now = new Date().toISOString();
-    const modalities = [
-      ...(input.prompt.trim() ? ["text" as const] : []),
-      ...resources.map((item) => item.modality)
-    ];
-    const task: InternalTask = {
-      input,
-      principal,
-      resources,
-      controller: new AbortController(),
-      view: {
-        id,
-        status: "running",
-        phase: "accepted",
-        events: [],
-        createdAt: now,
-        updatedAt: now,
-        modalities
-      }
-    };
-    this.tasks.put(ownerOf(session), id, task);
-    void this.run(task);
-    return structuredClone(task.view);
+    const controller = new AbortController();
+    let settleCreation!: () => void;
+    const settled = new Promise<void>((resolve) => { settleCreation = resolve; });
+    this.pendingCreations.set(controller, settled);
+    try {
+      const resources = await this.resolveResources(ownerOf(session), input.assets, controller.signal);
+      this.assertAccepting(controller.signal);
+      const now = new Date().toISOString();
+      const modalities = [
+        ...(input.prompt.trim() ? ["text" as const] : []),
+        ...resources.map((item) => item.modality)
+      ];
+      const task: InternalTask = {
+        input,
+        principal,
+        resources,
+        controller,
+        view: {
+          id,
+          status: "running",
+          phase: "accepted",
+          events: [],
+          createdAt: now,
+          updatedAt: now,
+          modalities
+        }
+      };
+      this.tasks.put(ownerOf(session), id, task);
+      this.start(task);
+      return structuredClone(task.view);
+    } finally {
+      this.pendingCreations.delete(controller);
+      settleCreation();
+    }
   }
+
+  close(): Promise<void> {
+    if (this.closePromise !== undefined) return this.closePromise;
+    this.closing = true;
+    this.closePromise = this.finishClose();
+    return this.closePromise;
+  }
+
+  dispose(): Promise<void> { return this.close(); }
 
   cancel(rawPrincipal: AiSessionPrincipal, id: string): AiPlanTaskView {
     const owner = ownerOf(authorizedPrincipal(rawPrincipal));
@@ -174,11 +200,14 @@ export class AiPlanService {
 
   private async resolveResources(
     owner: OwnerContext,
-    references: readonly AiAssetReference[]
+    references: readonly AiAssetReference[],
+    signal: AbortSignal
   ): Promise<LocalResourceInput[]> {
     const resources: LocalResourceInput[] = [];
     for (const reference of references) {
-      const verified = await this.assets.resolve(owner, reference.assetId);
+      signal.throwIfAborted();
+      const verified = await this.assets.resolve(owner, reference.assetId, signal);
+      signal.throwIfAborted();
       if (verified.asset.id !== reference.assetId
         || !expectedAssetTypes(reference).includes(verified.asset.type)) {
         throw new ProviderError("security", "Authorized asset type does not match its ai-task/v1 purpose.");
@@ -197,8 +226,46 @@ export class AiPlanService {
     return resources;
   }
 
+  private assertAccepting(signal?: AbortSignal): void {
+    if (this.closing || signal?.aborted) {
+      throw new ProviderError("cancelled", "AI planning service is closing.");
+    }
+  }
+
+  private start(task: InternalTask): void {
+    const execution = Promise.resolve().then(() => this.run(task));
+    this.activeRuns.set(task, execution);
+    void execution.then(
+      () => { this.activeRuns.delete(task); },
+      () => { this.activeRuns.delete(task); }
+    );
+  }
+
+  private abortTask(task: InternalTask, reason: ProviderError): void {
+    if (task.view.status !== "running" && task.view.status !== "cancelling") return;
+    if (task.view.status === "running") {
+      task.view = { ...task.view, status: "cancelling", updatedAt: new Date().toISOString() };
+    }
+    if (!task.controller.signal.aborted) task.controller.abort(reason);
+  }
+
+  private async finishClose(): Promise<void> {
+    const reason = new ProviderError("cancelled", "AI planning service is closing.");
+    for (const controller of this.pendingCreations.keys()) {
+      if (!controller.signal.aborted) controller.abort(reason);
+    }
+    for (const task of this.activeRuns.keys()) this.abortTask(task, reason);
+    await Promise.all([...this.pendingCreations.values()]);
+    for (const task of this.activeRuns.keys()) this.abortTask(task, reason);
+    while (this.activeRuns.size > 0) {
+      await Promise.all([...this.activeRuns.values()]);
+    }
+  }
+
   private async run(task: InternalTask): Promise<void> {
+    let providerProgressOpen = true;
     const progress = (event: ProviderProgress): void => {
+      if (!providerProgressOpen || this.closing || task.controller.signal.aborted || task.view.status !== "running") return;
       task.view = {
         ...task.view,
         phase: event.phase,
@@ -208,25 +275,32 @@ export class AiPlanService {
       };
     };
     try {
-      const result = await this.provider!.understand({
-        principal: task.principal,
-        prompt: task.input.prompt.trim() || "请仅依据所选素材生成可编辑动画规划。",
-        resources: task.resources,
-        planning: {
-          width: task.input.canvas.width,
-          height: task.input.canvas.height,
-          fps: task.input.canvas.fps,
-          durationSeconds: task.input.durationSeconds,
-          style: task.input.style,
-          brand: task.input.brand
-        },
-        timeoutMs: 120_000,
-        signal: task.controller.signal,
-        onProgress: progress
-      });
+      task.controller.signal.throwIfAborted();
+      let result: UnderstandingResult;
+      try {
+        result = await this.provider!.understand({
+          principal: task.principal,
+          prompt: task.input.prompt.trim() || "请仅依据所选素材生成可编辑动画规划。",
+          resources: task.resources,
+          planning: {
+            width: task.input.canvas.width,
+            height: task.input.canvas.height,
+            fps: task.input.canvas.fps,
+            durationSeconds: task.input.durationSeconds,
+            style: task.input.style,
+            brand: task.input.brand
+          },
+          timeoutMs: 120_000,
+          signal: task.controller.signal,
+          onProgress: progress
+        });
+      } finally {
+        providerProgressOpen = false;
+      }
+      task.controller.signal.throwIfAborted();
       const { progress: _progress, ...viewWithoutProgress } = task.view;
       task.view = { ...viewWithoutProgress, phase: "plan", updatedAt: new Date().toISOString() };
-      const planned = await planAnimation(result, {
+      const planned = await this.planner(result, {
         resources: task.resources,
         width: task.input.canvas.width,
         height: task.input.canvas.height,
@@ -236,6 +310,7 @@ export class AiPlanService {
         brand: task.input.brand,
         signal: task.controller.signal
       });
+      task.controller.signal.throwIfAborted();
       task.view = {
         ...task.view,
         status: "completed",

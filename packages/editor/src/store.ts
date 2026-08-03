@@ -1,5 +1,5 @@
 import { CommandHistory, type EffectInstance, type JsonValue, type LayerDefinition, type MotionProject, type UndoableCommand } from "@codemotion/core";
-import { loadProject, saveProject } from "@codemotion/schema";
+import { loadProject, saveProject, validateContract } from "@codemotion/schema";
 import {
   evaluateAnimatable,
   evaluateAnimatableAt,
@@ -168,6 +168,11 @@ export class EditorStore {
     this.publish({ selectedEffectId: null });
   }
 
+  clearSelection(): void {
+    this.selectedLayerId = null;
+    this.publish({ selectedEffectId: null });
+  }
+
   selectEffect(effectId: string | null): void { this.publish({ selectedEffectId: effectId }); }
 
   newProject(name: string, width: number, height: number, fps: number): void {
@@ -190,7 +195,7 @@ export class EditorStore {
   get canUndo(): boolean { return this.history.canUndo; }
   get canRedo(): boolean { return this.history.canRedo; }
 
-  updateSelected(field: PropertyFieldSchema, rawValue: string | number): void {
+  updateSelected(field: PropertyFieldSchema, rawValue: string | number | boolean): void {
     const layerId = this.selectedLayerId;
     if (layerId === null) return;
     this.execute(`修改${field.label}`, (draft) => {
@@ -222,10 +227,12 @@ export class EditorStore {
           animatable.keyframes.sort((a, b) => a.time - b.time);
         }
       } else setPath(layer, field.path, value);
+      const validation = validateContract("LayerDefinition", layer);
+      if (!validation.valid) throw new Error(`${field.label}未通过正式 LayerDefinition Schema 校验。`);
     });
   }
 
-  propertyValue(field: PropertyFieldSchema): string | number {
+  propertyValue(field: PropertyFieldSchema): string | number | boolean {
     const layer = findLayer(this.history.state.project, this.selectedLayerId);
     if (layer === undefined) return "";
     const value = pathValue(layer, field.path);
@@ -237,7 +244,28 @@ export class EditorStore {
       }
       return typeof evaluated === "number" || typeof evaluated === "string" ? evaluated : "";
     }
-    return typeof value === "number" || typeof value === "string" ? value : "";
+    return typeof value === "number" || typeof value === "string" || typeof value === "boolean" ? value : "";
+  }
+
+  updateLayerGeometry(layerId: string, positionX: number, positionY: number, scaleX: number, scaleY: number): void {
+    const values = [positionX, positionY, scaleX, scaleY];
+    if (values.some((value) => !Number.isFinite(value))) return;
+    this.execute("调整图层几何", (draft) => {
+      const layer = findLayer(draft.project, layerId);
+      if (!layer || layer.locked) return;
+      const update = (target: typeof layer.transform.position, x: number, y: number): void => {
+        if (target.mode === "constant") target.value = { ...target.value, x, y };
+        else if (target.mode === "keyframes") {
+          const current = evaluateAnimatable(target, this.snapshotValue.currentTime);
+          const existing = target.keyframes.find((frame) => Math.abs(frame.time - this.snapshotValue.currentTime) < 0.0001);
+          if (existing) existing.value = { ...current, x, y };
+          else target.keyframes.push({ time: this.snapshotValue.currentTime, value: { ...current, x, y } });
+          target.keyframes.sort((left, right) => left.time - right.time);
+        }
+      };
+      update(layer.transform.position, positionX, positionY);
+      update(layer.transform.scale, Math.max(5, scaleX), Math.max(5, scaleY));
+    });
   }
 
   addKeyframe(animatablePath: string): void {

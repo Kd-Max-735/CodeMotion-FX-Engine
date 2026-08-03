@@ -3,19 +3,31 @@ import {
   ArrowLeft,
   AudioLines,
   CheckCircle2,
-  Clock3,
   Film,
   Image as ImageIcon,
   LoaderCircle,
+  LogIn,
+  LogOut,
   OctagonX,
   Play,
+  Plus,
+  RefreshCw,
   ShieldAlert,
   Sparkles,
-  WandSparkles
+  Upload,
+  WandSparkles,
+  X
 } from "lucide-react";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { aiPlanApi, type AiPlanSettings, type AiPlanTaskView } from "./ai-plan-client.js";
-import { projectMedia } from "./export-center.js";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { AI_CANVAS_RATIOS, aiPlanApi, buildAiPlanningInput, type AiPlanTaskView } from "./ai-plan-client.js";
+import {
+  mediaAssetApi,
+  sessionApi,
+  type AiAssetPurpose,
+  type BrowserAssetSummaryV1,
+  type BrowserMediaKind,
+  type BrowserSessionV1
+} from "./media-asset-client.js";
 import type { EditorStore } from "./store.js";
 
 const phaseLabels: Record<AiPlanTaskView["phase"], string> = {
@@ -28,210 +40,256 @@ const phaseLabels: Record<AiPlanTaskView["phase"], string> = {
   plan: "生成 Storyboard 与 DSL"
 };
 
+const PURPOSE_LABELS: Record<AiAssetPurpose, string> = {
+  "reference-image": "参考图片",
+  "reference-video": "参考视频",
+  "reference-audio": "参考音频",
+  logo: "品牌 Logo"
+};
+
+
 function formatBytes(value: number): string {
   if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 ** 2).toFixed(1)} MB`;
 }
 
-function modalityIcon(kind: "image" | "audio" | "video") {
-  return kind === "image" ? <ImageIcon size={17} /> : kind === "audio" ? <AudioLines size={17} /> : <Film size={17} />;
+function assetIcon(kind: BrowserMediaKind) {
+  if (kind === "audio") return <AudioLines size={17} />;
+  if (kind === "video") return <Film size={17} />;
+  return <ImageIcon size={17} />;
+}
+
+function identity(session: BrowserSessionV1 | undefined): string | undefined {
+  return session ? `${session.principal.tenantId}\0${session.principal.userId}\0${[...session.principal.scopes].sort().join(" ")}` : undefined;
 }
 
 export function AiPlanner({ store }: { store: EditorStore }) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const project = snapshot.document.project;
-  const media = useMemo(() => projectMedia(project), [project]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const uploadController = useRef<AbortController | undefined>(undefined);
+  const [session, setSession] = useState<BrowserSessionV1>();
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [devCode, setDevCode] = useState("");
+  const [assets, setAssets] = useState<BrowserAssetSummaryV1[]>([]);
+  const [assetCursor, setAssetCursor] = useState<string | null>(null);
+  const [assetKind, setAssetKind] = useState<BrowserMediaKind | "all">("all");
+  const [assetsLoading, setAssetsLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadPurpose, setUploadPurpose] = useState<AiAssetPurpose>("reference-image");
+  const [failedUpload, setFailedUpload] = useState<File>();
+  const [selected, setSelected] = useState<Record<string, AiAssetPurpose>>({});
   const [prompt, setPrompt] = useState("");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [timeoutSeconds, setTimeoutSeconds] = useState(180);
+  const [ratio, setRatio] = useState<keyof typeof AI_CANVAS_RATIOS>(project.width >= project.height ? "16:9" : "9:16");
+  const [width, setWidth] = useState(project.width);
+  const [height, setHeight] = useState(project.height);
+  const [fps, setFps] = useState(Math.min(60, project.fps));
   const [duration, setDuration] = useState(Math.min(6, project.duration));
+  const [style, setStyle] = useState("");
+  const [tone, setTone] = useState("");
+  const [requiredText, setRequiredText] = useState("");
+  const [forbiddenContent, setForbiddenContent] = useState("");
+  const [colors, setColors] = useState(["#ff5a3c"]);
   const [tasks, setTasks] = useState<AiPlanTaskView[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [configured, setConfigured] = useState<boolean>();
-  const [requestError, setRequestError] = useState<string>();
+  const [message, setMessage] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  const sessionKey = identity(session);
+  const scopes = new Set(session?.principal.scopes ?? []);
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? tasks[0];
-  const result = selectedTask?.result;
 
-  const refresh = async () => {
+  const readSession = useCallback(async () => {
+    setSessionLoading(true);
+    try {
+      const next = await sessionApi.read();
+      setSession((current) => {
+        if (identity(current) !== identity(next)) {
+          setAssets([]);
+          setSelected({});
+          setTasks([]);
+          setSelectedTaskId(undefined);
+        }
+        return next;
+      });
+      setMessage(undefined);
+    } catch {
+      setSession(undefined);
+      setAssets([]);
+      setSelected({});
+      setTasks([]);
+      setConfigured(undefined);
+    } finally { setSessionLoading(false); }
+  }, []);
+
+  const handleRequestError = useCallback((error: unknown, fallback: string) => {
+    setMessage(error instanceof Error ? error.message : fallback);
+    if (typeof error === "object" && error !== null && "status" in error && error.status === 401) void readSession();
+  }, [readSession]);
+
+  const loadAssets = useCallback(async (append = false) => {
+    if (!session || !session.principal.scopes.includes("assets:read")) return;
+    setAssetsLoading(true);
+    try {
+      const page = await mediaAssetApi.list({
+        limit: 50,
+        ...(append && assetCursor ? { cursor: assetCursor } : {}),
+        ...(assetKind === "all" ? {} : { kind: assetKind })
+      });
+      setAssets((current) => append ? [...current, ...page.items] : page.items);
+      setAssetCursor(page.nextCursor);
+      setMessage(undefined);
+    } catch (error) { handleRequestError(error, "素材加载失败。"); }
+    finally { setAssetsLoading(false); }
+  }, [sessionKey, assetCursor, assetKind, handleRequestError]);
+
+  const loadTasks = useCallback(async () => {
+    if (!session || !session.principal.scopes.includes("ai:plan")) return;
     try {
       const response = await aiPlanApi.list();
       setConfigured(response.configured);
       setTasks(response.tasks);
-    } catch {
-      setConfigured(false);
-      setRequestError("无法连接服务端 AI Provider。");
+    } catch (error) { handleRequestError(error, "任务加载失败。"); }
+  }, [sessionKey, handleRequestError]);
+
+  useEffect(() => { void readSession(); }, [readSession]);
+  useEffect(() => { if (sessionKey) void loadAssets(false); }, [sessionKey, assetKind]);
+  useEffect(() => {
+    if (!sessionKey || !scopes.has("ai:plan")) return;
+    void loadTasks();
+    const timer = window.setInterval(() => { void loadTasks(); }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [sessionKey]);
+  useEffect(() => () => uploadController.current?.abort(), []);
+
+  const applyRatio = (next: keyof typeof AI_CANVAS_RATIOS) => {
+    const [nextWidth, nextHeight] = AI_CANVAS_RATIOS[next];
+    setRatio(next);
+    setWidth(nextWidth);
+    setHeight(nextHeight);
+  };
+
+  const uploadFile = async (file: File) => {
+    if (!scopes.has("assets:write")) return;
+    const controller = new AbortController();
+    uploadController.current = controller;
+    setUploading(true);
+    setFailedUpload(undefined);
+    setMessage(undefined);
+    try {
+      const uploaded = await mediaAssetApi.upload(file, uploadPurpose, controller.signal);
+      setAssets((current) => [uploaded, ...current.filter((item) => item.assetId !== uploaded.assetId)]);
+      if (uploaded.allowedPurposes.includes(uploadPurpose)) {
+        setSelected((current) => ({ ...current, [uploaded.assetId]: uploadPurpose }));
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setFailedUpload(file);
+        handleRequestError(error, "上传失败。");
+      }
+    } finally {
+      if (uploadController.current === controller) uploadController.current = undefined;
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = "";
     }
   };
 
-  useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 500);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const toggleAsset = (id: string) => {
-    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const toggleAsset = (asset: BrowserAssetSummaryV1) => {
+    setSelected((current) => {
+      if (current[asset.assetId]) {
+        const next = { ...current };
+        delete next[asset.assetId];
+        return next;
+      }
+      const purpose = asset.allowedPurposes[0];
+      return purpose && Object.keys(current).length < 8 ? { ...current, [asset.assetId]: purpose } : current;
+    });
   };
 
-  const create = async () => {
+  const setPurpose = (asset: BrowserAssetSummaryV1, purpose: AiAssetPurpose) => {
+    if (!asset.allowedPurposes.includes(purpose)) return;
+    setSelected((current) => current[asset.assetId] ? { ...current, [asset.assetId]: purpose } : current);
+  };
+
+  const selectedAssets = useMemo(() => Object.entries(selected).flatMap(([assetId, purpose]) => {
+    const asset = assets.find((item) => item.assetId === assetId);
+    return asset?.allowedPurposes.includes(purpose) ? [{ assetId, purpose }] : [];
+  }), [selected, assets]);
+
+  const input = buildAiPlanningInput({ prompt, assets: selectedAssets, width, height, fps,
+    durationSeconds: duration, style, colors, tone, requiredText, forbiddenContent });
+  const formValid = Number.isInteger(width) && width >= 2 && width <= 8192
+    && Number.isInteger(height) && height >= 2 && height <= 8192 && width * height <= 33_554_432
+    && Number.isInteger(fps) && fps >= 1 && fps <= 60
+    && Number.isFinite(duration) && duration >= 0.5 && duration <= 60
+    && (prompt.trim().length > 0 || selectedAssets.length > 0)
+    && selectedAssets.length === Object.keys(selected).length && selectedAssets.length <= 8
+    && colors.every((item) => /^#[0-9a-f]{6}$/i.test(item));
+  const canSubmit = Boolean(session && scopes.has("ai:plan") && configured && !submitting && formValid);
+
+  const createTask = async () => {
+    if (!canSubmit) return;
     setSubmitting(true);
-    setRequestError(undefined);
-    const settings: AiPlanSettings = {
-      prompt,
-      assetIds: selectedIds,
-      timeoutMs: timeoutSeconds * 1000,
-      width: project.width,
-      height: project.height,
-      fps: project.fps,
-      duration
-    };
+    setMessage(undefined);
     try {
-      const { task } = await aiPlanApi.create(project, settings);
+      const { task } = await aiPlanApi.create(input);
       setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
       setSelectedTaskId(task.id);
-    } catch (error) {
-      setRequestError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSubmitting(false);
-    }
+    } catch (error) { handleRequestError(error, "任务创建失败。"); }
+    finally { setSubmitting(false); }
   };
 
-  const cancel = async (id: string) => {
+  const cancelTask = async (id: string) => {
     try {
       const { task } = await aiPlanApi.cancel(id);
       setTasks((current) => current.map((item) => item.id === id ? task : item));
-    } catch (error) {
-      setRequestError(error instanceof Error ? error.message : String(error));
-    }
+    } catch (error) { handleRequestError(error, "取消失败。"); }
   };
 
-  const enterEditor = () => {
-    if (!result) return;
-    store.importProject(JSON.stringify(result.dsl));
-  };
+  if (!session && !sessionLoading) {
+    const loopback = location.hostname === "127.0.0.1" || location.hostname === "[::1]" || location.hostname === "::1";
+    return <main className="ai-planner"><header className="ai-header"><button className="icon-button" aria-label="返回工作台" title="返回工作台" onClick={() => store.setView("workbench")}><ArrowLeft size={18} /></button><div><span className="eyebrow">SECURE SESSION</span><h1>AI 动画规划</h1></div></header><section className="ai-auth-panel"><ShieldAlert size={28} /><h2>需要服务端会话</h2><p>认证成功后才能读取素材或创建规划任务。</p><div className="ai-auth-actions"><button className="primary-command" onClick={() => sessionApi.startProductionLogin()}><LogIn size={16} />账号登录</button>{loopback && <button className="secondary-command" onClick={() => sessionApi.startDevelopmentLogin()}>绑定本地一次性 code</button>}</div>{loopback && <form onSubmit={(event) => { event.preventDefault(); void sessionApi.finishDevelopmentLogin(devCode).then(readSession).catch((error: Error) => setMessage(error.message)); }}><label className="ai-field">终端一次性 code<input type="password" autoComplete="one-time-code" value={devCode} onChange={(event) => setDevCode(event.target.value)} /></label><button className="primary-command" disabled={!devCode}>完成开发登录</button></form>}{message && <div className="ai-error" role="alert"><AlertTriangle size={16} /><span>{message}</span></div>}</section></main>;
+  }
 
-  const progress = selectedTask?.progress;
-  const uploadPercent = progress?.phase === "upload" && progress.total && progress.loaded !== undefined
-    ? Math.min(100, progress.loaded / progress.total * 100)
-    : undefined;
-  const canSubmit = configured === true
-    && !submitting
-    && (prompt.trim().length > 0 || selectedIds.length > 0)
-    && selectedIds.length <= 8
-    && duration >= 0.5
-    && duration <= 60;
+  return <main className="ai-planner">
+    <header className="ai-header">
+      <button className="icon-button" aria-label="返回工作台" title="返回工作台" onClick={() => store.setView("workbench")}><ArrowLeft size={18} /></button>
+      <div><span className="eyebrow">MULTIMODAL PLANNER</span><h1>AI 动画规划</h1></div>
+      {session && <div className="ai-session"><span>{session.principal.userId}</span><button className="icon-button" aria-label="退出登录" title="退出登录" onClick={() => void sessionApi.logout().then(readSession).catch((error: Error) => setMessage(error.message))}><LogOut size={15} /></button></div>}
+      <span className={`ai-provider-state ${configured ? "ready" : "offline"}`}><i />{configured ? "Provider 已连接" : configured === false ? "Provider 未配置" : "检查服务状态"}</span>
+    </header>
+    {message && <div className="ai-error" role="alert"><AlertTriangle size={16} /><span>{message}</span><button className="icon-button" aria-label="关闭错误" onClick={() => setMessage(undefined)}><X size={14} /></button></div>}
+    <div className="ai-layout">
+      <aside className="ai-input-panel">
+        <div className="ai-section-head"><div><span className="eyebrow">INPUT</span><h2>规划输入</h2></div><WandSparkles size={20} /></div>
+        <label className="ai-field">文本要求<textarea aria-label="动画规划文本" maxLength={20_000} rows={4} value={prompt} onChange={(event) => setPrompt(event.target.value)} /><small>{prompt.length} / 20000</small></label>
+        <div className="ai-form-grid">
+          <fieldset><legend>画幅</legend><div className="format-segment">{Object.keys(AI_CANVAS_RATIOS).map((item) => <button type="button" key={item} className={ratio === item ? "selected" : ""} onClick={() => applyRatio(item as keyof typeof AI_CANVAS_RATIOS)}>{item}</button>)}</div><div className="ai-size-row"><input aria-label="画布宽度" type="number" min="2" max="8192" value={width} onChange={(event) => setWidth(event.target.valueAsNumber)} /><span>×</span><input aria-label="画布高度" type="number" min="2" max="8192" value={height} onChange={(event) => setHeight(event.target.valueAsNumber)} /></div></fieldset>
+          <label className="ai-field">帧率<select value={fps} onChange={(event) => setFps(Number(event.target.value))}>{[24,25,30,50,60].map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label className="ai-field">时长<input type="number" min="0.5" max="60" step="0.5" value={duration} onChange={(event) => setDuration(event.target.valueAsNumber)} /></label>
+        </div>
+        <label className="ai-field">风格<input value={style} onChange={(event) => setStyle(event.target.value)} placeholder="极简, 纸张质感" /></label>
+        <label className="ai-field">品牌语气<input value={tone} onChange={(event) => setTone(event.target.value)} placeholder="克制, 专业" /></label>
+        <div className="ai-brand-colors"><span>品牌颜色</span>{colors.map((color, index) => <label key={index}><input aria-label={`品牌颜色 ${index + 1}`} type="color" value={color} onChange={(event) => setColors((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} />{color}{colors.length > 1 && <button className="icon-button" aria-label="删除颜色" onClick={() => setColors((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={12} /></button>}</label>)}{colors.length < 16 && <button className="icon-button" aria-label="添加颜色" onClick={() => setColors((current) => [...current, "#ffffff"])}><Plus size={13} /></button>}</div>
+        <label className="ai-field">必须出现的文字<textarea rows={2} value={requiredText} onChange={(event) => setRequiredText(event.target.value)} placeholder="每行一项" /></label>
+        <label className="ai-field">禁止内容<textarea rows={2} value={forbiddenContent} onChange={(event) => setForbiddenContent(event.target.value)} placeholder="每行一项" /></label>
 
-  return (
-    <main className="ai-planner">
-      <header className="ai-header">
-        <button className="icon-button" aria-label="返回工作台" title="返回工作台" onClick={() => store.setView("workbench")}><ArrowLeft size={18} /></button>
-        <div><span className="eyebrow">MULTIMODAL PLANNER</span><h1>AI 动画规划</h1></div>
-        <span className={`ai-provider-state ${configured ? "ready" : "offline"}`}><i />{configured ? "服务端 Provider 已连接" : configured === false ? "服务端 Provider 未配置" : "检查服务状态"}</span>
-      </header>
-      {requestError && <div className="ai-error" role="alert"><AlertTriangle size={16} /><span>{requestError}</span></div>}
+        <div className="ai-assets-head"><span>安全素材</span><b>{selectedAssets.length} / 8</b></div>
+        <div className="ai-upload-row"><select aria-label="上传用途" value={uploadPurpose} onChange={(event) => setUploadPurpose(event.target.value as AiAssetPurpose)}>{Object.entries(PURPOSE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><input ref={fileInput} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadFile(file); }} /><button className="secondary-command" disabled={!scopes.has("assets:write") || uploading} onClick={() => fileInput.current?.click()}><Upload size={14} />上传</button>{uploading && <button className="icon-button" aria-label="取消上传" onClick={() => uploadController.current?.abort()}><OctagonX size={14} /></button>}{failedUpload && !uploading && <button className="text-button" onClick={() => void uploadFile(failedUpload)}>重试</button>}</div>
+        <div className="ai-asset-filter"><select aria-label="素材类型筛选" value={assetKind} onChange={(event) => setAssetKind(event.target.value as BrowserMediaKind | "all")}><option value="all">全部类型</option><option value="image">图片</option><option value="svg">SVG</option><option value="audio">音频</option><option value="video">视频</option></select><button className="icon-button" aria-label="刷新素材" onClick={() => void loadAssets(false)}><RefreshCw size={14} /></button></div>
+        <div className="ai-asset-picker" aria-busy={assetsLoading}>{assetsLoading && assets.length === 0 ? <div className="ai-empty"><LoaderCircle className="spin" />加载素材</div> : assets.length === 0 ? <div className="ai-empty">没有可用素材</div> : assets.map((asset) => <div key={asset.assetId} className={`ai-asset-option${selected[asset.assetId] ? " selected" : ""}`}><input aria-label={`选择 ${asset.displayName}`} type="checkbox" checked={Boolean(selected[asset.assetId])} disabled={!selected[asset.assetId] && selectedAssets.length >= 8} onChange={() => toggleAsset(asset)} /><span className="ai-asset-icon">{assetIcon(asset.kind)}</span><span><b>{asset.displayName}</b><small>{asset.codec} · {formatBytes(asset.bytes)}</small></span>{selected[asset.assetId] && <select aria-label={`${asset.displayName} 用途`} value={selected[asset.assetId]} onChange={(event) => setPurpose(asset, event.target.value as AiAssetPurpose)}>{asset.allowedPurposes.map((purpose) => <option key={purpose} value={purpose}>{PURPOSE_LABELS[purpose]}</option>)}</select>}</div>)}</div>
+        {assetCursor && <button className="text-button ai-load-more" disabled={assetsLoading} onClick={() => void loadAssets(true)}>加载更多</button>}
+        {!scopes.has("ai:plan") && <div className="ai-scope-warning"><ShieldAlert size={14} />当前会话缺少 ai:plan</div>}
+        <button className="primary-command ai-submit" disabled={!canSubmit} onClick={() => void createTask()}>{submitting ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}创建规划任务</button>
+      </aside>
 
-      <div className="ai-layout">
-        <aside className="ai-input-panel">
-          <div className="ai-section-head"><div><span className="eyebrow">INPUT</span><h2>规划输入</h2></div><WandSparkles size={20} /></div>
-          <label className="ai-field">文本要求
-            <textarea aria-label="动画规划文本" maxLength={20_000} rows={6} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="输入动画目标、约束或叙事要求" />
-            <small>{prompt.length} / 20000</small>
-          </label>
-          <div className="ai-assets-head"><span>工程素材</span><b>{selectedIds.length} / 8</b></div>
-          <div className="ai-asset-picker">
-            {media.length === 0 ? <div className="ai-empty">当前工程没有 Stage 6 已验证媒体。</div> : media.map((asset) => (
-              <label key={asset.id} className={`ai-asset-option${selectedIds.includes(asset.id) ? " selected" : ""}${asset.valid ? "" : " invalid"}`}>
-                <input type="checkbox" checked={selectedIds.includes(asset.id)} disabled={!asset.valid || (selectedIds.length >= 8 && !selectedIds.includes(asset.id))} onChange={() => toggleAsset(asset.id)} />
-                <span className="ai-asset-icon">{modalityIcon(asset.kind)}</span>
-                <span><b>{asset.kind.toUpperCase()} · {asset.codec}</b><small>{asset.dimensions ? `${asset.dimensions} · ` : ""}{asset.duration > 0 ? `${asset.duration.toFixed(2)}s · ` : ""}{formatBytes(asset.bytes)}</small><code>{asset.shortHash}</code></span>
-                {asset.valid ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
-              </label>
-            ))}
-          </div>
-          <div className="ai-limits">
-            <div><ImageIcon size={14} /><span><b>图片</b><small>10 MB · 8192 px</small></span></div>
-            <div><AudioLines size={14} /><span><b>音频</b><small>512 MB · 6 小时</small></span></div>
-            <div><Film size={14} /><span><b>视频</b><small>512 MB · 6 小时</small></span></div>
-          </div>
-          <div className="ai-number-grid">
-            <label className="ai-field">规划时长<input type="number" min="0.5" max="60" step="0.5" value={duration} onChange={(event) => setDuration(Number(event.target.value))} /><small>0.5–60 秒</small></label>
-            <label className="ai-field">超时<input type="number" min="10" max="300" step="10" value={timeoutSeconds} onChange={(event) => setTimeoutSeconds(Number(event.target.value))} /><small>10–300 秒</small></label>
-          </div>
-          <button className="primary-command ai-submit" disabled={!canSubmit} onClick={() => void create()}>{submitting ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}开始真实分析</button>
-        </aside>
-
-        <section className="ai-workspace">
-          <div className="ai-task-bar">
-            <div>
-              <span className="eyebrow">LIVE TASK</span>
-              <h2>{selectedTask ? phaseLabels[selectedTask.phase] : "等待输入"}</h2>
-              {selectedTask && <small>{selectedTask.modalities.map((item) => item.toUpperCase()).join(" + ")} · {new Date(selectedTask.createdAt).toLocaleTimeString()}</small>}
-            </div>
-            {selectedTask?.status === "running" && <button className="secondary-command danger" onClick={() => void cancel(selectedTask.id)}><OctagonX size={15} />取消</button>}
-            {selectedTask?.status === "cancelling" && <span className="ai-status"><LoaderCircle className="spin" size={15} />正在取消</span>}
-            {selectedTask?.status === "completed" && <span className="ai-status success"><CheckCircle2 size={15} />结构化结果已验证</span>}
-          </div>
-          {selectedTask && (selectedTask.status === "running" || selectedTask.status === "cancelling") && (
-            <div className="ai-progress" role="status">
-              <span><LoaderCircle className="spin" size={16} /><b>{phaseLabels[selectedTask.phase]}</b><small>{progress?.localAssetId ?? "模型请求"}</small></span>
-              {uploadPercent !== undefined ? <div className="ai-progress-track"><i style={{ width: `${uploadPercent}%` }} /><b>{uploadPercent.toFixed(0)}%</b></div> : <div className="ai-progress-indeterminate"><i /></div>}
-              {progress?.loaded !== undefined && progress.total !== undefined && <code>{formatBytes(progress.loaded)} / {formatBytes(progress.total)}</code>}
-            </div>
-          )}
-          {selectedTask?.error && <div className="ai-task-error" role="alert"><ShieldAlert size={18} /><span><b>{selectedTask.error.code}</b><small>{selectedTask.error.message}</small></span></div>}
-
-          {!result ? <div className="ai-result-empty"><Sparkles size={28} /><b>Storyboard 与 DSL</b><span>真实模型结果将在服务端结构化校验完成后显示。</span></div> : (
-            <div className="ai-results">
-              <section className="ai-result-band summary-band">
-                <div className="ai-section-head"><div><span className="eyebrow">UNDERSTANDING</span><h2>结构化摘要</h2></div><b>{Math.round(result.understanding.confidence * 100)}%</b></div>
-                <div className="ai-summary-grid">
-                  <div><h3>要求</h3>{result.understanding.text.requirements.map((item) => <p key={item}>{item}</p>)}</div>
-                  <div><h3>约束</h3>{result.understanding.text.constraints.map((item) => <p key={item}>{item}</p>)}</div>
-                  <div><h3>视觉风格</h3>{result.understanding.images.flatMap((item) => [...item.style, ...item.colors]).map((item) => <span className="ai-chip" key={item}>{item}</span>)}</div>
-                  <div><h3>风险</h3>{result.understanding.risks.length ? result.understanding.risks.map((item) => <p key={item}>{item}</p>) : <p>模型未返回风险项</p>}</div>
-                </div>
-              </section>
-
-              {(result.understanding.images.length > 0 || result.understanding.audio.length > 0 || result.understanding.video.length > 0) && <section className="ai-result-band">
-                <div className="ai-section-head"><div><span className="eyebrow">MEDIA</span><h2>素材理解</h2></div></div>
-                <div className="media-understanding">
-                  {result.understanding.images.map((item) => <article key={item.localAssetId}><ImageIcon size={17} /><div><b>{item.subjects.join(" · ") || "图片"}</b><p>{item.composition}</p><small>{[...item.style, ...item.colors].join(" · ")}</small>{item.ocr.length > 0 && <code>OCR: {item.ocr.join(" / ")}</code>}</div></article>)}
-                  {result.understanding.audio.map((item) => <article key={item.localAssetId}><AudioLines size={17} /><div><b>{item.speakers.join(" · ") || "音频"}</b><p>{item.transcript}</p><small>{item.emotion.join(" · ")} · {item.bgm} · {item.rhythm}</small>{item.soundEffects.map((effect) => <code key={`${effect.at}-${effect.description}`}>{effect.at.toFixed(2)}s {effect.description}</code>)}</div></article>)}
-                  {result.understanding.video.flatMap((item) => item.shots.map((shot, index) => <article key={`${item.localAssetId}-${index}`}><Film size={17} /><div><b>{shot.range.start.toFixed(2)}–{shot.range.end.toFixed(2)}s · {shot.event}</b><p>{shot.action}</p><small>{shot.audioVisualRelation}</small>{shot.onScreenText.length > 0 && <code>{shot.onScreenText.join(" / ")}</code>}</div></article>))}
-                </div>
-              </section>}
-
-              <section className="ai-result-band">
-                <div className="ai-section-head"><div><span className="eyebrow">STORYBOARD</span><h2>镜头与效果</h2></div><b>{result.storyboard.shots.length} SHOTS</b></div>
-                <div className="storyboard-list">{result.storyboard.shots.map((shot) => <article key={shot.id}>
-                  <span className="shot-time">{shot.range.start.toFixed(2)}–{shot.range.end.toFixed(2)}s</span>
-                  <div><b>{shot.description}</b><small>{shot.layers.map((layer) => layer.description).join(" · ")}</small></div>
-                  <div>{shot.effects.map((effect) => <code key={`${effect.effectId}-${effect.targetLayerId}`}>{effect.effectId}</code>)}</div>
-                </article>)}</div>
-              </section>
-
-              <section className="ai-result-band">
-                <div className="ai-section-head"><div><span className="eyebrow">TIMELINE DRAFT</span><h2>时间轴草案</h2></div><Clock3 size={18} /></div>
-                <div className="draft-timeline">{result.storyboard.shots.map((shot) => <div key={shot.id}><span>{shot.id}</span><i style={{ left: `${shot.range.start / result.storyboard.duration * 100}%`, width: `${(shot.range.end - shot.range.start) / result.storyboard.duration * 100}%` }} /><small>{shot.range.start.toFixed(1)}–{shot.range.end.toFixed(1)}s</small></div>)}</div>
-              </section>
-
-              <section className="ai-result-band budget-band">
-                <div className="ai-section-head"><div><span className="eyebrow">BUDGET & TRACE</span><h2>预算与实际调用</h2></div></div>
-                <dl>
-                  <div><dt>模型</dt><dd>{result.trace.modelId}</dd></div>
-                  <div><dt>延迟</dt><dd>{(result.trace.latencyMs / 1000).toFixed(2)}s</dd></div>
-                  <div><dt>Token</dt><dd>{result.trace.usage.totalTokens}</dd></div>
-                  <div><dt>预计成本</dt><dd>¥{result.trace.usage.estimatedCostCny.lowerBound.toFixed(6)}–¥{result.trace.usage.estimatedCostCny.upperBound.toFixed(6)}</dd></div>
-                  <div><dt>DSL</dt><dd>{result.dsl.compositions[0]?.layers.length ?? 0} 图层 · {result.dsl.compositions[0]?.layers.flatMap((layer) => layer.effects).length ?? 0} 效果</dd></div>
-                  <div><dt>预览预算</dt><dd>{result.preview.frameHashes.length} 帧 · {result.preview.width}×{result.preview.height}</dd></div>
-                </dl>
-                <button className="primary-command enter-editor" onClick={enterEditor}><Play size={16} />进入编辑器继续手工编辑</button>
-              </section>
-            </div>
-          )}
-        </section>
-      </div>
-    </main>
-  );
+      <section className="ai-workspace">
+        <div className="ai-task-bar"><div><span className="eyebrow">SERVER TASKS</span><h2>{selectedTask ? phaseLabels[selectedTask.phase] : "等待输入"}</h2><small>{selectedTask ? new Date(selectedTask.updatedAt).toLocaleTimeString() : "状态以服务端为准"}</small></div>{selectedTask?.status === "running" && <button className="secondary-command danger" onClick={() => void cancelTask(selectedTask.id)}><OctagonX size={15} />取消</button>}{selectedTask?.status === "completed" && <span className="ai-status success"><CheckCircle2 size={15} />已完成</span>}</div>
+        {tasks.length > 0 && <div className="ai-task-list" aria-label="AI 任务列表">{tasks.map((task) => <button key={task.id} className={task.id === selectedTask?.id ? "selected" : ""} onClick={() => setSelectedTaskId(task.id)}><span>{task.status}</span><b>{phaseLabels[task.phase]}</b><small>{new Date(task.createdAt).toLocaleTimeString()}</small></button>)}</div>}
+        {selectedTask && (selectedTask.status === "running" || selectedTask.status === "cancelling") && <div className="ai-progress" role="status"><span><LoaderCircle className="spin" size={16} /><b>{phaseLabels[selectedTask.phase]}</b><small>{selectedTask.status === "cancelling" ? "正在取消" : selectedTask.progress?.localAssetId ?? "模型请求"}</small></span><div className="ai-progress-indeterminate"><i /></div></div>}
+        {selectedTask?.error && <div className="ai-task-error" role="alert"><ShieldAlert size={18} /><span><b>{selectedTask.error.code}</b><small>{selectedTask.error.message}</small></span></div>}
+        {!selectedTask?.result ? <div className="ai-result-empty"><Sparkles size={28} /><b>Storyboard 与 DSL</b><span>服务端完成结构化校验后显示结果。</span></div> : <div className="ai-results"><section className="ai-result-band"><div className="ai-section-head"><div><span className="eyebrow">STORYBOARD</span><h2>镜头与效果</h2></div><b>{selectedTask.result.storyboard.shots.length} SHOTS</b></div><div className="storyboard-list">{selectedTask.result.storyboard.shots.map((shot) => <article key={shot.id}><span className="shot-time">{shot.range.start.toFixed(2)}–{shot.range.end.toFixed(2)}s</span><div><b>{shot.description}</b><small>{shot.layers.map((layer) => layer.description).join(" · ")}</small></div><div>{shot.effects.map((effect) => <code key={`${effect.effectId}-${effect.targetLayerId}`}>{effect.effectId}</code>)}</div></article>)}</div></section><button className="primary-command enter-editor" onClick={() => store.importProject(JSON.stringify(selectedTask.result!.dsl))}><Play size={16} />进入编辑器继续编辑</button></div>}
+      </section>
+    </div>
+  </main>;
 }

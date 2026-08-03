@@ -27,6 +27,7 @@ export interface ServerRuntimeOptions {
   readonly writeDevLoginCode?: (code: string) => void;
   readonly authAudit?: (event: AuthAuditEvent) => void;
   readonly mediaAudit?: (event: Readonly<{ event: "media-index-record-rejected" | "media-index-load-failed" }>) => void;
+  readonly createAiPlans?: (assets: TenantMediaStore) => AiPlanService;
 }
 
 export interface ServerRuntime {
@@ -35,6 +36,8 @@ export interface ServerRuntime {
   readonly mediaAssets: MediaAssetService;
   readonly aiPlans: AiPlanService;
   readonly handle: Middleware;
+  close(): Promise<void>;
+  dispose(): Promise<void>;
 }
 
 export async function createServerRuntime(options: ServerRuntimeOptions): Promise<ServerRuntime> {
@@ -66,7 +69,7 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
   const cursorSecret = createHash("sha256").update("codemotion-media-cursor-secret-v1\0")
     .update(authOptions.sessionSecret).update(randomBytes(32)).digest();
   const mediaAssets = new MediaAssetService({ store: mediaStore, auth, uploadTempRoot, cursorSecret });
-  const aiPlans = createProductionAiPlanService(mediaStore);
+  const aiPlans = options.createAiPlans?.(mediaStore) ?? createProductionAiPlanService(mediaStore);
   const handlers: Middleware[] = [
     auth.handle(),
     mediaAssets.handle(),
@@ -76,7 +79,10 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
       (request, response) => auth.authorize(request, response, "ai:plan", true).then(() => undefined)
     )
   ];
+  let closing = false;
+  let closePromise: Promise<void> | undefined;
   const handle: Middleware = async (request, response, next) => {
+    if (closing) { next(); return; }
     let index = 0;
     const dispatch = async (): Promise<void> => {
       const handler = handlers[index++];
@@ -87,5 +93,11 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
     };
     await dispatch();
   };
-  return { auth, mediaStore, mediaAssets, aiPlans, handle };
+  const close = (): Promise<void> => {
+    if (closePromise !== undefined) return closePromise;
+    closing = true;
+    closePromise = aiPlans.close();
+    return closePromise;
+  };
+  return { auth, mediaStore, mediaAssets, aiPlans, handle, close, dispose: close };
 }

@@ -7,6 +7,8 @@ import type {
   MotionProject,
   Vector3
 } from "@codemotion/core";
+import { contractsSchema } from "@codemotion/schema";
+import { evaluateAnimatable } from "@codemotion/timeline";
 import { LAB_PIPELINE_EFFECT_ID } from "./lab-effect.js";
 
 export type WorkspaceView = "workbench" | "editor" | "lab" | "render-center" | "ai-planner";
@@ -131,6 +133,43 @@ export function findLayer(project: MotionProject, layerId: string | null): Layer
   return mainLayers(project).find((layer) => layer.id === layerId);
 }
 
+export interface CanvasLayerRect {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export function canvasLayerRect(project: MotionProject, layer: LayerDefinition, time: number): CanvasLayerRect {
+  const position = evaluateAnimatable(layer.transform.position, time);
+  const scale = evaluateAnimatable(layer.transform.scale, time);
+  const width = Math.max(project.width * 0.02, project.width * 0.36 * Math.abs(scale.x) / 100);
+  const height = Math.max(project.height * 0.02, project.height * 0.36 * Math.abs(scale.y) / 100);
+  return {
+    left: project.width / 2 + position.x - width / 2,
+    top: project.height / 2 + position.y - height / 2,
+    width,
+    height
+  };
+}
+
+export function topLayerInCanvasRect(
+  project: MotionProject,
+  time: number,
+  area: CanvasLayerRect
+): LayerDefinition | undefined {
+  const right = area.left + area.width;
+  const bottom = area.top + area.height;
+  return [...mainLayers(project)]
+    .filter((layer) => layer.visible && !layer.locked)
+    .sort((left, rightLayer) => rightLayer.zIndex - left.zIndex)
+    .find((layer) => {
+      const candidate = canvasLayerRect(project, layer, time);
+      return candidate.left < right && candidate.left + candidate.width > area.left
+        && candidate.top < bottom && candidate.top + candidate.height > area.top;
+    });
+}
+
 export function pipelineEffect(): EffectInstance {
   return {
     id: `effect.pipeline.${Date.now().toString(36)}`,
@@ -180,7 +219,7 @@ export function locateProjectError(error: unknown, project: MotionProject): Loca
 
 export interface PropertyFieldSchema extends JsonObject {
   label: string;
-  kind: "text" | "number" | "color" | "select";
+  kind: "text" | "number" | "checkbox" | "select";
   path: string;
   minimum?: number;
   maximum?: number;
@@ -190,22 +229,98 @@ export interface PropertyFieldSchema extends JsonObject {
   options?: JsonValue[];
 }
 
-export const LAYER_PROPERTY_SCHEMA: Readonly<{ sections: readonly { title: string; fields: readonly PropertyFieldSchema[] }[] }> = {
-  sections: [
-    { title: "基础属性", fields: [
-      { label: "名称", kind: "text", path: "name" },
-      { label: "混合模式", kind: "select", path: "blendMode", options: ["normal", "multiply", "screen", "add"] }
-    ] },
-    { title: "变换", fields: [
-      { label: "位置 X", kind: "number", path: "transform.position", component: "x", animatablePath: "transform.position", step: 1 },
-      { label: "位置 Y", kind: "number", path: "transform.position", component: "y", animatablePath: "transform.position", step: 1 },
-      { label: "缩放 X", kind: "number", path: "transform.scale", component: "x", animatablePath: "transform.scale", step: 1 },
-      { label: "旋转", kind: "number", path: "transform.rotation", component: "z", animatablePath: "transform.rotation", step: 1 },
-      { label: "不透明度", kind: "number", path: "opacity", animatablePath: "opacity", minimum: 0, maximum: 1, step: 0.01 }
-    ] },
-    { title: "外观", fields: [
-      { label: "填充", kind: "color", path: "properties.fill" },
-      { label: "文字", kind: "text", path: "properties.text" }
-    ] }
-  ]
-};
+interface ContractNode {
+  readonly $ref?: string;
+  readonly type?: string;
+  readonly const?: JsonValue;
+  readonly enum?: readonly JsonValue[];
+  readonly minimum?: number;
+  readonly maximum?: number;
+  readonly exclusiveMinimum?: number;
+  readonly properties?: Readonly<Record<string, ContractNode>>;
+  readonly allOf?: readonly ContractNode[];
+}
+
+interface ContractDocument { readonly $defs?: Readonly<Record<string, ContractNode>> }
+
+export interface PropertySection { readonly title: string; readonly fields: readonly PropertyFieldSchema[] }
+
+function words(path: string): string {
+  const last = path.split(".").at(-1) ?? path;
+  return last.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (value) => value.toUpperCase());
+}
+
+function referencedName(node: ContractNode): string | undefined {
+  return node.$ref?.startsWith("#/$defs/") ? node.$ref.slice("#/$defs/".length) : undefined;
+}
+
+function primitiveField(path: string, node: ContractNode): PropertyFieldSchema | undefined {
+  if (node.enum) return { label: words(path), kind: "select", path, options: [...node.enum] };
+  if (node.type === "string") return { label: words(path), kind: "text", path };
+  if (node.type === "boolean") return { label: words(path), kind: "checkbox", path };
+  if (node.type === "number" || node.type === "integer") return {
+    label: words(path), kind: "number", path,
+    ...(node.minimum === undefined ? {} : { minimum: node.minimum }),
+    ...(node.maximum === undefined ? {} : { maximum: node.maximum }),
+    step: node.type === "integer" ? 1 : 0.01
+  };
+  return undefined;
+}
+
+function schemaFields(defs: Readonly<Record<string, ContractNode>>, path: string, node: ContractNode): PropertyFieldSchema[] {
+  const direct = primitiveField(path, node);
+  if (direct) return [direct];
+  const reference = referencedName(node);
+  if (reference?.startsWith("AnimatableVector")) {
+    const vectorName = reference.endsWith("2") ? "Vector2" : "Vector3";
+    const components = Object.keys(defs[vectorName]?.properties ?? {});
+    return components.map((component) => ({
+      label: `${words(path)} ${component.toUpperCase()}`,
+      kind: "number",
+      path,
+      component: component as "x" | "y" | "z",
+      animatablePath: path,
+      step: 1
+    }));
+  }
+  if (reference?.startsWith("Animatable")) {
+    const scalarName = reference.slice("Animatable".length).toLowerCase();
+    return [{
+      label: words(path),
+      kind: scalarName === "number" ? "number" : "text",
+      path,
+      animatablePath: path,
+      ...(path === "opacity" ? { minimum: 0, maximum: 1, step: 0.01 } : { step: 0.01 })
+    }];
+  }
+  const resolved = reference ? defs[reference] : node;
+  if (!resolved?.properties) return [];
+  return Object.entries(resolved.properties).flatMap(([key, child]) => schemaFields(defs, `${path}.${key}`, child));
+}
+
+function layerBranch(defs: Readonly<Record<string, ContractNode>>, type: string): ContractNode | undefined {
+  return Object.values(defs).find((candidate) => candidate.allOf?.some((part) =>
+    part.properties?.type?.const === type));
+}
+
+export function layerPropertySections(
+  layer: LayerDefinition,
+  schema: Readonly<JsonObject> = contractsSchema
+): readonly PropertySection[] {
+  const defs = (schema as unknown as ContractDocument).$defs ?? {};
+  const common = defs.LayerCommon?.properties ?? {};
+  const baseFields = Object.entries(common).flatMap(([key, node]) => {
+    if (["id", "type", "transform", "masks", "effects", "source"].includes(key)) return [];
+    return schemaFields(defs, key, node);
+  });
+  const transformFields = Object.entries(defs.TransformDefinition?.properties ?? {})
+    .flatMap(([key, node]) => schemaFields(defs, `transform.${key}`, node));
+  const branch = layerBranch(defs, layer.type);
+  const branchProperties = branch?.allOf?.flatMap((part) => Object.entries(part.properties?.properties?.properties ?? {})) ?? [];
+  const layerFields = branchProperties.flatMap(([key, node]) => schemaFields(defs, `properties.${key}`, node));
+  return [
+    { title: "Layer", fields: baseFields },
+    { title: "Transform", fields: transformFields },
+    ...(layerFields.length ? [{ title: `${words(layer.type)} properties`, fields: layerFields }] : [])
+  ];
+}

@@ -39,7 +39,7 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { evaluateAnimatable } from "@codemotion/timeline";
 import type { JsonValue, LayerDefinition, MotionProject, Vector3 } from "@codemotion/core";
 import { EFFECT_DRAG_MIME, isLabPipelineEffect } from "./lab-effect.js";
@@ -50,7 +50,7 @@ import {
   projectResourceIds,
   type EffectParameterField
 } from "./effect-catalog.js";
-import { findLayer, LAYER_PROPERTY_SCHEMA, locateProjectError, mainLayers, pipelineEffect, type PropertyFieldSchema } from "./model.js";
+import { canvasLayerRect, findLayer, layerPropertySections, locateProjectError, mainLayers, pipelineEffect, topLayerInCanvasRect, type CanvasLayerRect, type PropertyFieldSchema } from "./model.js";
 import { CorePreviewRenderer, ProjectPreviewRenderer, type PreviewStats } from "./preview-renderer.js";
 import { RenderCenter } from "./RenderCenter.js";
 import { AiPlanner } from "./AiPlanner.js";
@@ -58,14 +58,15 @@ import { EditorStore } from "./store.js";
 
 interface AppProps { store: EditorStore }
 
-const IconButton = ({ label, disabled, onClick, children, active = false }: {
+const IconButton = ({ label, disabled, onClick, children, active = false, pressed }: {
   label: string;
   disabled?: boolean;
   onClick?: () => void;
   children: React.ReactNode;
   active?: boolean;
+  pressed?: boolean;
 }) => (
-  <button className={`icon-button${active ? " active" : ""}`} aria-label={label} title={label} disabled={disabled} onClick={onClick}>
+  <button className={`icon-button${active ? " active" : ""}`} aria-label={label} aria-pressed={pressed} title={label} disabled={disabled} onClick={onClick}>
     {children}
   </button>
 );
@@ -262,6 +263,10 @@ function CanvasViewport({ store }: AppProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const renderer = useMemo(() => new ProjectPreviewRenderer(), []);
   const [stats, setStats] = useState<PreviewStats>({ backend: "Unavailable", cpuMs: 0, drawCalls: 0, textures: 0, width: 0, height: 0 });
+  const [tool, setTool] = useState<"pointer" | "frame">("pointer");
+  const [grid, setGrid] = useState(false);
+  const [marquee, setMarquee] = useState<{ pointerId: number; startX: number; startY: number; x: number; y: number }>();
+  const resize = useRef<{ pointerId: number; corner: "nw" | "ne" | "sw" | "se"; clientX: number; clientY: number; rect: CanvasLayerRect } | undefined>(undefined);
   const project = snapshot.document.project;
   const selected = findLayer(project, snapshot.document.selectedLayerId);
   useEffect(() => {
@@ -283,21 +288,95 @@ function CanvasViewport({ store }: AppProps) {
     };
   }, [renderer, project, snapshot.currentTime, snapshot.revision]);
   useEffect(() => () => renderer.dispose(), [renderer]);
-  const position = selected ? evaluateAnimatable(selected.transform.position, snapshot.currentTime) : undefined;
-  const scale = selected ? evaluateAnimatable(selected.transform.scale, snapshot.currentTime) : undefined;
+  const selectionRect = selected ? canvasLayerRect(project, selected, snapshot.currentTime) : undefined;
   const dropEffect = (event: DragEvent) => {
     event.preventDefault();
     const effectId = event.dataTransfer.getData(EFFECT_DRAG_MIME);
     if (selected && P0_EDITOR_EFFECTS.some((effect) => effect.effectId === effectId)) store.addEffect(selected.id, effectId);
   };
+  const canvasPoint = (event: ReactPointerEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(project.width, (event.clientX - rect.left) / rect.width * project.width)),
+      y: Math.max(0, Math.min(project.height, (event.clientY - rect.top) / rect.height * project.height))
+    };
+  };
+  const pointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    if (tool === "pointer") { store.clearSelection(); return; }
+    const point = canvasPoint(event);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setMarquee({ pointerId: event.pointerId, startX: point.x, startY: point.y, x: point.x, y: point.y });
+  };
+  const pointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!marquee || marquee.pointerId !== event.pointerId) return;
+    const point = canvasPoint(event);
+    setMarquee({ ...marquee, x: point.x, y: point.y });
+  };
+  const finishMarquee = (event: ReactPointerEvent<HTMLDivElement>, cancelled = false) => {
+    if (!marquee || marquee.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!cancelled) {
+      const left = Math.min(marquee.startX, marquee.x);
+      const top = Math.min(marquee.startY, marquee.y);
+      const area = { left, top, width: Math.abs(marquee.x - marquee.startX), height: Math.abs(marquee.y - marquee.startY) };
+      const hit = area.width < project.width * 0.005 && area.height < project.height * 0.005
+        ? undefined : topLayerInCanvasRect(project, snapshot.currentTime, area);
+      if (hit) store.selectLayer(hit.id); else store.clearSelection();
+    }
+    setMarquee(undefined);
+  };
+  const resizeDown = (corner: "nw" | "ne" | "sw" | "se", event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!selectionRect || !selected || selected.locked || event.button !== 0) return;
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resize.current = { pointerId: event.pointerId, corner, clientX: event.clientX, clientY: event.clientY, rect: selectionRect };
+  };
+  const resizeMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = resize.current;
+    if (!drag || drag.pointerId !== event.pointerId || !selected) return;
+    event.stopPropagation();
+    const frame = event.currentTarget.closest(".canvas-frame")?.getBoundingClientRect();
+    if (!frame) return;
+    const dx = (event.clientX - drag.clientX) / frame.width * project.width;
+    const dy = (event.clientY - drag.clientY) / frame.height * project.height;
+    let left = drag.rect.left;
+    let right = drag.rect.left + drag.rect.width;
+    let top = drag.rect.top;
+    let bottom = drag.rect.top + drag.rect.height;
+    const minWidth = project.width * 0.02;
+    const minHeight = project.height * 0.02;
+    if (drag.corner.includes("w")) left = Math.max(0, Math.min(right - minWidth, left + dx));
+    else right = Math.min(project.width, Math.max(left + minWidth, right + dx));
+    if (drag.corner.includes("n")) top = Math.max(0, Math.min(bottom - minHeight, top + dy));
+    else bottom = Math.min(project.height, Math.max(top + minHeight, bottom + dy));
+    store.updateLayerGeometry(
+      selected.id,
+      (left + right) / 2 - project.width / 2,
+      (top + bottom) / 2 - project.height / 2,
+      (right - left) / (project.width * 0.36) * 100,
+      (bottom - top) / (project.height * 0.36) * 100
+    );
+  };
+  const resizeEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (resize.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    resize.current = undefined;
+  };
+  const marqueeRect = marquee ? {
+    left: Math.min(marquee.startX, marquee.x), top: Math.min(marquee.startY, marquee.y),
+    width: Math.abs(marquee.x - marquee.startX), height: Math.abs(marquee.y - marquee.startY)
+  } : undefined;
   return (
     <section className="canvas-workspace" onDragOver={(event) => event.preventDefault()} onDrop={dropEffect}>
-      <div className="canvas-toolbar"><div className="tool-segment"><IconButton label="选择工具" active><MousePointer2 size={16} /></IconButton><IconButton label="框选工具"><Square size={16} /></IconButton><IconButton label="网格"><Grid3X3 size={16} /></IconButton></div><span className={`backend-status ${stats.backend === "G5 Shared" ? "ok" : "fail"}`}><i />{stats.backend}{stats.timeContract && ` · Time ${stats.timeContract}`}</span><div className="zoom-control"><IconButton label="适合画布" onClick={() => store.setZoom(52)}><Maximize2 size={15} /></IconButton><input aria-label="画布缩放" type="range" min="15" max="200" value={snapshot.zoom} onChange={(event) => store.setZoom(Number(event.target.value))} /><b>{snapshot.zoom}%</b></div></div>
+      <div className="canvas-toolbar"><div className="tool-segment"><IconButton label="选择工具" active={tool === "pointer"} pressed={tool === "pointer"} onClick={() => setTool("pointer")}><MousePointer2 size={16} /></IconButton><IconButton label="框选工具" active={tool === "frame"} pressed={tool === "frame"} onClick={() => setTool("frame")}><Square size={16} /></IconButton><IconButton label="网格" active={grid} pressed={grid} onClick={() => setGrid((value) => !value)}><Grid3X3 size={16} /></IconButton></div><span className={`backend-status ${stats.backend === "G5 Shared" ? "ok" : "fail"}`}><i />{stats.backend}{stats.timeContract && ` · Time ${stats.timeContract}`}</span><div className="zoom-control"><IconButton label="适合画布" onClick={() => store.setZoom(52)}><Maximize2 size={15} /></IconButton><input aria-label="画布缩放" type="range" min="15" max="200" value={snapshot.zoom} onChange={(event) => store.setZoom(Number(event.target.value))} /><b>{snapshot.zoom}%</b></div></div>
       <div className="canvas-stage">
-        <div className="canvas-frame" style={{ width: `${snapshot.zoom}%`, aspectRatio: `${project.width}/${project.height}` }}>
+        <div className={`canvas-frame tool-${tool}`} style={{ width: `${snapshot.zoom}%`, aspectRatio: `${project.width}/${project.height}` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={(event) => finishMarquee(event)} onPointerCancel={(event) => finishMarquee(event, true)}>
           <canvas ref={canvas} aria-label="WebGL 合成预览" />
+          {grid && <div className="canvas-grid" aria-hidden="true" />}
           <div className="safe-area" />
-          {selected && position && scale && <div className="selection-box" style={{ left: `${position.x / project.width * 100}%`, top: `${position.y / project.height * 100}%`, width: `${Math.max(12, scale.x / 4)}%`, height: `${Math.max(10, scale.y / 5)}%` }}><span className="handle nw" /><span className="handle ne" /><span className="handle sw" /><span className="handle se" /><label>{selected.name}</label></div>}
+          {selected && selectionRect && <div className="selection-box" onPointerDown={(event) => event.stopPropagation()} style={{ left: `${selectionRect.left / project.width * 100}%`, top: `${selectionRect.top / project.height * 100}%`, width: `${selectionRect.width / project.width * 100}%`, height: `${selectionRect.height / project.height * 100}%` }}><button aria-label="左上缩放控制柄" className="handle nw" onPointerDown={(event) => resizeDown("nw", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><button aria-label="右上缩放控制柄" className="handle ne" onPointerDown={(event) => resizeDown("ne", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><button aria-label="左下缩放控制柄" className="handle sw" onPointerDown={(event) => resizeDown("sw", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><button aria-label="右下缩放控制柄" className="handle se" onPointerDown={(event) => resizeDown("se", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><label>{selected.name}</label></div>}
+          {marqueeRect && <div className="marquee-box" style={{ left: `${marqueeRect.left / project.width * 100}%`, top: `${marqueeRect.top / project.height * 100}%`, width: `${marqueeRect.width / project.width * 100}%`, height: `${marqueeRect.height / project.height * 100}%` }} />}
           {stats.error && <div className="canvas-error"><Zap size={20} /><b>预览失败</b><span>{stats.error}</span></div>}
         </div>
       </div>
@@ -315,7 +394,7 @@ function PropertyPanel({ store }: AppProps) {
     <aside className="right-panel panel-surface">
       <div className="inspector-head"><div><span className="layer-icon">{selected.type === "text" ? "T" : <Box size={15} />}</span><span><b>{selected.name}</b><small>{selected.id}</small></span></div><IconButton label="属性面板设置"><Settings2 size={15} /></IconButton></div>
       <div className="inspector-scroll">
-        {LAYER_PROPERTY_SCHEMA.sections.map((section) => <details key={section.title} open><summary>{section.title}<ChevronDown size={14} /></summary><div className="schema-fields">{section.fields.map((field) => <PropertyField key={`${field.path}-${field.component ?? ""}`} field={field} store={store} />)}</div></details>)}
+        {layerPropertySections(selected).map((section) => <details key={section.title} open><summary>{section.title}<ChevronDown size={14} /></summary><div className="schema-fields">{section.fields.map((field) => <PropertyField key={`${field.path}-${field.component ?? ""}`} field={field} store={store} />)}</div></details>)}
         <details open><summary>效果栈 <span className="count">{selected.effects.length}</span><ChevronDown size={14} /></summary><div className="effect-stack">{selected.effects.length === 0 ? <span className="empty-state">暂无效果</span> : selected.effects.map((effect, index) => {
           const definition = P0_EDITOR_EFFECTS.find((entry) => entry.effectId === effect.effectId);
           return <div className={`stack-row${snapshot.selectedEffectId === effect.id ? " selected" : ""}`} key={effect.id} onClick={() => store.selectEffect(effect.id)}>
@@ -379,7 +458,7 @@ function EffectField({ layerId, effectId, field, store }: {
 function PropertyField({ field, store }: { field: PropertyFieldSchema; store: EditorStore }) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const value = store.propertyValue(field);
-  const input = field.kind === "select" ? <select value={value} onChange={(event) => store.updateSelected(field, event.target.value)}>{field.options?.map((option) => <option key={String(option)}>{String(option)}</option>)}</select> : <input type={field.kind} value={value} min={field.minimum} max={field.maximum} step={field.step} onChange={(event) => store.updateSelected(field, field.kind === "number" ? event.target.valueAsNumber : event.target.value)} />;
+  const input = field.kind === "select" ? <select value={String(value)} onChange={(event) => store.updateSelected(field, event.target.value)}>{field.options?.map((option) => <option key={String(option)}>{String(option)}</option>)}</select> : field.kind === "checkbox" ? <input type="checkbox" checked={value === true} onChange={(event) => store.updateSelected(field, event.target.checked)} /> : <input type={field.kind} value={String(value)} min={field.minimum} max={field.maximum} step={field.step} onChange={(event) => store.updateSelected(field, field.kind === "number" ? event.target.valueAsNumber : event.target.value)} />;
   return <label className="schema-field"><span>{field.label}</span><span className="field-control">{input}{field.animatablePath && <IconButton label={`在 ${formatTime(snapshot.currentTime, snapshot.document.project.fps)} 添加${field.label}关键帧`} onClick={() => store.addKeyframe(field.animatablePath!)}><KeyRound size={13} /></IconButton>}</span></label>;
 }
 
@@ -424,7 +503,7 @@ function EffectLab({ store }: AppProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const [json, setJson] = useState('{\n  "strength": 1.0\n}');
   const [shader, setShader] = useState(`#version 300 es\nprecision highp float;\nuniform sampler2D u_input;\nin vec2 v_uv;\nout vec4 out_color;\nvoid main() {\n  vec4 color = texture(u_input, v_uv);\n  out_color = vec4(color.rgb, color.a);\n}`);
-  const [result, setResult] = useState("未运行");
+  const [result, setResult] = useState("等待校验");
   const canvas = useRef<HTMLCanvasElement>(null);
   const renderer = useMemo(() => new CorePreviewRenderer(), []);
   const [stats, setStats] = useState<PreviewStats>({ backend: "Unavailable", cpuMs: 0, drawCalls: 0, textures: 0, width: 0, height: 0 });
@@ -452,7 +531,7 @@ function EffectLab({ store }: AppProps) {
         <aside className="lab-params"><div className="lab-panel-head"><span><Settings2 size={15} />参数</span><span className="status-chip">Schema</span></div><label>强度<input type="range" min="0" max="1" step="0.01" defaultValue="1" /></label><label>预览质量<select defaultValue="preview"><option>draft</option><option>preview</option><option>final</option></select></label><label>当前后端<strong>{stats.backend}</strong></label><button className="primary-command" onClick={runValidation}><Play size={15} />运行校验</button><span className={`test-result ${result}`}>{result}</span></aside>
         <section className="code-panel"><div className="code-tabs"><button className="active">Shader</button><button>JSON 输入</button><span>GLSL ES 3.00</span></div><textarea aria-label="Shader 编辑器" value={shader} onChange={(event) => setShader(event.target.value)} spellCheck={false} /></section>
         <section className="json-panel"><div className="lab-panel-head"><span>参数 JSON</span><button className="text-button" onClick={() => setJson(JSON.stringify(JSON.parse(json), null, 2))}>格式化</button></div><textarea aria-label="效果参数 JSON" value={json} onChange={(event) => setJson(event.target.value)} spellCheck={false} /></section>
-        <section className="lab-tests"><div className="lab-panel-head"><span><Check size={15} />验证</span></div><div className="test-row"><span>Core renderer</span><b className={stats.backend === "WebGL2" ? "pass" : "blocked"}>{stats.backend === "WebGL2" ? "PASS" : "BLOCKED"}</b></div><div className="test-row"><span>Golden Frame</span><b>未运行</b></div><div className="test-row"><span>多浏览器截图</span><b>待 Group 7</b></div><div className="test-row"><span>导出测试</span><b>阶段 6</b></div></section>
+        <section className="lab-tests"><div className="lab-panel-head"><span><Check size={15} />当前视图状态</span></div><div className="test-row"><span>Core renderer</span><b className={stats.backend === "WebGL2" ? "pass" : "blocked"}>{stats.backend === "WebGL2" ? "可用" : "不可用"}</b></div><div className="test-row"><span>参数与 Shader</span><b>{result}</b></div><div className="test-row"><span>截图验证</span><b>由独立 QA 执行</b></div><div className="test-row"><span>导出验证</span><b>请在渲染中心查看</b></div></section>
       </div>
     </main>
   );

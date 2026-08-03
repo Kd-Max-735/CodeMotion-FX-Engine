@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadProject, saveProject, validateContract } from "@codemotion/schema";
 import { EFFECT_DRAG_MIME, LAB_PIPELINE_EFFECT_ID, isLabPipelineEffect } from "../src/lab-effect.js";
 import { AUTOSAVE_KEY, EditorStore } from "../src/store.js";
-import { LAYER_PROPERTY_SCHEMA, createStarterProject, locateProjectError, mainLayers, pipelineEffect } from "../src/model.js";
+import { createStarterProject, layerPropertySections, locateProjectError, mainLayers, pipelineEffect } from "../src/model.js";
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -12,7 +12,9 @@ class MemoryStorage {
 }
 
 function field(path: string, component?: string) {
-  const result = LAYER_PROPERTY_SCHEMA.sections.flatMap((section) => section.fields)
+  const project = createStarterProject();
+  const layer = mainLayers(project)[1]!;
+  const result = layerPropertySections(layer).flatMap((section) => section.fields)
     .find((candidate) => candidate.path === path && candidate.component === component);
   if (!result) throw new Error(`Missing field ${path}.${component ?? ""}`);
   return result;
