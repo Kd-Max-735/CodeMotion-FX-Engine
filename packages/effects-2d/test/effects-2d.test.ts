@@ -842,13 +842,49 @@ describe("Group 2 P0 catalog", () => {
     })).toThrow(/TextRasterSource|rasterInput/u);
   });
 
-  it("has one deterministic Golden Frame per effect at 0/25/50/75/100%", () => {
+  it("keeps all 40 Golden effects in frozen P0 order", () => {
     expect(golden.schemaVersion).toBe("1.1.0");
     expect(Object.keys(golden.frames)).toHaveLength(40);
-    for (const effect of GROUP_2_P0_EFFECTS) {
+    expect(P0_EFFECTS).toHaveLength(40);
+    expect(P0_EFFECTS[0]?.sourceId).toBe("M01");
+    expect(P0_EFFECTS[15]?.sourceId).toBe("T08");
+    expect(P0_EFFECTS[39]?.sourceId).toBe("H04");
+    expect(new Set(Object.keys(golden.frames)))
+      .toEqual(new Set(P0_EFFECTS.map((effect) => effect.effectId)));
+  });
+
+  it.each(P0_EFFECTS)(
+    "$sourceId $effectId matches Golden Frames at 0/25/50/75/100%",
+    (effect) => {
       const expected = golden.frames[effect.effectId];
       expect(expected).toBeDefined();
       for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
+        if (effect.sourceId === "T08") {
+          const fixture = textExtrudeFixture(
+            effect,
+            golden.t08Source.effectInstanceId,
+            progress,
+            golden.t08Source.width,
+            golden.t08Source.height
+          );
+          expect(fixture.time.effectId).toBe(effect.effectId);
+          expect(fixture.time.effectInstanceId).toBe(golden.t08Source.effectInstanceId);
+          expect(fixture.input.rasterInput.source.kind).toBe("text");
+          expect(fixture.input.rasterInput.source.text).toBe(golden.t08Source.text);
+          expect(fixture.input.rasterInput.source.glyphs.length).toBeGreaterThan(0);
+          const rendered = effect.renderPixels(
+            fixture.input,
+            effect.defaultPreset,
+            {
+              time: fixture.time,
+              seed: golden.t08Source.seed,
+              quality: golden.t08Source.quality
+            }
+          );
+          expect(hashPixelSurface(rendered), `T08@${progress}`)
+            .toBe(expected![String(progress)]);
+          continue;
+        }
         const fixture = realFixture(
           effect,
           `golden.cpu.${effect.sourceId}`,
@@ -861,39 +897,11 @@ describe("Group 2 P0 catalog", () => {
           effect.defaultPreset,
           fixture.options
         );
-        expect(hashPixelSurface(rendered), `${effect.effectId}@${progress}`).toBe(expected![String(progress)]);
+        expect(hashPixelSurface(rendered), `${effect.effectId}@${progress}`)
+          .toBe(expected![String(progress)]);
       }
     }
-    const t08 = P0_EFFECTS.find(
-      (effect): effect is TextExtrude3DEffectDefinition => effect.sourceId === "T08"
-    );
-    expect(t08).toBeDefined();
-    for (const effectTime of [0, 0.25, 0.5, 0.75, 1]) {
-      const fixture = textExtrudeFixture(
-        t08!,
-        golden.t08Source.effectInstanceId,
-        effectTime,
-        golden.t08Source.width,
-        golden.t08Source.height
-      );
-      expect(fixture.time.effectId).toBe(t08!.effectId);
-      expect(fixture.time.effectInstanceId).toBe(golden.t08Source.effectInstanceId);
-      expect(fixture.input.rasterInput.source.kind).toBe("text");
-      expect(fixture.input.rasterInput.source.text).toBe(golden.t08Source.text);
-      expect(fixture.input.rasterInput.source.glyphs.length).toBeGreaterThan(0);
-      const rendered = t08!.renderPixels(
-        fixture.input,
-        t08!.defaultPreset,
-        {
-          time: fixture.time,
-          seed: golden.t08Source.seed,
-          quality: golden.t08Source.quality
-        }
-      );
-      expect(hashPixelSurface(rendered), `T08@${effectTime}`)
-        .toBe(golden.frames[t08!.effectId]![String(effectTime)]);
-    }
-  });
+  );
 
   it.each(GROUP_2_P0_EFFECTS)("$sourceId $effectId is deterministic and clamps extreme/null-like params", (effect) => {
     const fixture = realFixture(
