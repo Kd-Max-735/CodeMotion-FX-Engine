@@ -21,8 +21,26 @@ let input: string;
 let media: string;
 let temp: string;
 let png: Buffer;
+let wav: Buffer;
 let pngPath: string;
 let secondPngPath: string;
+let wavPath: string;
+
+type TestMediaHandler = (
+  request: IncomingMessage,
+  response: import("node:http").ServerResponse,
+  next: () => void
+) => Promise<void>;
+
+function deferred<T = void>() {
+  let resolvePromise!: (value: T | PromiseLike<T>) => void;
+  let rejectPromise!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return { promise, resolve: resolvePromise, reject: rejectPromise };
+}
 
 beforeAll(async () => {
   root = await mkdtemp(resolve(tmpdir(), "cmfx-media-api-"));
@@ -31,6 +49,7 @@ beforeAll(async () => {
   temp = resolve(root, "temp");
   pngPath = resolve(input, "pixel.png");
   secondPngPath = resolve(input, "second.png");
+  wavPath = resolve(input, "sample.wav");
   await mkdir(input, { recursive: true });
   await runProcess("ffmpeg", [
     "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=16x12:d=0.1", "-frames:v", "1", "-y", pngPath
@@ -38,7 +57,12 @@ beforeAll(async () => {
   await runProcess("ffmpeg", [
     "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=20x10:d=0.1", "-frames:v", "1", "-y", secondPngPath
   ]);
+  await runProcess("ffmpeg", [
+    "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1.024", "-ar", "48000", "-ac", "2",
+    "-c:a", "pcm_s16le", "-y", wavPath
+  ]);
   png = await readFile(pngPath);
+  wav = await readFile(wavPath);
 });
 
 function principal(tenantId = "tenant-a", userId = "user-a", scopes = ["assets:read", "assets:write"]): AuthenticatedSessionPrincipal {
@@ -90,6 +114,7 @@ async function harness(options: {
   observeMultipartRequestReadBytes?: (bytes: number) => void;
   createUploadWriteStream?: (path: string) => Writable;
   wrapRequestRead?: (request: IncomingMessage) => void;
+  wrapHandler?: (handler: TestMediaHandler) => TestMediaHandler;
 } = {}) {
   const auth = options.auth ?? new TestAuth();
   const store = options.store ?? await new TenantMediaStore({
@@ -116,16 +141,44 @@ async function harness(options: {
       createUploadWriteStream: options.createUploadWriteStream
     })
   });
-  const handler = service.handle();
+  const handler = options.wrapHandler?.(service.handle()) ?? service.handle();
+  const handlerPromises = new Set<Promise<void>>();
+  const handlerFailures: unknown[] = [];
+  let observeFirstFailure!: (failure: unknown) => void;
+  const firstHandlerFailure = new Promise<unknown>((resolve) => { observeFirstFailure = resolve; });
   const server = createServer((request, response) => {
     options.wrapRequestRead?.(request);
-    void handler(request, response, () => { response.statusCode = 404; response.end(); });
+    const promise = handler(request, response, () => { response.statusCode = 404; response.end(); });
+    handlerPromises.add(promise);
+    promise.then(
+      () => { handlerPromises.delete(promise); },
+      (failure) => {
+        handlerFailures.push(failure);
+        observeFirstFailure(failure);
+        handlerPromises.delete(promise);
+      }
+    );
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  let closePromise: Promise<void> | undefined;
   return {
-    auth, store, base,
-    close: () => new Promise<void>((done, reject) => server.close((error) => error ? reject(error) : done()))
+    auth, store, base, firstHandlerFailure,
+    close: () => {
+      if (closePromise !== undefined) return closePromise;
+      closePromise = (async () => {
+        const uploadsClosed = service.close();
+        const serverClosed = new Promise<void>((done, reject) => server.close((error) => error ? reject(error) : done()));
+        const closeResults = await Promise.allSettled([uploadsClosed, serverClosed]);
+        while (handlerPromises.size > 0) await Promise.allSettled([...handlerPromises]);
+        const failures = [
+          ...handlerFailures,
+          ...closeResults.flatMap((result) => result.status === "rejected" ? [result.reason] : [])
+        ];
+        if (failures.length > 0) throw new AggregateError(failures, "Media test handler failures.");
+      })();
+      return closePromise;
+    }
   };
 }
 
@@ -195,35 +248,153 @@ function expectUnifiedBudget(snapshots: readonly MultipartBufferSnapshot[]): voi
 class BlockingFileWritable extends Writable {
   private readonly descriptor: number;
   private pending: ((error?: Error | null) => void) | undefined;
+  private blocked = true;
+  private descriptorClosed = false;
 
-  constructor(path: string) {
+  constructor(path: string, private readonly onBlocked?: () => void) {
     super({ highWaterMark: 1 });
     this.descriptor = openSync(path, "wx");
   }
 
   override _write(chunk: Buffer, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
     writeSync(this.descriptor, chunk);
-    this.pending = callback;
+    if (this.blocked) {
+      this.pending = callback;
+      this.onBlocked?.();
+    }
+    else callback();
+  }
+
+  release(): void {
+    this.blocked = false;
+    const pending = this.pending;
+    this.pending = undefined;
+    pending?.();
+  }
+
+  get isBlocked(): boolean { return this.pending !== undefined; }
+
+  override _final(callback: (error?: Error | null) => void): void {
+    this.closeDescriptor();
+    callback();
   }
 
   override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
     const pending = this.pending;
     this.pending = undefined;
     pending?.(error ?? new Error("Upload writer was stopped."));
-    closeSync(this.descriptor);
+    this.closeDescriptor();
     callback(error);
   }
-}
 
-async function waitUntil(condition: () => boolean | Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + 2_000;
-  while (!await condition()) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for upload cleanup.");
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  private closeDescriptor(): void {
+    if (this.descriptorClosed) return;
+    this.descriptorClosed = true;
+    closeSync(this.descriptor);
   }
 }
 
 describe("browser media upload and persistent tenant store", () => {
+  it.each(["fulfilled", "rejected"] as const)(
+    "keeps a %s tracked handler ordered before close across the active-map cleanup boundary",
+    async (outcome) => {
+      const expectedFailure = new Error("tracked upload failed");
+      const runAtCleanupBoundary = async (closeBeforeDelete: boolean) => {
+        const service = new MediaAssetService({
+          store: await new TenantMediaStore({ storageRoot: media, allowedRoots: [temp, input] }).initialize(),
+          auth: new TestAuth(), uploadTempRoot: temp, cursorSecret: Buffer.alloc(32, 7)
+        });
+        const operation = deferred();
+        vi.spyOn(
+          service as unknown as { handleFailure: () => Promise<void> },
+          "handleFailure"
+        ).mockImplementation(() => operation.promise);
+        const activeUploads = (service as unknown as {
+          activeUploads: Map<Promise<void>, AbortController>;
+        }).activeUploads;
+        const cleanupReached = deferred();
+        const events: string[] = [];
+        let returned!: Promise<void>;
+        let closeAtCleanup!: Promise<void>;
+        let trackedDeleteCalls = 0;
+        const deleteActive = activeUploads.delete.bind(activeUploads);
+        vi.spyOn(activeUploads, "delete").mockImplementation((task) => {
+          if (task !== returned) return deleteActive(task);
+          trackedDeleteCalls += 1;
+          if (closeBeforeDelete) closeAtCleanup = service.close();
+          const deleted = deleteActive(task);
+          if (!closeBeforeDelete) closeAtCleanup = service.close();
+          void closeAtCleanup.then(
+            () => { events.push("close"); },
+            () => { events.push("close rejected"); }
+          );
+          cleanupReached.resolve();
+          return deleted;
+        });
+        returned = service.handle()(
+          { method: "POST", url: "/api/media-assets" } as IncomingMessage,
+          {} as import("node:http").ServerResponse,
+          () => undefined
+        );
+        expect([...activeUploads.keys()]).toEqual([returned]);
+        const observed = returned.then(
+          () => { events.push("fulfilled"); },
+          (failure) => {
+            events.push("rejected");
+            expect(failure).toBe(expectedFailure);
+          }
+        );
+        if (outcome === "fulfilled") operation.resolve();
+        else operation.reject(expectedFailure);
+        await cleanupReached.promise;
+        const [, closeResult] = await Promise.all([
+          observed,
+          Promise.allSettled([closeAtCleanup]).then(([result]) => result!)
+        ]);
+        expect(activeUploads.size).toBe(0);
+        expect(trackedDeleteCalls).toBe(1);
+        if (outcome === "fulfilled") await expect(returned).resolves.toBeUndefined();
+        else await expect(returned).rejects.toBe(expectedFailure);
+        return { closeResult, events };
+      };
+
+      const beforeDelete = await runAtCleanupBoundary(true);
+      expect(beforeDelete.events).toEqual([
+        outcome,
+        outcome === "rejected" ? "close rejected" : "close"
+      ]);
+      expect(beforeDelete.closeResult.status).toBe(outcome === "rejected" ? "rejected" : "fulfilled");
+      if (beforeDelete.closeResult.status === "rejected") {
+        expect(beforeDelete.closeResult.reason).toBeInstanceOf(AggregateError);
+        expect((beforeDelete.closeResult.reason as AggregateError).errors).toEqual([expectedFailure]);
+      }
+
+      const afterDelete = await runAtCleanupBoundary(false);
+      expect(afterDelete.events).toEqual([outcome, "close"]);
+      expect(afterDelete.closeResult.status).toBe("fulfilled");
+    }
+  );
+
+  it("persists and propagates a handler rejection that settles before harness close", async () => {
+    const expected = [new Error("observed handler failure 1"), new Error("observed handler failure 2")];
+    let calls = 0;
+    const app = await harness({
+      wrapHandler: () => async (_request, response) => {
+        response.statusCode = 500;
+        response.end();
+        throw expected[calls++]!;
+      }
+    });
+    expect((await fetch(`${app.base}/api/media-assets`)).status).toBe(500);
+    await expect(app.firstHandlerFailure).resolves.toBe(expected[0]);
+    expect((await fetch(`${app.base}/api/media-assets`)).status).toBe(500);
+    let closeFailure: unknown;
+    try { await app.close(); }
+    catch (failure) { closeFailure = failure; }
+    expect(closeFailure).toBeInstanceOf(AggregateError);
+    expect((closeFailure as AggregateError).errors).toEqual(expected);
+  });
+
   it("streams a safe summary, cleans its temp file, and rehydrates for list and resolve", async () => {
     const localMedia = resolve(root, `media-${randomUUID()}`);
     const localTemp = resolve(root, `temp-${randomUUID()}`);
@@ -548,7 +719,7 @@ describe("browser media upload and persistent tenant store", () => {
     } finally { await app.close(); }
   });
 
-  it("returns 413 at the explicit parser queue boundary when the file consumer stalls", async () => {
+  it("keeps a legal PNG upload valid across a writable stall longer than the old 50ms window", async () => {
     const localTemp = resolve(root, `blocked-parser-${randomUUID()}`);
     const store = await new TenantMediaStore({
       storageRoot: resolve(root, randomUUID()), allowedRoots: [localTemp], limits: { imageBytes: 512 * 1024 }
@@ -556,31 +727,61 @@ describe("browser media upload and persistent tenant store", () => {
     const importer = vi.spyOn(store, "import");
     const totals: number[] = [];
     const snapshots: MultipartBufferSnapshot[] = [];
-    let blockedOutput: Writable | undefined;
+    let blockedOutput: BlockingFileWritable | undefined;
+    let outputCreated: (() => void) | undefined;
+    const outputReady = new Promise<void>((resolve) => { outputCreated = resolve; });
     const app = await harness({
       store,
       tempRoot: localTemp,
       observeMultipartBufferBytes: (bytes) => totals.push(bytes),
       observeMultipartBufferSnapshot: (snapshot) => snapshots.push(snapshot),
       createUploadWriteStream: (path) => {
-        blockedOutput = new BlockingFileWritable(path);
+        blockedOutput = new BlockingFileWritable(path, outputCreated);
         return blockedOutput;
       }
     });
     try {
-      const response = await upload(app.base, multipart(Buffer.alloc(256 * 1024, 9)));
-      expect(response.status).toBe(413);
-      expect(importer).not.toHaveBeenCalled();
+      const responsePromise = upload(app.base, multipart(png));
+      await outputReady;
+      expect(blockedOutput?.isBlocked).toBe(true);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 75);
+      blockedOutput!.release();
+      const response = await responsePromise;
+      expect(response.status).toBe(201);
+      expect(importer).toHaveBeenCalledOnce();
       expectUnifiedBudget(snapshots);
       expect(totals).toEqual(snapshots.map((snapshot) => snapshot.total));
-      expect(snapshots.some((snapshot) => snapshot.outputWritable > 0)).toBe(true);
       expect(snapshots.some((snapshot) => snapshot.inFlight > 0)).toBe(true);
-      expect(snapshots.some((snapshot) => snapshot.fileReadable > 0)).toBe(true);
-      expect(snapshots.some((snapshot) => snapshot.parserWritable > 0)).toBe(true);
-      expect(snapshots.some((snapshot) => snapshot.parserWritable === 64 * 1024
-        && snapshot.fileReadable >= 16 * 1024)).toBe(false);
-      expect(Math.max(...snapshots.map((snapshot) => snapshot.parserWritable))).toBeLessThan(64 * 1024);
       expect(blockedOutput?.destroyed).toBe(true);
+      expect(blockedOutput?.closed).toBe(true);
+      expect(await readdir(localTemp).catch(() => [])).toEqual([]);
+    } finally { await app.close(); }
+  });
+
+  it("streams a legal 192 KiB WAV through controlled writable backpressure", async () => {
+    const localTemp = resolve(root, `slow-wav-${randomUUID()}`);
+    const store = await new TenantMediaStore({
+      storageRoot: resolve(root, randomUUID()), allowedRoots: [localTemp], limits: { audioBytes: 512 * 1024 }
+    }).initialize();
+    let blockedOutput: BlockingFileWritable | undefined;
+    let outputCreated: (() => void) | undefined;
+    const outputReady = new Promise<void>((resolve) => { outputCreated = resolve; });
+    const app = await harness({
+      store,
+      tempRoot: localTemp,
+      createUploadWriteStream: (path) => {
+        blockedOutput = new BlockingFileWritable(path, outputCreated);
+        return blockedOutput;
+      }
+    });
+    try {
+      expect(wav.byteLength).toBeGreaterThanOrEqual(192 * 1024);
+      const responsePromise = upload(app.base, multipart(wav, { mime: "audio/wav", filename: "sample.wav" }));
+      await outputReady;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 75);
+      blockedOutput!.release();
+      const response = await responsePromise;
+      expect(response.status).toBe(201);
       expect(blockedOutput?.closed).toBe(true);
       expect(await readdir(localTemp).catch(() => [])).toEqual([]);
     } finally { await app.close(); }
@@ -601,8 +802,7 @@ describe("browser media upload and persistent tenant store", () => {
       tempRoot: localTemp,
       observeMultipartBufferSnapshot: (snapshot) => snapshots.push(snapshot),
       createUploadWriteStream: (path) => {
-        blockedOutput = new BlockingFileWritable(path);
-        outputCreated?.();
+        blockedOutput = new BlockingFileWritable(path, outputCreated);
         return blockedOutput;
       }
     });
@@ -618,9 +818,9 @@ describe("browser media upload and persistent tenant store", () => {
       });
       request.write(value.body.subarray(0, 128 * 1024));
       await outputReady;
-      request.destroy();
+      request.destroy(new Error("client aborted upload"));
       await stopped;
-      await waitUntil(async () => (await readdir(localTemp).catch(() => [])).length === 0);
+      await app.close();
       expectUnifiedBudget(snapshots);
       expect(importer).not.toHaveBeenCalled();
       expect(blockedOutput?.destroyed).toBe(true);

@@ -96,7 +96,7 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
   const close = (): Promise<void> => {
     if (closePromise !== undefined) return closePromise;
     closing = true;
-    closePromise = aiPlans.close();
+    closePromise = Promise.all([mediaAssets.close(), aiPlans.close()]).then(() => undefined);
     return closePromise;
   };
   return { auth, mediaStore, mediaAssets, aiPlans, handle, close, dispose: close };

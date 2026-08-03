@@ -347,7 +347,6 @@ function exactAscii(value: string): Buffer<ArrayBuffer> {
 }
 
 const MULTIPART_PUMP_SLICE_BYTES = 4 * 1024;
-const MULTIPART_PROGRESS_WINDOW_MS = 50;
 const RESERVED_PARSER_BYTES = MAX_PART_HEADER_BYTES + MAX_MULTIPART_BOUNDARY_BYTES
   + 8;
 
@@ -519,15 +518,58 @@ class MultipartBufferBudget {
   }
 
   async readAllowance(maxBytes: number, signal: AbortSignal): Promise<number> {
-    const deadline = Date.now() + MULTIPART_PROGRESS_WINDOW_MS;
     while (true) {
       if (signal.aborted) throw signal.reason;
       const room = MAX_MULTIPART_BUFFER_BYTES - this.assertWithinLimit().P;
       const allowed = Math.min(maxBytes, room);
       if (allowed > 0) return allowed;
-      if (Date.now() >= deadline) throw multipartError(413, "PAYLOAD_TOO_LARGE");
-      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+      await this.waitForProgress(signal);
     }
+  }
+
+  private async waitForProgress(signal: AbortSignal): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const file = this.fileStream;
+      const output = this.output;
+      let settled = false;
+      const cleanup = (): void => {
+        this.parser.off("drain", progressed);
+        this.parser.off("close", closed);
+        this.parser.off("error", failed);
+        file?.off("readable", progressed);
+        file?.off("end", progressed);
+        file?.off("close", progressed);
+        file?.off("error", failed);
+        output?.off("drain", progressed);
+        output?.off("finish", progressed);
+        output?.off("close", progressed);
+        output?.off("error", failed);
+        signal.removeEventListener("abort", aborted);
+      };
+      const settle = (complete: () => void): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        complete();
+      };
+      const progressed = (): void => settle(resolve);
+      const closed = (): void => settle(() => reject(new Error("Multipart parser closed before completion.")));
+      const failed = (error: Error): void => settle(() => reject(error));
+      const aborted = (): void => settle(() => reject(signal.reason));
+      this.parser.once("drain", progressed);
+      this.parser.once("close", closed);
+      this.parser.once("error", failed);
+      file?.once("readable", progressed);
+      file?.once("end", progressed);
+      file?.once("close", progressed);
+      file?.once("error", failed);
+      output?.once("drain", progressed);
+      output?.once("finish", progressed);
+      output?.once("close", progressed);
+      output?.once("error", failed);
+      signal.addEventListener("abort", aborted, { once: true });
+      if (signal.aborted) aborted();
+    });
   }
 }
 
@@ -537,14 +579,16 @@ async function waitForParserDrain(parser: Writable, budget: MultipartBufferBudge
     return;
   }
   await new Promise<void>((resolve, reject) => {
+    let settled = false;
     const cleanup = (): void => {
-      clearTimeout(timeout);
       parser.off("drain", drained);
       parser.off("close", closed);
       parser.off("error", failed);
       signal.removeEventListener("abort", aborted);
     };
     const checked = (complete: () => void): void => {
+      if (settled) return;
+      settled = true;
       cleanup();
       try { budget.assertWithinLimit(); complete(); }
       catch (cause) { reject(cause); }
@@ -553,11 +597,11 @@ async function waitForParserDrain(parser: Writable, budget: MultipartBufferBudge
     const closed = (): void => checked(() => reject(new Error("Multipart parser closed before completion.")));
     const failed = (error: Error): void => checked(() => reject(error));
     const aborted = (): void => checked(() => reject(signal.reason));
-    const timeout = setTimeout(() => checked(() => reject(multipartError(413, "PAYLOAD_TOO_LARGE"))), MULTIPART_PROGRESS_WINDOW_MS);
     parser.once("drain", drained);
     parser.once("close", closed);
     parser.once("error", failed);
     signal.addEventListener("abort", aborted, { once: true });
+    if (signal.aborted) aborted();
   });
 }
 
@@ -567,52 +611,33 @@ async function waitForRequestReadable(
   signal: AbortSignal
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
+    let settled = false;
     const cleanup = (): void => {
       request.off("readable", ready);
       request.off("end", ready);
       request.off("aborted", aborted);
+      request.off("close", closed);
       request.off("error", failed);
       signal.removeEventListener("abort", aborted);
     };
     const checked = (complete: () => void): void => {
+      if (settled) return;
+      settled = true;
       cleanup();
       try { budget.assertWithinLimit(); complete(); }
       catch (cause) { reject(cause); }
     };
     const ready = (): void => checked(resolve);
+    const closed = (): void => checked(() => reject(new Error("Upload request closed before completion.")));
     const failed = (error: Error): void => checked(() => reject(error));
     const aborted = (): void => checked(() => reject(signal.reason));
     request.once("readable", ready);
     request.once("end", ready);
     request.once("aborted", aborted);
+    request.once("close", closed);
     request.once("error", failed);
     signal.addEventListener("abort", aborted, { once: true });
-  });
-}
-
-async function waitForReadable(stream: Readable, budget: MultipartBufferBudget, signal: AbortSignal): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = (): void => {
-      stream.off("readable", readable);
-      stream.off("end", ended);
-      stream.off("close", ended);
-      stream.off("error", failed);
-      signal.removeEventListener("abort", aborted);
-    };
-    const checked = (complete: () => void): void => {
-      cleanup();
-      try { budget.assertWithinLimit(); complete(); }
-      catch (cause) { reject(cause); }
-    };
-    const readable = (): void => checked(resolve);
-    const ended = (): void => checked(resolve);
-    const failed = (error: Error): void => checked(() => reject(error));
-    const aborted = (): void => checked(() => reject(signal.reason));
-    stream.once("readable", readable);
-    stream.once("end", ended);
-    stream.once("close", ended);
-    stream.once("error", failed);
-    signal.addEventListener("abort", aborted, { once: true });
+    if (signal.aborted) aborted();
   });
 }
 
@@ -623,13 +648,15 @@ async function writeFileChunk(
   signal: AbortSignal
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
+    let settled = false;
     const cleanup = (): void => {
-      clearTimeout(timeout);
       output.off("close", closed);
       output.off("error", failed);
       signal.removeEventListener("abort", aborted);
     };
     const checked = (complete: () => void): void => {
+      if (settled) return;
+      settled = true;
       cleanup();
       try { budget.assertWithinLimit(); complete(); }
       catch (cause) { reject(cause); }
@@ -640,7 +667,6 @@ async function writeFileChunk(
     const closed = (): void => checked(() => reject(new Error("Upload output closed before completion.")));
     const failed = (error: Error): void => checked(() => reject(error));
     const aborted = (): void => checked(() => reject(signal.reason));
-    const timeout = setTimeout(() => checked(() => reject(multipartError(413, "PAYLOAD_TOO_LARGE"))), MULTIPART_PROGRESS_WINDOW_MS);
     output.once("close", closed);
     output.once("error", failed);
     signal.addEventListener("abort", aborted, { once: true });
@@ -672,20 +698,20 @@ async function transferFile(
   };
   signal.addEventListener("abort", stop, { once: true });
   try {
-    while (!stream.readableEnded) {
+    for await (const raw of stream) {
+      if (signal.aborted) throw signal.reason;
       budget.assertWithinLimit();
-      const source = stream.read(MULTIPART_PUMP_SLICE_BYTES) as Buffer | null;
-      if (source === null) {
-        await waitForReadable(stream, budget, signal);
-        continue;
+      const chunk = raw as Buffer;
+      for (let offset = 0; offset < chunk.byteLength; offset += MULTIPART_PUMP_SLICE_BYTES) {
+        const source = chunk.subarray(offset, Math.min(offset + MULTIPART_PUMP_SLICE_BYTES, chunk.byteLength));
+        budget.setInFlight(source);
+        fileBytes += source.byteLength;
+        if (fileBytes > cap) throw multipartError(413, "PAYLOAD_TOO_LARGE");
+        budget.assertWithinLimit();
+        await writeFileChunk(output, source, budget, signal);
+        budget.setInFlight(undefined);
+        budget.assertWithinLimit();
       }
-      budget.setInFlight(source);
-      fileBytes += source.byteLength;
-      if (fileBytes > cap) throw multipartError(413, "PAYLOAD_TOO_LARGE");
-      budget.assertWithinLimit();
-      await writeFileChunk(output, source, budget, signal);
-      budget.setInFlight(undefined);
-      budget.assertWithinLimit();
     }
     output.end();
     await finished(output);
@@ -888,6 +914,9 @@ export class MediaAssetService {
   private readonly limiter: UploadRateLimiter;
   private readonly cursorSecret: Buffer;
   private readonly bodyBytes: number;
+  private acceptingUploads = true;
+  private readonly activeUploads = new Map<Promise<void>, AbortController>();
+  private closePromise: Promise<void> | undefined;
 
   constructor(private readonly options: MediaAssetServiceOptions) {
     this.tempRoot = resolve(options.uploadTempRoot);
@@ -901,34 +930,90 @@ export class MediaAssetService {
   }
 
   handle() {
-    return async (request: IncomingMessage, response: ServerResponse, next: () => void): Promise<void> => {
+    return (request: IncomingMessage, response: ServerResponse, next: () => void): Promise<void> => {
       const url = new URL(request.url ?? "/", "http://localhost");
-      if (url.pathname !== "/api/media-assets") return next();
-      try {
-        if (request.method === "POST") return await this.upload(request, response);
-        if (request.method === "GET") return await this.list(request, response, url);
-        safeJson(response, 404, this.error("NOT_FOUND", "The media route was not found."));
-      } catch (cause) {
-        const error = cause instanceof AuthHttpError ? cause
-          : cause instanceof MediaHttpError ? cause
-            : new MediaHttpError(500, "MEDIA_STORAGE_FAILED", "The media request failed.");
-        if (!request.readableEnded) {
-          response.shouldKeepAlive = false;
-          response.setHeader("connection", "close");
-        }
-        safeJson(response, error.status, this.error(error.code, error.message));
+      if (url.pathname !== "/api/media-assets") {
+        next();
+        return Promise.resolve();
       }
+      if (request.method === "POST") return this.startUpload(request, response);
+      if (request.method === "GET") {
+        return this.handleFailure(request, response, () => this.list(request, response, url));
+      }
+      return this.handleFailure(request, response, () => {
+        safeJson(response, 404, this.error("NOT_FOUND", "The media route was not found."));
+        return Promise.resolve();
+      });
     };
   }
 
-  private async upload(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  close(): Promise<void> {
+    if (this.closePromise !== undefined) return this.closePromise;
+    this.acceptingUploads = false;
+    for (const controller of this.activeUploads.values()) {
+      controller.abort(new MediaHttpError(499, "UPLOAD_CANCELLED", "The upload was cancelled."));
+    }
+    const active = [...this.activeUploads.keys()];
+    this.closePromise = (async () => {
+      const results = await Promise.allSettled(active);
+      const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+      if (failures.length > 0) throw new AggregateError(failures, "Media upload shutdown failed.");
+    })();
+    return this.closePromise;
+  }
+
+  private startUpload(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (!this.acceptingUploads) return this.handleFailure(request, response, () => {
+      throw new MediaHttpError(503, "MEDIA_STORAGE_FAILED", "The media request is unavailable.");
+    });
+    const controller = new AbortController();
+    const tracked = this.handleFailure(request, response, () => this.upload(request, response, controller));
+    this.activeUploads.set(tracked, controller);
+    const remove = (): void => { this.activeUploads.delete(tracked); };
+    void tracked.then(remove, remove);
+    return tracked;
+  }
+
+  private async handleFailure(
+    request: IncomingMessage,
+    response: ServerResponse,
+    run: () => Promise<void>
+  ): Promise<void> {
+    try { await run(); }
+    catch (cause) {
+      const error = cause instanceof AuthHttpError ? cause
+        : cause instanceof MediaHttpError ? cause
+          : new MediaHttpError(500, "MEDIA_STORAGE_FAILED", "The media request failed.");
+      if (!request.readableEnded && !response.destroyed && !response.writableEnded) {
+        response.shouldKeepAlive = false;
+        response.setHeader("connection", "close");
+      }
+      if (!response.destroyed && !response.writableEnded) {
+        safeJson(response, error.status, this.error(error.code, error.message));
+      }
+    }
+  }
+
+  private async upload(request: IncomingMessage, response: ServerResponse, abort: AbortController): Promise<void> {
     const principal = await this.options.auth.authorize(request, response, "assets:write", true);
+    if (abort.signal.aborted) throw abort.signal.reason;
     const release = this.limiter.acquire(ownerOf(principal));
     let tempPath: string | undefined;
-    const abort = new AbortController();
     let uploaded: BrowserAssetSummaryV1 | undefined;
     const abortRequest = (): void => abort.abort(new MediaHttpError(499, "UPLOAD_CANCELLED", "The upload was cancelled."));
+    const closeRequest = (): void => {
+      if (!request.complete) abortRequest();
+    };
+    const closeResponse = (): void => {
+      if (!response.writableEnded) abortRequest();
+    };
+    const errorRequest = (): void => abortRequest();
+    const errorResponse = (): void => abortRequest();
     request.once("aborted", abortRequest);
+    request.once("close", closeRequest);
+    request.once("error", errorRequest);
+    response.once("close", closeResponse);
+    response.once("error", errorResponse);
     try {
       const contentLength = parseContentLength(request.headers["content-length"]);
       if (contentLength !== undefined && contentLength > this.bodyBytes) throw multipartError(413, "PAYLOAD_TOO_LARGE");
@@ -1043,6 +1128,10 @@ export class MediaAssetService {
       uploaded = summary(record);
     } finally {
       request.off("aborted", abortRequest);
+      request.off("close", closeRequest);
+      request.off("error", errorRequest);
+      response.off("close", closeResponse);
+      response.off("error", errorResponse);
       release();
       await removeExplicit(tempPath);
     }
