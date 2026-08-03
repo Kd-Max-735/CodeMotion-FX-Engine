@@ -8,6 +8,13 @@ ownership are further frozen by
 `docs/api/stage-7r-group-1-auth-upload-boundary.md`. For those subjects, the newer
 `1-S7R-F0` record as closed by `1-S7R-F0-CORRECTION` is authoritative.
 
+The formal AI Project -> edit -> Preview -> Export chain, browser-safe project
+projection, owner-aware materialization, and text/shape/inline-SVG raster ownership
+are frozen by `docs/api/stage-7r-project-materialization-boundary.md`. The
+`1-S7R-G0` record as corrected by `1-S7R-G0-CORRECTION` is authoritative for those
+later subjects, including its strict browser safety overlay, atomic download
+lease/tombstone protocol, six-scope ownership, and owner-aware audio evidence.
+
 Authority: `1-S7R-A`, Chapter 27, and the requirement document sections 16.4, 17,
 18, 19, 24.8, and 25.4.
 
@@ -327,3 +334,6 @@ count.
   transactions, the fixed 15-entry MIME-to-temporary-suffix table, and
   non-configurably bounded streaming multipart parsing; follow-up groups have no
   discretion to replace or enlarge those boundaries.
+- Formal project adoption, preview, and export must follow the versioned browser
+  projection, shared owner resolver, raster adapter, routes/scopes, and serial file
+  ownership in `docs/api/stage-7r-project-materialization-boundary.md`.

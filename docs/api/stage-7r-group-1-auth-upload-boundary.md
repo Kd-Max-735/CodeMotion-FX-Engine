@@ -5,6 +5,11 @@ Status: **GROUP 1 FROZEN** on 2026-07-31. This record is the authoritative
 browser media ingress, and server wiring. It defines implementation work for Groups
 5 and 4; it does not claim that work is already implemented.
 
+The later `1-S7R-G0` record in
+`docs/api/stage-7r-project-materialization-boundary.md` extends the exact scope
+union and owns authenticated Project preview/export materialization. It does not
+relax any authentication, CSRF, upload, or owner-isolation rule in this record.
+
 ## Public contract decision
 
 **No Core, Project Schema, Effect Definition Schema, Renderer Adapter API, time
@@ -61,7 +66,13 @@ substring, group-name, role-name, or case-insensitive matching.
 Only the authenticated BFF session resolver constructs this server-only principal:
 
 ```ts
-type ApplicationScope = "ai:plan" | "assets:read" | "assets:write";
+type ApplicationScope =
+  | "ai:plan"
+  | "assets:read"
+  | "assets:write"
+  | "project:preview"
+  | "export:create"
+  | "export:read";
 
 interface AuthenticatedSessionPrincipal {
   readonly tenantId: string;       // verified access-token tenant_id
@@ -90,6 +101,16 @@ Scope semantics are exact:
 | `ai:plan` | Create, list, read, and cancel the current user's AI tasks and resolve selected assets for planning |
 | `assets:read` | List current-user media and select opaque IDs in the browser |
 | `assets:write` | Upload media through the browser ingress API |
+| `project:preview` | Materialize the current browser project and render a request-scoped preview under the current owner |
+| `export:create` | Create, cancel, or retry current-owner export tasks and resolve their project assets |
+| `export:read` | List/read current-owner export tasks and download their completed output |
+
+As corrected by `1-S7R-G0-CORRECTION`, this union is not locally redeclared:
+`ApplicationScope`, the ordered `APPLICATION_SCOPES` constant containing exactly
+these six strings, and its runtime validator are exported by
+`@codemotion/schema`. Authentication services and browser clients import that one
+public contract. In particular, no browser file may retain the historical local
+three-scope union.
 
 `AiTaskPrincipal` remains the smaller trusted Group 6 invocation type
 `{tenantId,userId,taskId,scopes:["ai:plan"]}`. It is derived only after session and
@@ -503,8 +524,15 @@ Group 4 may create or modify only these browser/wiring files:
   auth out of preview/production; and
 - browser/client/visual tests owned by Group 4.
 
+For the later serial G0 implementation, the authoritative file split is Section 11
+of `stage-7r-project-materialization-boundary.md`: `media-asset-client.ts` belongs
+solely to G0-5, not G0-4. It must recognize all six scopes through the shared
+public import. The G0-4 list has no claim on that browser file, so G0-4/G0-5 do not
+overlap.
+
 Group 4 must not parse/verify tokens, construct principals, instantiate a separate
-media store, expose internal metadata, or add a browser-to-Ark path.
+media store, expose internal metadata, add a browser-to-Ark path, forge a scope, or
+change server-side authorization semantics.
 
 Group 6 continues to accept only trusted `AiTaskPrincipal` plus authorized
 `LocalResourceInput`. It does not own OIDC, cookies, CSRF, upload, browser storage,
