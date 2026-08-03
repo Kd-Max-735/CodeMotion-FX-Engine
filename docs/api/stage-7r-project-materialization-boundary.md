@@ -2,8 +2,9 @@
 
 Status: **GROUP 1 FROZEN** on 2026-08-03 under `1-S7R-G0`, corrected by
 `1-S7R-G0-CORRECTION` and the authority ownership allocation was corrected by
-`1-S7R-G0-1-AUTHORITY-BOUNDARY-CORRECTION`. This record closes the formal-chain
-blockers found by
+`1-S7R-G0-1-AUTHORITY-BOUNDARY-CORRECTION`; the G0-2 test scope and version
+semantics were corrected by `1-S7R-G0-2-SCOPE-CORRECTION`. This record closes the
+formal-chain blockers found by
 `G7-S7R-CLOSEOUT-AUDIT` and the four contract gaps reported by `G7-S7R-G0`.
 It defines later implementation segments; it does not claim they are implemented
 and does not authorize `G0-1`.
@@ -901,7 +902,8 @@ Waits for the G0-1 integration commit. Allowed files only:
   `packages/effects-2d/src/browser-project-authority.ts` (new),
   `packages/effects-2d/src/inputs.ts`, `packages/effects-2d/src/index.ts`,
   `packages/effects-2d/test/project-raster-sources.test.ts`,
-  `packages/effects-2d/test/browser-project-authority.test.ts`, README/CHANGELOG;
+  `packages/effects-2d/test/browser-project-authority.test.ts`,
+  `packages/effects-2d/test/effects-2d.test.ts`, README/CHANGELOG;
 - `packages/effects-2d/package.json` for version `1.2.0` and the exact
   `@codemotion/schema` `0.4.0` dependency;
 - exact `@codemotion/effects-2d` pins in `packages/ai-planner/package.json`,
@@ -918,6 +920,38 @@ initialization, and exclusively exports frozen `P0_BROWSER_PROJECT_AUTHORITY_V1`
 The authority test owns real identity, forged/reordered/cloned/missing/replaced
 catalog resistance, exact versions/Schemas, and proof that no request can select
 or replace authority.
+
+The three version domains are independent and frozen as follows:
+
+1. the npm package version becomes `@codemotion/effects-2d` `1.2.0`, representing
+   the P0 browser-project authority adapter, formal text and inline-SVG raster
+   sources, and integration with Schema `0.4.0` and Renderer API `0.3.0`;
+2. every existing P0 2D Effect Definition keeps its already-frozen definition
+   version, currently `1.1.0`; the package bump does not migrate definitions; and
+3. existing Effect presets remain `1.1.0`. A preset version changes only when its
+   data contract actually migrates under separate Group 1 approval, and G0-2 has
+   no such migration.
+
+Package, Effect Definition, and preset versions must not be asserted equal.
+Group 2 may modify `packages/effects-2d/test/effects-2d.test.ts` only for the
+minimum G0-2 package-version migration and new authority/raster regression
+assertions. It cannot delete, weaken, dynamically skip, or broadly rewrite the
+existing 40-effect, Golden Frame, determinism, visual, or historical acceptance
+tests; change visual algorithms or P0 order/count; or regenerate Golden Frames in
+bulk.
+
+G0-2 verification must:
+
+1. assert package JSON version `1.2.0`;
+2. retain explicit assertions that existing Effect Definitions and presets remain
+   `1.1.0`;
+3. retain exactly 40 P0 effects;
+4. retain T08 at ordered position 16;
+5. keep all existing Golden Frame and determinism tests passing;
+6. prove the authority/raster additions do not change existing 40-effect output;
+7. limit lockfile and consumer changes to exact package dependency updates without
+   effect-instance migration; and
+8. perform no MotionProject, EffectInstance, or preset migration.
 
 ### Segment G0-3: Group 6 AI result and adapter reuse
 
