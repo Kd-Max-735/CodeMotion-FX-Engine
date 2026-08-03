@@ -5,6 +5,7 @@ import {
   BLEND_CONFORMANCE_FIXTURES,
   COLOR_CONFORMANCE_FIXTURES,
   RASTER_COORDINATE_CONTRACT,
+  RASTERIZATION_CONTRACT_VERSION,
   assertDualInputTextures,
   assertLayerRasterizationInput,
   assertLayerRasterizationOutput,
@@ -83,6 +84,7 @@ function sources(): readonly LayerRasterSource[] {
         missingGlyphPolicy: "use-notdef",
         notdefGlyphId: 0
       },
+      fillRgba: [0.2, 0.4, 0.6, 0.8],
       glyphs: [{
         glyphId: 42,
         cluster: 0,
@@ -145,11 +147,28 @@ describe("public layer rasterization conformance", () => {
       expect(() => assertLayerRasterizationOutput(request, output(source.kind, `texture.${source.kind}`))).not.toThrow();
     }
     expect(RASTER_COORDINATE_CONTRACT).toMatchObject({
+      contractVersion: "1.1.0",
       origin: "top-left",
       pixelBounds: "half-open",
       pixelCenterOffset: 0.5,
       outputAlphaMode: "premultiplied"
     });
+    expect(RASTERIZATION_CONTRACT_VERSION).toBe("1.1.0");
+  });
+
+  it("validates optional text fillRgba while preserving legacy omission", () => {
+    const text = sources()[0];
+    if (text?.kind !== "text") throw new Error("Text fixture missing.");
+    const { fillRgba: _fillRgba, ...legacy } = text;
+    expect(() => assertLayerRasterizationInput(input(legacy))).not.toThrow();
+    for (const fillRgba of [
+      [0, 0, 0] as unknown as readonly [number, number, number, number],
+      [0, 0, 0, 2] as const,
+      [0, 0, 0, Number.NaN] as const,
+      [0, 0, 0, Number.POSITIVE_INFINITY] as const
+    ]) {
+      expect(() => assertLayerRasterizationInput(input({ ...text, fillRgba }))).toThrow(/fillRgba/);
+    }
   });
 
   it("rejects non-content vector fallback and aliased dual inputs", () => {

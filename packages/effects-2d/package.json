@@ -32,7 +32,7 @@
   "dependencies": {
     "@codemotion/core": "0.3.0",
     "@codemotion/effects-3d": "1.0.0",
-    "@codemotion/renderer-api": "0.2.0",
+    "@codemotion/renderer-api": "0.3.0",
     "@codemotion/timeline": "0.1.0"
   }
 }

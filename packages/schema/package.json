@@ -1,6 +1,6 @@
 {
   "name": "@codemotion/schema",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./internal/browser-project-authority": {
+      "types": "./dist/internal/browser-project-authority.d.ts",
+      "default": "./dist/internal/browser-project-authority.js"
     },
     "./contracts.schema.json": "./dist/contracts.schema.json"
   },

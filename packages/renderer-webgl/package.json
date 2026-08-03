@@ -9,6 +9,6 @@
   "files": ["dist/**/*.js", "dist/**/*.js.map", "dist/**/*.d.ts", "dist/**/*.d.ts.map"],
   "dependencies": {
     "@codemotion/core": "0.3.0",
-    "@codemotion/renderer-api": "0.2.0"
+    "@codemotion/renderer-api": "0.3.0"
   }
 }

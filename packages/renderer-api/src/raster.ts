@@ -6,7 +6,7 @@ import type {
 } from "@codemotion/core";
 import type { FrameContext, TextureDescriptor, TextureHandle } from "./index.js";
 
-export const RASTERIZATION_CONTRACT_VERSION = "1.0.0" as const;
+export const RASTERIZATION_CONTRACT_VERSION = "1.1.0" as const;
 
 export type RasterSourceKind = "text" | "shape" | "svg" | "image" | "video";
 export type MissingGlyphPolicy = "error" | "use-notdef" | "skip";
@@ -61,6 +61,7 @@ export interface TextRasterSource {
   readonly text: string;
   readonly font: FontRasterAsset;
   readonly glyphs: readonly RasterGlyph[];
+  readonly fillRgba?: readonly [number, number, number, number];
 }
 
 export type VectorPathCommand =
@@ -206,6 +207,13 @@ export function assertLayerRasterizationInput(input: LayerRasterizationInput): v
     }
     if (!Number.isInteger(input.source.font.unitsPerEm) || input.source.font.unitsPerEm < 1) {
       throw new RangeError("Font unitsPerEm must be a positive integer.");
+    }
+    if (input.source.fillRgba !== undefined) {
+      if (!Array.isArray(input.source.fillRgba) || input.source.fillRgba.length !== 4
+        || !input.source.fillRgba.every((component) => Number.isFinite(component)
+          && component >= 0 && component <= 1)) {
+        throw new RangeError("Text fillRgba must contain exactly four finite components within [0, 1].");
+      }
     }
     for (const [index, glyph] of input.source.glyphs.entries()) {
       assertCoverage(glyph.coverage, `glyphs[${index}].coverage`);

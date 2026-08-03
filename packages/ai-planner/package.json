@@ -24,8 +24,8 @@
     "@codemotion/core": "0.3.0",
     "@codemotion/effects-2d": "1.1.0",
     "@codemotion/exporter": "0.1.0",
-    "@codemotion/renderer-api": "0.2.0",
-    "@codemotion/schema": "0.3.0",
+    "@codemotion/renderer-api": "0.3.0",
+    "@codemotion/schema": "0.4.0",
     "ajv": "^8.17.1"
   }
 }

@@ -1,7 +1,9 @@
 # Stage 7R project materialization, preview, and export boundary
 
 Status: **GROUP 1 FROZEN** on 2026-08-03 under `1-S7R-G0`, corrected by
-`1-S7R-G0-CORRECTION`. This record closes the formal-chain blockers found by
+`1-S7R-G0-CORRECTION` and the authority ownership allocation was corrected by
+`1-S7R-G0-1-AUTHORITY-BOUNDARY-CORRECTION`. This record closes the formal-chain
+blockers found by
 `G7-S7R-CLOSEOUT-AUDIT` and the four contract gaps reported by `G7-S7R-G0`.
 It defines later implementation segments; it does not claim they are implemented
 and does not authorize `G0-1`.
@@ -50,8 +52,10 @@ groups consume them:
 
 - `@codemotion/schema` `0.4.0` is the sole owner of the closed
   `browser-project/v1`, `ai-plan-result/v2`, `preview-request/v1`,
-  `export-request/v1`, and `export-task/v1` transport types and runtime validators,
-  plus the browser-project sanitizer, without changing `PROJECT_SCHEMA_VERSION`;
+  `export-request/v1`, and `export-task/v1` transport types, structural validation
+  implementation, authority consumer type, and browser-project sanitizer without
+  changing `PROJECT_SCHEMA_VERSION`; request-facing validators are exposed only
+  through the statically pre-bound authority frozen below;
 - AI task completed results become `ai-plan-result/v2`; raw `PlannedAnimation` and
   its `dsl` field remain a server-only planning DTO and are never serialized to
   browsers; and
@@ -255,6 +259,42 @@ inbound browser validator never performs this rewrite and instead rejects a
 non-fixed row. Neither path serializes `storedPath`,
 `rasterProxyPath`, `ResourceDescriptor`, Ark eligibility, importer probe output, or
 raw pixel/coverage buffers.
+
+### 3.2 P0 validator authority and package boundary
+
+`@codemotion/schema` owns transport data contracts, the one structural validation
+implementation, the frozen `BrowserProjectAuthorityV1` consumer interface, and the
+non-root authority builder. Its package root does not export
+`BrowserProjectValidationOptionsV1`, a validator/sanitizer accepting `effectsById`,
+`catalog`, `registry`, parameter-Schema authority, a replaceable token/digest, or a
+factory that can be called while handling a request.
+
+The only builder export is the exact restricted subpath
+`@codemotion/schema/internal/browser-project-authority`; wildcard internal exports
+are forbidden. It is a module-composition hook, not a request API. It validates and
+snapshots the supplied definitions, eagerly compiles their parameter Schemas, keeps
+the snapshot and evaluator in a closure, freezes every authority method and the
+authority object, and returns no readable or replaceable registry. Missing, null,
+non-Map, incomplete, duplicate, mismatched, or malformed configuration fails with
+one fixed sanitized configuration error and creates no degraded validator. Route
+mounting cannot proceed without a successfully created authority.
+
+G0-1 does not prove P0 catalog identity: Schema neither imports `effects-2d` nor
+copies the 40 IDs, definitions, Schemas, or a directory digest. G0-2 Group 2 owns
+the identity seam in `packages/effects-2d/src/browser-project-authority.ts`. That
+module statically imports the same-package real `P0_EFFECTS_BY_ID`, invokes the
+Schema internal builder exactly once during module initialization, and exports the
+frozen `P0_BROWSER_PROJECT_AUTHORITY_V1`. Its public validation/sanitization methods
+accept contract data only and never accept registry/options. G0-2 tests must prove
+that a shape-correct 40-entry forged Map (including a removed real effect and an
+added permissive forged effect) cannot enter that public authority path.
+
+The sole dependency direction is `core -> schema -> effects-2d -> ai-planner/editor
+services`; `schema -> effects-2d` is forbidden. G0-3 `browser-result.ts` and G0-4
+`project-materialization.ts`, `ai-plan-service.ts`, `preview-task-service.ts`, and
+`export-task-service.ts` consume only `P0_BROWSER_PROJECT_AUTHORITY_V1`. They cannot
+import the internal builder or accept a registry. G0-3/G0-4 remain blocked until
+the G0-2 authority adapter has passed and been integrated.
 
 ## 4. AI completed result
 
@@ -822,7 +862,8 @@ Allowed files only:
 - `packages/schema/src/browser-project.ts` (new),
   `packages/schema/src/ai-plan-result.ts` (new),
   `packages/schema/src/editor-render-api.ts` (new), and
-  `packages/schema/src/index.ts`;
+  `packages/schema/src/index.ts`, plus the correction-only new restricted
+  `packages/schema/src/internal/browser-project-authority.ts`;
 - matching focused tests under `packages/schema/test/` and
   `packages/schema/package.json`;
 - `packages/renderer-api/src/raster.ts`,
@@ -846,22 +887,37 @@ non-finite numbers, and each size/depth/count overrun with the fixed error code.
 It cannot change the MotionProject Schema, Core types/version, renderer callback
 shape, or P0 catalog.
 
+G0-1 succeeds when the Schema root has no arbitrary-registry safety entry, the
+restricted builder closes and freezes authority with fixed configuration failure,
+transport and blank-ID validation pass, and the G0-2 identity owner/files are
+frozen. Real P0 static pre-binding and the production public safety entry become
+established only by G0-2 PASS; G0-1 must not claim that identity proof.
+
 ### Segment G0-2: Group 2 formal raster implementation
 
 Waits for the G0-1 integration commit. Allowed files only:
 
 - `packages/effects-2d/src/project-raster-sources.ts` (new),
+  `packages/effects-2d/src/browser-project-authority.ts` (new),
   `packages/effects-2d/src/inputs.ts`, `packages/effects-2d/src/index.ts`,
-  `packages/effects-2d/test/project-raster-sources.test.ts`, README/CHANGELOG;
-- `packages/effects-2d/package.json` for version `1.2.0`;
+  `packages/effects-2d/test/project-raster-sources.test.ts`,
+  `packages/effects-2d/test/browser-project-authority.test.ts`, README/CHANGELOG;
+- `packages/effects-2d/package.json` for version `1.2.0` and the exact
+  `@codemotion/schema` `0.4.0` dependency;
 - exact `@codemotion/effects-2d` pins in `packages/ai-planner/package.json`,
   `packages/editor/package.json`, and `packages/exporter/package.json`; and
-- root `package-lock.json` only for that approved version.
+- root `package-lock.json` only for that approved version and exact Schema
+  dependency.
 
 Group 2 cannot modify exporter, AI pipeline, Project Schema, renderer API, or UI.
 Its focused tests must prove the closed shape grammar renders through the same
 formal vector path at requested dimensions and rejects commands, fields, numbers,
-and budgets outside Section 3.1.
+and budgets outside Section 3.1. Its authority module statically imports the real
+same-package `P0_EFFECTS_BY_ID`, calls the restricted builder once at module
+initialization, and exclusively exports frozen `P0_BROWSER_PROJECT_AUTHORITY_V1`.
+The authority test owns real identity, forged/reordered/cloned/missing/replaced
+catalog resistance, exact versions/Schemas, and proof that no request can select
+or replace authority.
 
 ### Segment G0-3: Group 6 AI result and adapter reuse
 
@@ -876,6 +932,8 @@ Waits for the G0-2 integration commit. Allowed files only:
 
 Group 6 must implement the safe v2 result serializer, remove private text/shape/SVG
 builders, reuse the formal adapter for draft preview, and retain provider safety.
+`browser-result.ts` consumes only `P0_BROWSER_PROJECT_AUTHORITY_V1`; it cannot
+import the Schema internal builder or accept registry/options.
 The Group 5 segment wires that serializer into the HTTP task view; until then the
 raw DTO remains server-only. Group 6 cannot modify editor source, authentication,
 upload, exporter, or public contracts.
@@ -896,6 +954,10 @@ Waits for the G0-3 integration commit. Allowed files only:
 
 Group 5 replaces global `mediaRoot` resolution with the injected shared store,
 mounts AI/preview/export in one runtime, and implements scopes/routes/errors above.
+Its materialization, AI, preview, and export services consume only
+`P0_BROWSER_PROJECT_AUTHORITY_V1`, and route mounting fails before serving traffic
+if that module authority did not initialize. They cannot import the Schema internal
+builder or accept registry/options.
 Its tests own the real owner-aware audio resolution/decode/export/mux chain and the
 atomic download lifecycle, including concurrency, expiry, disconnect, abort,
 runtime close, crash rehydration, bounded drain, and individual cleanup retry. It
