@@ -262,6 +262,7 @@ function coverageAt(buffer: CoverageBuffer, x: number, y: number): number {
 
 function rasterizeText(source: TextRasterSource, width: number, height: number, colorSpace: ColorSpace): PixelSurface {
   const data = new Uint8ClampedArray(width * height * 4);
+  const fill = source.fillRgba;
   for (const glyph of source.glyphs) {
     const originX = Math.round(glyph.bounds.x + glyph.offsetX);
     const originY = Math.round(glyph.bounds.y + glyph.offsetY);
@@ -270,14 +271,20 @@ function rasterizeText(source: TextRasterSource, width: number, height: number, 
         const x = originX + gx;
         const y = originY + gy;
         if (x < 0 || y < 0 || x >= width || y >= height) continue;
-        const coverage = coverageAt(glyph.coverage, gx, gy);
+        const coverage = coverageAt(glyph.coverage, gx, gy) * (fill?.[3] ?? 1);
         const offset = (y * width + x) * 4;
         const existing = data[offset + 3]! / 255;
         const alpha = coverage + existing * (1 - coverage);
-        const clusterTone = 0.2 + (glyph.cluster % 4) * 0.14;
-        data[offset] = Math.round((0.55 + clusterTone * 0.35) * 255);
-        data[offset + 1] = Math.round((0.78 - clusterTone * 0.2) * 255);
-        data[offset + 2] = Math.round((0.95 - clusterTone * 0.12) * 255);
+        if (fill === undefined) {
+          const clusterTone = 0.2 + (glyph.cluster % 4) * 0.14;
+          data[offset] = Math.round((0.55 + clusterTone * 0.35) * 255);
+          data[offset + 1] = Math.round((0.78 - clusterTone * 0.2) * 255);
+          data[offset + 2] = Math.round((0.95 - clusterTone * 0.12) * 255);
+        } else if (alpha > 0) {
+          data[offset] = Math.round(fill[0] * 255);
+          data[offset + 1] = Math.round(fill[1] * 255);
+          data[offset + 2] = Math.round(fill[2] * 255);
+        }
         data[offset + 3] = Math.round(alpha * 255);
       }
     }

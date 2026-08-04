@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0 - 2026-08-03
+
+Added the frozen `P0_BROWSER_PROJECT_AUTHORITY_V1` production singleton, constructed
+once from the real 40-entry `P0_EFFECTS_BY_ID` catalog through Schema `0.4.0`'s
+internal binding point. No registry, builder, rebinding hook, or replacement options
+are exported.
+
+Added the formal deterministic 2D raster adapter for built-in text, shape, and safe
+inline-SVG layers at requested output dimensions. It enforces the frozen font,
+Unicode, color, glyph-coverage, SVG grammar, byte, command, coordinate, pixel, and
+abort budgets. XML, external resources, arbitrary URLs/files, OS fonts, DOM/Canvas,
+and uploaded media are unsupported. Uploaded image/video/audio/SVG materialization
+remains owned by Group 5 and is not routed through this adapter.
+
+The package is now `1.2.0`; Effect Definition and preset versions remain `1.1.0`.
+
 ## 1.1.0 - 2026-07-29
 
 Migrated all 39 Group 2 effects to G1's versioned `EffectTimeSample` and

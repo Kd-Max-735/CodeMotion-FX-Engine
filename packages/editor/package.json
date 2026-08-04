@@ -24,7 +24,7 @@
   "dependencies": {
     "@codemotion/ai-planner": "0.3.0",
     "@codemotion/core": "0.3.0",
-    "@codemotion/effects-2d": "1.1.0",
+    "@codemotion/effects-2d": "1.2.0",
     "@codemotion/effects-3d": "1.0.0",
     "@codemotion/exporter": "0.1.0",
     "@codemotion/renderer-api": "0.3.0",

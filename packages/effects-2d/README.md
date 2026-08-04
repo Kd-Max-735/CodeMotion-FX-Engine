@@ -6,7 +6,7 @@ without rewriting its implementation.
 
 Each effect is a real deterministic implementation with:
 
-- package and Effect Definition `1.1.0`, JSON parameter Schema, generated UI Schema, defaults and three valid built-in presets;
+- package `1.2.0` with unchanged Effect Definition and preset version `1.1.0`, JSON parameter Schema, generated UI Schema, defaults and three valid built-in presets;
 - a WebGL2 shader path plus deterministic CPU/Canvas2D fallback;
 - `draft`, `preview`, and `final` quality settings, a performance class and measured budget;
 - straight/premultiplied Alpha handling, post-effect masks, bounded extreme-parameter normalization and `dispose`;
@@ -40,6 +40,25 @@ const frame = effect.renderPixels(source.surface, effect.presets[2].params, {
 });
 effect.dispose();
 ```
+
+## Stage 7R project authority and formal raster sources
+
+`P0_BROWSER_PROJECT_AUTHORITY_V1` is the frozen production singleton bound once to
+the real `P0_EFFECTS_BY_ID` catalog. It exposes only the Schema `0.4.0` validation
+methods; callers cannot provide, replace, or read its registry.
+
+`resolveFormal2dRasterSourceV1` owns deterministic built-in text, shape, and safe
+inline-SVG materialization at the requested render dimensions. Text uses the fixed
+`Codemotion Planner Unicode Bitmap` family, NFC grapheme segmentation, explicit
+RGBA fill, a 4,096-scalar limit, and a 16 MiB glyph-coverage budget. Shape and
+inline-SVG paths accept only finite `M/m`, `L/l`, `C/c`, and `Z/z` path data with
+fixed byte, command, coordinate, and pixel budgets; XML, URLs, arbitrary files,
+browser DOM/Canvas, and operating-system fonts are not used. The same abort signal
+is checked during parsing and raster preparation.
+
+The resolver intentionally does not own uploaded image, video, audio, or uploaded
+SVG resolution. Group 5 must resolve those assets through the verified tenant-media
+path; uploaded SVG never enters the inline path parser.
 
 ## 1.0.0 to 1.1.0 migration
 

@@ -1365,18 +1365,18 @@ describe("Group 2 P0 catalog", () => {
     }
   });
 
-  it("keeps package, definitions, presets, README, CHANGELOG, and migration at 1.1.0", () => {
+  it("keeps package 1.2.0 independent from 1.1.0 definitions and presets", () => {
     const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
       version: string;
     };
     const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
     const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
-    expect(packageJson.version).toBe("1.1.0");
+    expect(packageJson.version).toBe("1.2.0");
     expect(readme).toContain("1.1.0");
     expect(changelog).toContain("1.1.0");
     for (const effect of GROUP_2_P0_EFFECTS) {
-      expect(effect.version).toBe(packageJson.version);
-      expect(effect.presets.every((preset) => preset.version === packageJson.version)).toBe(true);
+      expect(effect.version).toBe("1.1.0");
+      expect(effect.presets.every((preset) => preset.version === "1.1.0")).toBe(true);
       expect(effect.migrationHandlers).toContainEqual(expect.objectContaining({
         fromVersion: "1.0.0",
         toVersion: "1.1.0"
