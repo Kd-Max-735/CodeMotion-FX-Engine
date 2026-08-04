@@ -16,6 +16,7 @@ import {
 import {
   P0_EFFECTS,
   P0_EFFECTS_BY_ID,
+  resolveFormal2dRasterSourceV1,
   type P0CatalogEffectDefinition
 } from "@codemotion/effects-2d";
 import {
@@ -24,7 +25,7 @@ import {
   verifyStoredMediaAsset,
   type ImportedMedia
 } from "@codemotion/exporter";
-import type { CoverageBuffer, LayerRasterSource } from "@codemotion/renderer-api";
+import type { CoverageBuffer } from "@codemotion/renderer-api";
 import { validateContract } from "@codemotion/schema";
 import type {
   BrandConstraint,
@@ -35,7 +36,7 @@ import type {
   TimeRange,
   UnderstandingResult
 } from "./provider.js";
-import { coverageAsset, textRasterSource, vectorRasterSource } from "./raster-sources.js";
+import { coverageAsset } from "./raster-sources.js";
 
 interface StoryboardLayerBase extends JsonObject {
   id: string;
@@ -97,6 +98,10 @@ export interface LowResolutionPreview {
   readonly quality: "draft";
 }
 
+/**
+ * @deprecated Server-only planning DTO. Never serialize this value as a browser or API response;
+ * use serializeAiPlanCompletedResultV2 instead.
+ */
 export interface PlannedAnimation {
   readonly understanding: NormalizedUnderstanding;
   readonly storyboard: Storyboard;
@@ -558,7 +563,7 @@ function toLayer(
     properties: {
       text: layer.text,
       fontFamily: "Codemotion Planner Unicode Bitmap",
-      fontSize: 64
+      fontSize: 32
     }
   };
   throw new Error(`Storyboard layer ${layer.id} has an unsupported type.`);
@@ -614,10 +619,8 @@ function toDsl(
       layers
     }],
     fonts: [{
-      id: "font.ai-planner.unicode-bitmap",
-      family: "Codemotion Planner Unicode Bitmap",
-      style: "normal",
-      weight: 500
+      id: "font.codemotion.unicode-bitmap-v1",
+      family: "Codemotion Planner Unicode Bitmap"
     }],
     audioTracks,
     renderPresets: [],
@@ -749,30 +752,6 @@ export function validatePlannedDsl(project: MotionProject, maxHeavyEffects = 3):
   return issues;
 }
 
-function plannedRasterSources(project: MotionProject): ReadonlyMap<string, LayerRasterSource> {
-  const width = 160;
-  const height = 90;
-  const sources = new Map<string, LayerRasterSource>();
-  for (const composition of project.compositions) {
-    for (const layer of composition.layers) {
-      if (layer.type === "text") {
-        sources.set(layer.id, textRasterSource(
-          layer.properties.text,
-          layer.properties.fontFamily,
-          layer.properties.fontSize,
-          width,
-          height,
-          composition.width,
-          composition.height
-        ));
-      } else if (layer.type === "svg" && typeof layer.properties.svg === "string") {
-        sources.set(layer.id, vectorRasterSource(layer.properties.svg));
-      }
-    }
-  }
-  return sources;
-}
-
 function collectResourceIdentities(value: unknown, output: Set<string>): void {
   if (typeof value === "string") {
     if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(value) && !value.startsWith("context://")) output.add(value);
@@ -830,13 +809,25 @@ async function lowResolutionPreview(
   const width = 160;
   const height = 90;
   const frameNumbers = previewFrameNumbers(project.duration, project.fps, options.previewFrameLimit);
+  options.signal?.throwIfAborted();
   const media = await verifiedVisualMedia(resources, options.signal);
-  const staticSources = plannedRasterSources(project);
   const producer = createProjectFrameProducer(project, media, {
     timeContractVersion: TIME_CONTRACT_VERSION,
-    resolveRasterSource: async ({ layer, request, layerTime }) => {
-      const staticSource = staticSources.get(layer.id);
-      if (staticSource !== undefined) return staticSource;
+    resolveRasterSource: async ({ composition, layer, request, projectTime, layerTime }) => {
+      options.signal?.throwIfAborted();
+      const formalSource = resolveFormal2dRasterSourceV1({
+        layer,
+        compositionWidth: composition.width,
+        compositionHeight: composition.height,
+        renderWidth: request.width,
+        renderHeight: request.height,
+        projectSeed: project.seed,
+        projectTime: projectTime.projectTime,
+        layerTime: layerTime.localTime,
+        ...(options.signal === undefined ? {} : { signal: options.signal })
+      });
+      if (formalSource !== undefined) return formalSource;
+      options.signal?.throwIfAborted();
       if ((layer.type !== "image" && layer.type !== "video") || layer.source === undefined) {
         throw new Error(`Layer ${layer.id} has no planned raster source.`);
       }
@@ -845,6 +836,7 @@ async function lowResolutionPreview(
         throw new Error(`Layer ${layer.id} references unverified visual media.`);
       }
       const frameTime = layer.type === "image" ? 0 : layerTime.sourceTime;
+      options.signal?.throwIfAborted();
       const pixels = await decodeMediaFrame(imported, { ...request, time: frameTime }, {
         ...(options.ffmpegPath === undefined ? {} : { ffmpegPath: options.ffmpegPath }),
         ...(options.signal === undefined ? {} : { signal: options.signal })
@@ -871,7 +863,8 @@ async function lowResolutionPreview(
     rejectBackgroundOnlyFrames: false,
     ...(options.ffmpegPath === undefined ? {} : { ffmpegPath: options.ffmpegPath })
   });
-  const frames = await Promise.all(frameNumbers.map(async (frame) => {
+  const frames: string[] = [];
+  for (const frame of frameNumbers) {
     options.signal?.throwIfAborted();
     const pixels = await producer({
       frame,
@@ -881,8 +874,8 @@ async function lowResolutionPreview(
       width,
       height
     }, options.signal);
-    return `sha256:${createHash("sha256").update(pixels).digest("hex")}`;
-  }));
+    frames.push(`sha256:${createHash("sha256").update(pixels).digest("hex")}`);
+  }
   return {
     width,
     height,

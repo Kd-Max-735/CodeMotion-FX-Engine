@@ -16,6 +16,7 @@ import {
   planAnimation,
   retrieveP0Effects,
   sanitizeUserText,
+  serializeAiPlanCompletedResultV2,
   validatePlannedDsl,
   type LocalResourceInput,
   type AiTaskPrincipal,
@@ -370,7 +371,15 @@ describe("AI planner", () => {
     );
     expect(retrieved[0]?.effectId).toBe("fx.text.textExtrude3D");
     expect(retrieved.every((effect) => P0_EFFECTS_BY_ID.get(effect.effectId) === effect)).toBe(true);
-    const planned = await planAnimation(result, { duration: 2, previewFrameLimit: 2 });
+    const planned = await planAnimation({
+      ...result,
+      storyboard: {
+        ...result.storyboard,
+        layers: result.storyboard.layers.map((layer) => layer.type === "text"
+          ? { ...layer, text: "Extrude3D" }
+          : layer)
+      }
+    }, { duration: 2, previewFrameLimit: 2 });
     const effect = planned.dsl.compositions[0]!.layers.flatMap((layer) => layer.effects)[0]!;
     const definition = P0_EFFECTS_BY_ID.get(effect.effectId)!;
     expect(effect.effectId).toBe("fx.text.textExtrude3D");
@@ -417,7 +426,7 @@ describe("AI planner", () => {
       ...base.storyboard,
       brand: { ...base.storyboard.brand, requiredText: [required] },
       layers: base.storyboard.layers.map((layer) => layer.type === "text"
-        ? { ...layer, text: `Launch\n${required}` }
+        ? { ...layer, text: `Launch ${required}` }
         : layer)
     };
     const planned = await planAnimation({ ...base, storyboard }, { duration: 1, previewFrameLimit: 2 });
@@ -438,7 +447,7 @@ describe("AI planner", () => {
       if (firstText === undefined) throw new Error("Expected mock text layer.");
       const first = {
         ...firstText,
-        text: distribution === "one-layer" ? required.join("\n") : required[0]!
+        text: distribution === "one-layer" ? required.join(" ") : required[0]!
       };
       const layers = distribution === "one-layer"
         ? base.storyboard.layers.map((layer) => layer.id === first.id ? first : layer)
@@ -694,6 +703,16 @@ describe("AI planner", () => {
       );
       expect(planned.preview.frameHashes).toHaveLength(4);
       expect(validatePlannedDsl(planned.dsl)).toEqual([]);
+      const browserResult = serializeAiPlanCompletedResultV2(planned);
+      expect(browserResult.editableProject.project.assets).toEqual(
+        testCase.resources.map((resource) => ({
+          id: resource.asset.id,
+          type: resource.asset.type,
+          uri: "cmfx-browser-asset://opaque",
+          metadata: {}
+        }))
+      );
+      expect(browserResult.editableProject.project.assets.every((asset) => !("hash" in asset))).toBe(true);
       hashes.push(planned.preview.frameHashes.at(-1)!);
     }
     expect(new Set(hashes).size).toBe(cases.length);

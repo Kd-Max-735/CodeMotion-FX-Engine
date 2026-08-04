@@ -1,4 +1,5 @@
 export * from "./ark-provider.js";
+export * from "./browser-result.js";
 export * from "./mock-provider.js";
 export * from "./pipeline.js";
 export * from "./provider.js";
