@@ -202,6 +202,7 @@ describe("browser project authority boundary", () => {
     expect(authority).not.toHaveProperty("registry");
     expect(authority.validateBrowserProjectEnvelope).toHaveLength(1);
     expect(authority.sanitizeBrowserProject).toHaveLength(2);
+    expect(authority.classifyBrowserProjectAssetReferences).toHaveLength(1);
   });
 
   it("fails closed with one fixed configuration error for missing or damaged authority inputs", () => {
@@ -257,6 +258,143 @@ describe("browser-project/v1 frozen safety overlay", () => {
     expect(P0_EFFECTS).toHaveLength(40);
     expect(P0_EFFECTS_BY_ID.size).toBe(40);
     expect(PROJECT_SCHEMA_VERSION).toBe("1.2.0");
+  });
+
+  it("classifies only authoritative asset locations and keeps logo roles distinct", () => {
+    const result = authority.classifyBrowserProjectAssetReferences(browserProject());
+    expect(result.valid).toBe(true);
+    if (!result.valid) return;
+    expect(Object.isFrozen(result.value)).toBe(true);
+    expect(result.value.map(({ assetId, role, allowedMediaTypes }) => ({
+      assetId, role, allowedMediaTypes
+    }))).toEqual([
+      { assetId: "asset.image", role: "image-layer-source", allowedMediaTypes: ["image", "svg"] },
+      { assetId: "asset.video", role: "video-layer-source", allowedMediaTypes: ["video"] },
+      { assetId: "asset.audio", role: "audio-track", allowedMediaTypes: ["audio"] },
+      { assetId: "asset.image", role: "brand-logo", allowedMediaTypes: ["image", "svg"] }
+    ]);
+    expect(result.value.every((entry) => Object.isFrozen(entry)
+      && Object.isFrozen(entry.location) && Object.isFrozen(entry.allowedMediaTypes))).toBe(true);
+    expect(result.value.some((entry) => entry.location.kind === "catalog-parameter")).toBe(false);
+    expect(authority.classifyBrowserProjectAssetReferences({
+      ...browserProject(), registry: P0_EFFECTS_BY_ID
+    }).valid).toBe(false);
+  });
+
+  it("keeps ordinary asset-shaped strings as data without changing classified roles", () => {
+    const textMatch = clone(browserProject());
+    const textMorph = P0_EFFECTS.find((definition) => definition.sourceId === "T05")!;
+    textMatch.project.compositions[0]!.layers[1]!.effects = [{
+      id: "effect.text-match",
+      effectId: textMorph.effectId,
+      version: textMorph.version,
+      enabled: true,
+      mix: constant(1),
+      params: { ...structuredClone(textMorph.defaultPreset), sourceText: "asset.image" }
+    }];
+    expect(authority.validateBrowserProjectEnvelope(textMatch).valid).toBe(true);
+    const baseline = authority.classifyBrowserProjectAssetReferences(browserProject());
+    const classified = authority.classifyBrowserProjectAssetReferences(textMatch);
+    expect(classified.valid).toBe(true);
+    expect(classified).toEqual(baseline);
+    if (classified.valid) {
+      expect(classified.value.some((entry) => entry.location.kind === "catalog-parameter")).toBe(false);
+    }
+  });
+
+  it("accepts every reachable D02 builtin and rejects every other brush value", () => {
+    const brushReveal = P0_EFFECTS.find((definition) => definition.sourceId === "D02")!;
+    const withBrush = (brushTexture: JsonValue): BrowserProjectEnvelopeV1 => {
+      const project = clone(browserProject());
+      project.project.compositions[0]!.layers[1]!.effects = [{
+        id: "effect.brush",
+        effectId: brushReveal.effectId,
+        version: brushReveal.version,
+        enabled: true,
+        mix: constant(1),
+        params: { ...structuredClone(brushReveal.defaultPreset), brushTexture }
+      }];
+      return project;
+    };
+    const validValues: JsonValue[] = [
+      "builtin://brush/round",
+      { mode: "constant", value: "builtin://brush/round" },
+      { mode: "keyframes", keyframes: [
+        { time: 0, value: "builtin://brush/round", interpolation: "hold" },
+        { time: 1, value: "builtin://brush/round", interpolation: "hold" }
+      ] }
+    ];
+    for (const value of validValues) {
+      const candidate = withBrush(value);
+      expect(authority.validateBrowserProjectEnvelope(candidate).valid).toBe(true);
+      const classified = authority.classifyBrowserProjectAssetReferences(candidate);
+      expect(classified.valid).toBe(true);
+      if (classified.valid) {
+        expect(classified.value.some((entry) => entry.location.kind === "catalog-parameter")).toBe(false);
+      }
+    }
+    const invalidLiterals = [
+      "asset.image",
+      "asset://owner-upload",
+      "https://example.invalid",
+      "file:///private/brush.png",
+      "builtin://brush/square",
+      "ordinary-brush"
+    ];
+    const invalidValues: JsonValue[] = invalidLiterals.flatMap((value) => [
+      value,
+      { mode: "constant", value },
+      { mode: "keyframes", keyframes: [
+        { time: 0, value: "builtin://brush/round", interpolation: "hold" },
+        { time: 1, value, interpolation: "hold" }
+      ] }
+    ]);
+    for (const value of invalidValues) expectUnsafe(withBrush(value));
+  });
+
+  it("rejects URI and path values only at non-reference string parameter positions", () => {
+    const textMorph = P0_EFFECTS.find((definition) => definition.sourceId === "T05")!;
+    const withSourceText = (sourceText: JsonValue): BrowserProjectEnvelopeV1 => {
+      const project = clone(browserProject());
+      project.project.compositions[0]!.layers[1]!.effects = [{
+        id: "effect.text-uri",
+        effectId: textMorph.effectId,
+        version: textMorph.version,
+        enabled: true,
+        mix: constant(1),
+        params: { ...structuredClone(textMorph.defaultPreset), sourceText }
+      }];
+      return project;
+    };
+    expect(authority.validateBrowserProjectEnvelope(withSourceText("ordinary")).valid).toBe(true);
+    expect(authority.validateBrowserProjectEnvelope(withSourceText("asset.image")).valid).toBe(true);
+    for (const value of [
+      "https://example.invalid",
+      { mode: "constant", value: "file:///private/source.txt" },
+      { mode: "keyframes", keyframes: [
+        { time: 0, value: "ordinary", interpolation: "hold" },
+        { time: 1, value: "../private/source.txt", interpolation: "hold" }
+      ] }
+    ] satisfies JsonValue[]) expectUnsafe(withSourceText(value));
+  });
+
+  it("fails closed for duplicate, unknown, and conflicting asset roles", () => {
+    const duplicateLogo = clone(browserProject()) as unknown as {
+      constraints: { brand: { logoAssetIds: string[] } };
+    };
+    duplicateLogo.constraints.brand.logoAssetIds.push("asset.image");
+    expectUnsafe(duplicateLogo);
+
+    const unknownLogo = clone(browserProject()) as unknown as {
+      constraints: { brand: { logoAssetIds: string[] } };
+    };
+    unknownLogo.constraints.brand.logoAssetIds[0] = "asset.unknown";
+    expectUnsafe(unknownLogo);
+
+    const conflicting = clone(browserProject());
+    conflicting.project.compositions[0]!.layers[3]!.source = { assetId: "asset.image" };
+    conflicting.project.assets = conflicting.project.assets.filter((asset) => asset.id !== "asset.video");
+    expectUnsafe(conflicting);
   });
 
   it("sanitizes only trusted asset authority and metadata with deterministic round trips", () => {

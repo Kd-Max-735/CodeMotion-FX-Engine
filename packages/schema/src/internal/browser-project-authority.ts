@@ -1,6 +1,7 @@
 import type { Animatable, JsonValue } from "@codemotion/core";
 import { validateAiPlanCompletedResultV2Internal } from "../ai-plan-result.js";
 import {
+  classifyBrowserProjectAssetReferencesV1Internal,
   createBrowserProjectValidationOptionsV1Internal,
   sanitizeBrowserProjectV1Internal,
   validateBrowserProjectEnvelopeV1Internal,
@@ -53,6 +54,17 @@ export function createBrowserProjectAuthorityV1(
         validateBrowserProjectEnvelopeV1Internal(value, options)),
       sanitizeBrowserProject: frozenMethod((project, constraints) =>
         sanitizeBrowserProjectV1Internal(project, constraints, options)),
+      classifyBrowserProjectAssetReferences: frozenMethod((value: unknown) => {
+        const validated = validateBrowserProjectEnvelopeV1Internal(value, options);
+        if (!validated.valid) return validated;
+        return {
+          valid: true as const,
+          value: classifyBrowserProjectAssetReferencesV1Internal(
+            validated.value.project,
+            validated.value.constraints
+          )
+        };
+      }),
       validateAiPlanCompletedResult: frozenMethod((value: unknown) =>
         validateAiPlanCompletedResultV2Internal(value, options)),
       validateEditorPreviewRequest: frozenMethod((value: unknown) =>

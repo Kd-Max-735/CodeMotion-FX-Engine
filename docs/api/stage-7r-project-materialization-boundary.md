@@ -3,7 +3,9 @@
 Status: **GROUP 1 FROZEN** on 2026-08-03 under `1-S7R-G0`, corrected by
 `1-S7R-G0-CORRECTION` and the authority ownership allocation was corrected by
 `1-S7R-G0-1-AUTHORITY-BOUNDARY-CORRECTION`; the G0-2 test scope and version
-semantics were corrected by `1-S7R-G0-2-SCOPE-CORRECTION`. This record closes the
+semantics were corrected by `1-S7R-G0-2-SCOPE-CORRECTION`. The catalog asset
+authority boundary was corrected by
+`1-S7R-G0-4-CATALOG-ASSET-AUTHORITY-CORRECTION`. This record closes the
 formal-chain blockers found by
 `G7-S7R-CLOSEOUT-AUDIT` and the four contract gaps reported by `G7-S7R-G0`.
 It defines later implementation segments; it does not claim they are implemented
@@ -51,7 +53,7 @@ not by changing the persisted Project model.
 Three public contract changes are approved and must be implemented before later
 groups consume them:
 
-- `@codemotion/schema` `0.4.0` is the sole owner of the closed
+- `@codemotion/schema` `0.5.0` supersedes `0.4.0` and is the sole owner of the closed
   `browser-project/v1`, `ai-plan-result/v2`, `preview-request/v1`,
   `export-request/v1`, and `export-task/v1` transport types, structural validation
   implementation, authority consumer type, and browser-project sanitizer without
@@ -78,6 +80,12 @@ planning DTO, so serial package migration continues to typecheck; it is not a
 browser/API contract. `@codemotion/ai-planner` `0.4.0` adds the public
 `serializeAiPlanCompletedResultV2` server serializer; Group 5 must invoke it at the
 service response boundary. No handler may return the input DTO.
+
+Schema `0.5.0` is required because asset-reference classification is added to the
+exported `BrowserProjectAuthorityV1` interface. All direct consumers pin exactly
+`0.5.0`; there is no `0.4.0` compatibility shim or dual authority. Project Schema
+remains `1.2.0`, transport discriminants remain unchanged, and migration consists
+only of consuming the new frozen authority method.
 
 ## 3. Browser project contract
 
@@ -217,6 +225,25 @@ required asset-row `type` is accepted only as the closed UI hint below and is
 ignored for authority. The server always resolves the opaque ID through the shared
 owner-aware store.
 
+The audited P0 catalog has exactly one asset-semantic effect parameter: D02
+`fx.draw.brushReveal.params.brushTexture`. H01 `mask`, H02 `matteLayer`, and H04
+`map` are renderer-context references, not owner assets; every other string
+parameter is text, color, vector path, charset, or numeric-map data. V1 freezes
+D02 to `builtin://brush/round`. It rejects opaque browser asset IDs and
+`asset://` values, creates no asset row, has no authoritative `StoredMedia` type,
+and is converted by the Group 2 effects runtime to `CoverageBuffer` through the
+built-in brush path. Preview and Export supply that coverage under the same
+literal. Uploaded brushes require a future Group 1 contract covering accepted
+media types, decode/raster budgets, and an owner-media-to-coverage adapter.
+
+Logo, background, image/video source, audio track, and catalog parameter are
+independent roles. The same asset ID may occupy compatible roles, but the
+intersection of allowed authoritative media types must be non-empty. Background,
+image source, and logo allow `image|svg`; video source allows `video`; audio track
+allows `audio`. Duplicate logo rows, unknown IDs, an empty type intersection, or
+a catalog parameter masquerading as another role fails closed before owner
+resolution.
+
 The sanitizer and validator are fail-closed. Their only public semantic failure is
 `422 BROWSER_PROJECT_UNSAFE`; a size/node/depth/array/string budget failure is
 `413 PROJECT_TOO_LARGE`. They may return a location and an allowlisted reason in
@@ -270,6 +297,21 @@ non-root authority builder. Its package root does not export
 `catalog`, `registry`, parameter-Schema authority, a replaceable token/digest, or a
 factory that can be called while handling a request.
 
+`BrowserProjectAuthorityV1.classifyBrowserProjectAssetReferences(value)` first
+performs the same closed validation and returns a deeply frozen ordered list.
+Each row contains only opaque `assetId`, one closed role, one closed location, and
+the allowed authoritative media-type set. It exposes no registry, Effect
+Definition, parameter Schema, evaluator, options, token, or digest. Invalid input,
+unknown references, duplicate role rows, or incompatible role types returns the
+existing safe transport failure without partial results.
+
+Reference proof is positional. Background, layer source, audio track, and logo
+rows come only from their declared fields. Catalog rows may come only from the
+real static P0 registry snapshot. Recursive string scanning is forbidden: a
+normal parameter string equal to an asset ID is not a reference. URI-like effect
+values are accepted only when the real parameter Schema declares that exact
+literal, which freezes D02 to its builtin value without exposing the Schema.
+
 The only builder export is the exact restricted subpath
 `@codemotion/schema/internal/browser-project-authority`; wildcard internal exports
 are forbidden. It is a module-composition hook, not a request API. It validates and
@@ -296,6 +338,12 @@ services`; `schema -> effects-2d` is forbidden. G0-3 `browser-result.ts` and G0-
 `export-task-service.ts` consume only `P0_BROWSER_PROJECT_AUTHORITY_V1`. They cannot
 import the internal builder or accept a registry. G0-3/G0-4 remain blocked until
 the G0-2 authority adapter has passed and been integrated.
+
+No further Group 2 product correction is required for this V1 decision. The real
+D02 Schema default and existing Group 2 runtime already provide the fixed builtin
+literal and coverage conversion; Schema `0.5.0` applies the browser-only narrowing
+inside the closed authority. Group 2 must not broaden D02 to owner uploads or add
+catalog metadata under G0-4. Future upload support returns to Group 1 first.
 
 ## 4. AI completed result
 
@@ -433,13 +481,15 @@ It is never JSON serialized. Materialization performs this fixed order:
    parent cycles, unsupported layer/reference combinations, non-P0 effect IDs,
    stale effect versions, invalid parameters/keyframes, and unresolved
    catalog-defined layer/asset references;
-4. collect every referenced opaque asset ID without reading client URI/hash/type or
-   metadata;
+4. call only `classifyBrowserProjectAssetReferences`, collect its opaque IDs, and
+   retain every occurrence's role/type requirement without reading client
+   URI/hash/type or metadata;
 5. call the shared store `resolve(owner,assetId,signal)` once per unique ID before
    any consumer disk read or decode; an owner-key miss is safe `404 NOT_FOUND`;
-6. validate authoritative type compatibility: image layers/background accept
-   `image` or imported `svg`, video layers accept `video`, audio tracks accept
-   `audio`, and V1 has no uploaded-font path;
+6. validate every resolved authoritative type against every classified occurrence;
+   image layers/background/logo accept `image` or imported `svg`, video layers
+   accept `video`, audio tracks accept `audio`, D02 creates no owner resolve, and
+   V1 has no uploaded-font path;
 7. replace the entire asset array with each resolved
    `VerifiedStoredMedia.asset`, preserve only validated project structure/effect
    parameters and safe constraints, and validate the reconstructed Project again;
@@ -841,8 +891,9 @@ of the user-editable project constraints.
 Unknown asset/effect/layer references, duplicate IDs, parent/composition cycles,
 stale effect versions, invalid keyframe/time ranges, invalid P0 parameters, excess
 heavy effects, or URI-like values in fields not declared by the P0 catalog fail
-before disk or FFmpeg. Catalog-defined asset references must name an asset row and
-are resolved under the same owner.
+before disk or FFmpeg. Catalog-defined owner-asset references, if a later approved
+catalog permits any, must be emitted by the static authority, name an asset row,
+and resolve under the same owner. V1 D02 is builtin-only and never enters that set.
 
 Neither Preview nor Export can use only an AI task ID. They always receive the
 current `browser-project/v1` envelope, so manual edits are authoritative project
@@ -876,7 +927,8 @@ Allowed files only:
   `packages/exporter/package.json`, and `packages/renderer-webgl/package.json`; and
 - root `package-lock.json` only for these approved versions.
 
-This segment implements schema package `0.4.0`, renderer-api `0.3.0`, browser
+This segment originally implemented Schema `0.4.0`; the catalog authority
+correction advances Schema to `0.5.0`. Renderer-api remains `0.3.0`. It implements browser
 contract validation/sanitization, the six-value public scope contract, and optional
 `fillRgba`. Positive tests must cover every allowed layer/property family,
 constant/keyframe animatables, exact P0 effects, owner-opaque assets, and every
@@ -905,7 +957,7 @@ Waits for the G0-1 integration commit. Allowed files only:
   `packages/effects-2d/test/browser-project-authority.test.ts`,
   `packages/effects-2d/test/effects-2d.test.ts`, README/CHANGELOG;
 - `packages/effects-2d/package.json` for version `1.2.0` and the exact
-  `@codemotion/schema` `0.4.0` dependency;
+  `@codemotion/schema` `0.5.0` dependency;
 - exact `@codemotion/effects-2d` pins in `packages/ai-planner/package.json`,
   `packages/editor/package.json`, and `packages/exporter/package.json`; and
 - root `package-lock.json` only for that approved version and exact Schema
@@ -925,7 +977,7 @@ The three version domains are independent and frozen as follows:
 
 1. the npm package version becomes `@codemotion/effects-2d` `1.2.0`, representing
    the P0 browser-project authority adapter, formal text and inline-SVG raster
-   sources, and integration with Schema `0.4.0` and Renderer API `0.3.0`;
+   sources, and integration with Schema `0.5.0` and Renderer API `0.3.0`;
 2. every existing P0 2D Effect Definition keeps its already-frozen definition
    version, currently `1.1.0`; the package bump does not migrate definitions; and
 3. existing Effect presets remain `1.1.0`. A preset version changes only when its
@@ -992,6 +1044,10 @@ Its materialization, AI, preview, and export services consume only
 `P0_BROWSER_PROJECT_AUTHORITY_V1`, and route mounting fails before serving traffic
 if that module authority did not initialize. They cannot import the Schema internal
 builder or accept registry/options.
+Materialization must consume `classifyBrowserProjectAssetReferences` occurrence by
+occurrence for resolve/type checks; residual-asset-as-logo classification, local
+field-name tables, recursive parameter scanning, and direct P0 registry imports are
+forbidden.
 Its tests own the real owner-aware audio resolution/decode/export/mux chain and the
 atomic download lifecycle, including concurrency, expiry, disconnect, abort,
 runtime close, crash rehydration, bounded drain, and individual cleanup retry. It
@@ -1086,10 +1142,14 @@ Later verification must prove at least:
 27. the G0-1 positive/negative browser-overlay suite proves the exact allowlist,
     Animatable restriction, P0 effect/version/parameter validation, recursive
     executable/dependency/prototype rejection, fixed budgets, stable errors, and no
-    second validator implementation; and
+    second validator implementation;
 28. the current editor's closed shape path formally previews and exports through
     the Group 2 adapter without Canvas commands, embedded pixels, or a second
-    raster implementation.
+    raster implementation; and
+29. authority tests prove ordinary strings matching an asset ID do not create a
+    reference, D02 accepts only `builtin://brush/round`, classification is deeply
+    frozen and cannot be replaced by request data, and catalog/logo roles never
+    collapse into a residual asset category.
 
 The gate remains BLOCKED if any test substitutes an in-memory private asset Map,
 raw `PlannedAnimation.dsl`, global media root, fixed 160x90 raster source, fake

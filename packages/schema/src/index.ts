@@ -18,6 +18,10 @@ export {
 } from "./browser-project.js";
 export type {
   ApplicationScope,
+  BrowserProjectAssetReferenceLocationV1,
+  BrowserProjectAssetReferenceRoleV1,
+  BrowserProjectAssetReferenceV1,
+  BrowserProjectAuthoritativeMediaTypeV1,
   BrowserProjectAuthorityV1,
   BrowserProjectConstraintsV1,
   BrowserProjectEnvelopeV1,

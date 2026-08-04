@@ -69,6 +69,37 @@ export interface BrowserProjectValidationOptionsV1 {
   readonly evaluateAnimatableAt: (value: Animatable, time: number) => JsonValue;
 }
 
+export type BrowserProjectAuthoritativeMediaTypeV1 = "image" | "video" | "audio" | "svg";
+
+export type BrowserProjectAssetReferenceLocationV1 =
+  | { readonly kind: "background" }
+  | { readonly kind: "layer-source"; readonly compositionId: string; readonly layerId: string }
+  | { readonly kind: "audio-track"; readonly trackId: string }
+  | { readonly kind: "brand-logo"; readonly index: number }
+  | {
+    readonly kind: "catalog-parameter";
+    readonly compositionId: string;
+    readonly layerId: string;
+    readonly effectInstanceId: string;
+    readonly effectId: string;
+    readonly parameter: string;
+  };
+
+export type BrowserProjectAssetReferenceRoleV1 =
+  | "background"
+  | "image-layer-source"
+  | "video-layer-source"
+  | "audio-track"
+  | "brand-logo"
+  | "effect-brush-coverage";
+
+export interface BrowserProjectAssetReferenceV1 {
+  readonly assetId: string;
+  readonly role: BrowserProjectAssetReferenceRoleV1;
+  readonly allowedMediaTypes: readonly BrowserProjectAuthoritativeMediaTypeV1[];
+  readonly location: BrowserProjectAssetReferenceLocationV1;
+}
+
 export type TransportValidationErrorCodeV1 =
   | "UNSUPPORTED_CONTRACT"
   | "MALFORMED_REQUEST"
@@ -92,6 +123,9 @@ export interface BrowserProjectAuthorityV1 {
     project: MotionProject,
     constraints: BrowserProjectConstraintsV1
   ) => TransportValidationResultV1<BrowserProjectEnvelopeV1>;
+  readonly classifyBrowserProjectAssetReferences: (
+    value: unknown
+  ) => TransportValidationResultV1<readonly BrowserProjectAssetReferenceV1[]>;
   readonly validateAiPlanCompletedResult: (
     value: unknown
   ) => TransportValidationResultV1<AiPlanCompletedResultV2>;
@@ -556,7 +590,62 @@ export function validateP0EffectSnapshotV1(
   return true;
 }
 
-function validEffect(value: unknown, options: BrowserProjectValidationOptionsV1): boolean {
+function parameterSchemaProperty(
+  definition: BrowserProjectEffectDefinitionV1,
+  name: string
+): Record<string, unknown> | undefined {
+  const schema = definition.parameterSchema as Record<string, unknown>;
+  if (!isTransportRecordV1(schema.properties)) return undefined;
+  const property = schema.properties[name];
+  return isTransportRecordV1(property) ? property : undefined;
+}
+
+function parameterReachableValues(value: unknown): readonly unknown[] {
+  if (isTransportRecordV1(value) && value.mode === "constant") return [value.value];
+  if (isTransportRecordV1(value) && value.mode === "keyframes" && Array.isArray(value.keyframes)) {
+    return value.keyframes.map((frame) => isTransportRecordV1(frame) ? frame.value : undefined);
+  }
+  return [value];
+}
+
+function fixedReferenceLiteral(
+  definition: BrowserProjectEffectDefinitionV1,
+  parameter: string
+): string | undefined {
+  if (definition.sourceId === "D02" && definition.effectId === "fx.draw.brushReveal"
+    && parameter === "brushTexture") return "builtin://brush/round";
+  if (definition.sourceId === "H01" && definition.effectId === "fx.composite.maskReveal"
+    && parameter === "mask") return "context://mask";
+  if (definition.sourceId === "H02" && definition.effectId === "fx.composite.trackMatte"
+    && parameter === "matteLayer") return "context://secondary";
+  if (definition.sourceId === "H04" && definition.effectId === "fx.composite.displacementMap"
+    && parameter === "map") return "context://secondary";
+  return undefined;
+}
+
+function validEffectParameterSafety(
+  definition: BrowserProjectEffectDefinitionV1,
+  params: Record<string, unknown>
+): boolean {
+  for (const [name, value] of Object.entries(params)) {
+    const property = parameterSchemaProperty(definition, name);
+    if (property === undefined) return false;
+    const fixedLiteral = fixedReferenceLiteral(definition, name);
+    for (const entry of parameterReachableValues(value)) {
+      if (fixedLiteral !== undefined) {
+        if (entry !== fixedLiteral) return false;
+      } else if (property.type === "string" && typeof entry === "string" && URL_LIKE.test(entry)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function validEffect(
+  value: unknown,
+  options: BrowserProjectValidationOptionsV1
+): boolean {
   if (!exact(value,
     ["id", "effectId", "version", "enabled", "startTime", "endTime", "mix", "maskId", "params",
       "renderQuality", "cachePolicy"],
@@ -572,7 +661,10 @@ function validEffect(value: unknown, options: BrowserProjectValidationOptionsV1)
     if (isTransportRecordV1(parameter) && typeof parameter.mode === "string"
       && !validAnimatable(parameter, () => true)) return false;
   }
-  return validateP0EffectSnapshotV1(
+  const definition = typeof value.effectId === "string" ? options.effectsById.get(value.effectId) : undefined;
+  return definition !== undefined
+    && validEffectParameterSafety(definition, value.params)
+    && validateP0EffectSnapshotV1(
     value.effectId,
     value.version,
     value.params,
@@ -584,7 +676,10 @@ function validEffect(value: unknown, options: BrowserProjectValidationOptionsV1)
 
 const ALLOWED_LAYER_TYPES = new Set(["text", "shape", "image", "video", "svg", "composition"]);
 
-function validLayer(value: unknown, options: BrowserProjectValidationOptionsV1): boolean {
+function validLayer(
+  value: unknown,
+  options: BrowserProjectValidationOptionsV1
+): boolean {
   if (!exact(value,
     ["id", "type", "name", "visible", "locked", "solo", "startTime", "endTime", "inPoint", "outPoint",
       "parentId", "zIndex", "transform", "opacity", "blendMode", "masks", "effects", "source", "properties"],
@@ -613,7 +708,10 @@ function validMarker(value: unknown): boolean {
     && (value.color === undefined || (typeof value.color === "string" && COLOR.test(value.color)));
 }
 
-function validComposition(value: unknown, options: BrowserProjectValidationOptionsV1): boolean {
+function validComposition(
+  value: unknown,
+  options: BrowserProjectValidationOptionsV1
+): boolean {
   return exact(value, ["id", "name", "width", "height", "duration", "fps", "layers", "markers", "effects", "effectGraph"],
     ["id", "name", "width", "height", "duration", "layers"])
     && typeof value.id === "string" && typeof value.name === "string"
@@ -626,27 +724,49 @@ function validComposition(value: unknown, options: BrowserProjectValidationOptio
     && value.effectGraph === undefined;
 }
 
-function collectProjectReferences(project: MotionProject, constraints: BrowserProjectConstraintsV1): Set<string> {
-  const references = new Set<string>(constraints.brand.logoAssetIds);
-  if (project.background.type === "asset") references.add(project.background.assetId);
-  for (const track of project.audioTracks) references.add(track.assetId);
-  const assetIds = new Set(project.assets.map((asset) => asset.id));
-  const seen = new Set<object>();
-  const collectParameterAssets = (value: unknown): void => {
-    if (typeof value === "string" && assetIds.has(value)) references.add(value);
-    else if (Array.isArray(value)) value.forEach(collectParameterAssets);
-    else if (isTransportRecordV1(value) && !seen.has(value)) {
-      seen.add(value);
-      Object.values(value).forEach(collectParameterAssets);
-    }
+export function classifyBrowserProjectAssetReferencesV1Internal(
+  project: MotionProject,
+  constraints: BrowserProjectConstraintsV1
+): readonly BrowserProjectAssetReferenceV1[] {
+  const references: BrowserProjectAssetReferenceV1[] = [];
+  const add = (reference: BrowserProjectAssetReferenceV1): void => {
+    references.push(deepFreeze(reference));
   };
+  if (project.background.type === "asset") add({
+    assetId: project.background.assetId,
+    role: "background",
+    allowedMediaTypes: Object.freeze(["image", "svg"]),
+    location: { kind: "background" }
+  });
   for (const composition of project.compositions) {
     for (const layer of composition.layers) {
-      if (layer.source !== undefined) references.add(layer.source.assetId);
-      for (const effect of layer.effects) collectParameterAssets(effect.params);
+      if (layer.type === "image" && layer.source !== undefined) add({
+        assetId: layer.source.assetId,
+        role: "image-layer-source",
+        allowedMediaTypes: Object.freeze(["image", "svg"]),
+        location: { kind: "layer-source", compositionId: composition.id, layerId: layer.id }
+      });
+      if (layer.type === "video" && layer.source !== undefined) add({
+        assetId: layer.source.assetId,
+        role: "video-layer-source",
+        allowedMediaTypes: Object.freeze(["video"]),
+        location: { kind: "layer-source", compositionId: composition.id, layerId: layer.id }
+      });
     }
   }
-  return references;
+  for (const track of project.audioTracks) add({
+    assetId: track.assetId,
+    role: "audio-track",
+    allowedMediaTypes: Object.freeze(["audio"]),
+    location: { kind: "audio-track", trackId: track.id }
+  });
+  constraints.brand.logoAssetIds.forEach((assetId, index) => add({
+    assetId,
+    role: "brand-logo",
+    allowedMediaTypes: Object.freeze(["image", "svg"]),
+    location: { kind: "brand-logo", index }
+  }));
+  return Object.freeze(references);
 }
 
 function validProjectStructure(
@@ -670,7 +790,9 @@ function validProjectStructure(
     && ["image", "video", "audio", "svg"].includes(asset.type)
     && asset.uri === BROWSER_ASSET_URI && exact(asset.metadata, [], []))) return false;
   const assetIds = project.assets.map((asset) => asset.id);
-  if (new Set(assetIds).size !== assetIds.length) return false;
+  const assetIdSet = new Set(assetIds);
+  if (assetIdSet.size !== assetIds.length
+    || new Set(constraints.brand.logoAssetIds).size !== constraints.brand.logoAssetIds.length) return false;
   if (!project.compositions.every((composition) => validComposition(composition, options))) return false;
   const layers = project.compositions.flatMap((composition) => composition.layers);
   if (layers.length > 1_024 || new Set(layers.map((layer) => layer.id)).size !== layers.length) return false;
@@ -678,9 +800,20 @@ function validProjectStructure(
     && typeof track.id === "string" && typeof track.assetId === "string"
     && validNumber(track.startTime) && validNumber(track.endTime)
     && validAnimatable(track.volume, validNumber))) return false;
-  const references = collectProjectReferences(project, constraints);
+  const classified = classifyBrowserProjectAssetReferencesV1Internal(project, constraints);
+  const references = new Set(classified.map((reference) => reference.assetId));
   if (references.size !== assetIds.length || assetIds.some((id) => !references.has(id))) return false;
-  if ([...references].some((id) => !assetIds.includes(id))) return false;
+  if ([...references].some((id) => !assetIdSet.has(id))) return false;
+  const allowedByAsset = new Map<string, Set<BrowserProjectAuthoritativeMediaTypeV1>>();
+  for (const reference of classified) {
+    const current = allowedByAsset.get(reference.assetId);
+    const next = new Set(reference.allowedMediaTypes);
+    if (current === undefined) allowedByAsset.set(reference.assetId, next);
+    else {
+      for (const type of current) if (!next.has(type)) current.delete(type);
+      if (current.size === 0) return false;
+    }
+  }
   const byId = new Map(project.assets.map((asset) => [asset.id, asset.type]));
   for (const composition of project.compositions) {
     const layerIds = new Set(composition.layers.map((layer) => layer.id));
@@ -814,7 +947,10 @@ export function sanitizeBrowserProjectV1Internal(
   });
   if (inspection === "budget") return transportValidationFailureV1("PROJECT_TOO_LARGE");
   if (inspection === "unsafe") return transportValidationFailureV1("BROWSER_PROJECT_UNSAFE");
-  const references = collectProjectReferences(temporaryProject, constraints);
+  const references = new Set(classifyBrowserProjectAssetReferencesV1Internal(
+    temporaryProject,
+    constraints
+  ).map((reference) => reference.assetId));
   if ([...references].some((id) => !sourceAssetIds.has(id))) {
     return transportValidationFailureV1("BROWSER_PROJECT_UNSAFE");
   }
