@@ -64,6 +64,47 @@ const planningInput: AiPlanningInputV1 = {
 };
 
 describe("server runtime lifecycle", () => {
+  it("returns the unified safe SERVICE_CLOSING envelope from real middleware", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "cmfx-runtime-closing-response-"));
+    const runtime = await createServerRuntime({
+      mode: "development",
+      configureServer: true,
+      listenHost: "127.0.0.1",
+      publicOrigin: "http://127.0.0.1:5173",
+      mediaRoot: resolve(root, "media"),
+      uploadTempRoot: resolve(root, "uploads"),
+      env: {
+        NODE_ENV: "development",
+        CODEMOTION_DEV_AUTH: "1",
+        CODEMOTION_DEV_TENANT_ID: owner.tenantId,
+        CODEMOTION_DEV_USER_ID: owner.userId,
+        CODEMOTION_DEV_SCOPES: "assets:read assets:write ai:plan project:preview export:create export:read"
+      },
+      writeDevLoginCode: () => undefined,
+      createAiPlans: (assets) => new AiPlanService(new RuntimeBlockingProvider(), assets)
+    });
+    await runtime.close();
+    const server = createServer((request, response) => {
+      void runtime.handle(request, response, () => { response.statusCode = 404; response.end(); });
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+    try {
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/editor-preview`);
+      expect(response.status).toBe(503);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      const body = await response.json() as { error: Record<string, unknown> };
+      expect(body).toEqual({ error: {
+        code: "SERVICE_CLOSING",
+        message: "The service is closing.",
+        retryable: true,
+        requestId: expect.stringMatching(/^req_[0-9a-f-]{36}$/)
+      } });
+      expect(JSON.stringify(body)).not.toMatch(/path|hash|owner|token|cookie|provider|ffmpeg|probe/iu);
+    } finally {
+      await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
+    }
+  });
+
   it("exposes close, aborts its shared AI service, and disables the old handle", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "cmfx-runtime-lifecycle-"));
     const provider = new RuntimeBlockingProvider();

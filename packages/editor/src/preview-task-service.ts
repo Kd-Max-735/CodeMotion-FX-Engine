@@ -1,123 +1,143 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { resolve } from "node:path";
-import type { MotionProject, RenderQuality } from "@codemotion/core";
-import { makeBrushCoverage } from "@codemotion/effects-2d";
+import { randomUUID } from "node:crypto";
+import type { RenderQuality } from "@codemotion/core";
 import {
-  createProjectFrameProducer,
-  projectMediaReferences,
-  verifyStoredMediaAsset,
-  type ImportedMedia
-} from "@codemotion/exporter";
-import { loadProject } from "@codemotion/schema";
-import type { CoverageBuffer } from "@codemotion/renderer-api";
+  makeBrushCoverage,
+  P0_BROWSER_PROJECT_AUTHORITY_V1,
+  resolveFormal2dRasterSourceV1
+} from "@codemotion/effects-2d";
+import { createProjectFrameProducer } from "@codemotion/exporter";
+import type { EditorPreviewRequestV1 } from "@codemotion/schema";
+import type { CoverageBuffer, LayerRasterSource } from "@codemotion/renderer-api";
+import type {
+  AuthenticatedSessionPrincipal,
+  AuthSessionService
+} from "./auth-session-service.js";
+import {
+  materializeBrowserProjectV1,
+  ProjectServiceError,
+  type OwnerMediaResolverV1
+} from "./project-materialization.js";
 
-const MAX_PREVIEW_REQUEST_BYTES = 24 * 1024 * 1024;
+const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
-function jsonReplacer(_key: string, value: unknown): unknown {
-  return ArrayBuffer.isView(value)
-    ? Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
-    : value;
+export function sendSafeProjectError(response: ServerResponse, status: number, code: string): void {
+  const messages: Readonly<Record<string, string>> = Object.freeze({
+    UNAUTHENTICATED: "Authentication is required.",
+    FORBIDDEN: "The required permission is missing.",
+    REQUEST_ORIGIN_REJECTED: "The request origin was rejected.",
+    MALFORMED_REQUEST: "The request is malformed.",
+    UNSUPPORTED_CONTRACT: "Unsupported contract.",
+    PROJECT_TOO_LARGE: "The project exceeds the allowed size.",
+    BROWSER_PROJECT_UNSAFE: "The browser project is unsafe.",
+    PROJECT_VALIDATION_FAILED: "Project validation failed.",
+    ASSET_REFERENCE_INVALID: "A project asset reference is invalid.",
+    NOT_FOUND: "The requested object was not found.",
+    MEDIA_STORAGE_UNAVAILABLE: "Media storage is temporarily unavailable.",
+    MEDIA_VALIDATION_FAILED: "Media validation failed.",
+    ASSET_CHANGED_DURING_MATERIALIZATION: "The project asset changed during validation.",
+    SERVICE_CLOSING: "The service is closing.",
+    PREVIEW_RENDER_FAILED: "Preview rendering failed."
+  });
+  response.statusCode = status;
+  response.setHeader("content-type", "application/json; charset=utf-8");
+  response.setHeader("cache-control", "no-store");
+  response.end(JSON.stringify({
+    error: {
+      code,
+      message: messages[code] ?? "The request failed.",
+      retryable: status >= 500,
+      requestId: `req_${randomUUID()}`
+    }
+  }));
 }
 
-export interface EditorPreviewRequest {
-  readonly project: unknown;
-  readonly time: number;
-  readonly width: number;
-  readonly height: number;
-  readonly quality?: RenderQuality;
-}
-
-function positiveInteger(value: number, name: string, maximum: number): number {
-  if (!Number.isInteger(value) || value < 1 || value > maximum) {
-    throw new RangeError(`${name} must be an integer within [1, ${maximum}].`);
+async function jsonBody(request: IncomingMessage, signal: AbortSignal): Promise<unknown> {
+  const length = request.headers["content-length"];
+  if (typeof length === "string" && (!/^\d+$/.test(length) || Number(length) > MAX_BODY_BYTES)) {
+    throw new ProjectServiceError("PROJECT_TOO_LARGE");
   }
-  return value;
-}
-
-function finiteTime(value: number, project: MotionProject): number {
-  if (!Number.isFinite(value)) throw new TypeError("Preview time must be finite.");
-  return Math.min(Math.max(0, value), Math.max(0, project.duration - 1 / project.fps));
-}
-
-async function jsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of request) {
+    signal.throwIfAborted();
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += buffer.length;
-    if (bytes > MAX_PREVIEW_REQUEST_BYTES) throw new Error("Preview request exceeds the 24 MB limit.");
+    bytes += buffer.byteLength;
+    if (bytes > MAX_BODY_BYTES) throw new ProjectServiceError("PROJECT_TOO_LARGE");
     chunks.push(buffer);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-
-function coverageAssets(project: MotionProject): Map<string, CoverageBuffer> {
-  const result = new Map<string, CoverageBuffer>([["builtin://brush/round", makeBrushCoverage()]]);
-  for (const asset of project.assets) {
-    const candidate = asset.metadata.coverage;
-    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) continue;
-    const coverage = candidate as { width?: unknown; height?: unknown; data?: unknown; rowOrder?: unknown };
-    if (!Number.isInteger(coverage.width) || !Number.isInteger(coverage.height)
-      || typeof coverage.width !== "number" || typeof coverage.height !== "number"
-      || !Array.isArray(coverage.data) || coverage.data.length !== coverage.width * coverage.height
-      || coverage.rowOrder !== "top-to-bottom") continue;
-    result.set(asset.id, {
-      width: coverage.width,
-      height: coverage.height,
-      data: new Uint8Array(coverage.data as number[]),
-      rowOrder: "top-to-bottom"
-    });
-  }
-  return result;
-}
-
-async function verifiedMedia(project: MotionProject, mediaRoot: string): Promise<Map<string, ImportedMedia>> {
-  const result = new Map<string, ImportedMedia>();
-  const references = projectMediaReferences(project);
-  for (const id of references.visualAssetIds) {
-    const asset = project.assets.find((entry) => entry.id === id);
-    if (asset === undefined || !/^media:\/\//.test(asset.uri)) continue;
-    result.set(id, await verifyStoredMediaAsset({ asset, storageDirectory: mediaRoot }));
-  }
-  return result;
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { throw new ProjectServiceError("MALFORMED_REQUEST"); }
 }
 
 export class EditorPreviewService {
-  constructor(private readonly mediaRoot = resolve(process.env.CMFX_MEDIA_STORAGE ?? "tmp/stage-6-media")) {}
+  private readonly active = new Set<AbortController>();
+  private closing = false;
 
-  async render(request: EditorPreviewRequest): Promise<{
+  private readonly resolver: OwnerMediaResolverV1;
+
+  constructor(resolver: OwnerMediaResolverV1 | string) {
+    this.resolver = typeof resolver === "string"
+      ? { resolve: async () => { throw new ProjectServiceError("SERVICE_CLOSING"); } }
+      : resolver;
+    if (this.resolver === undefined || typeof this.resolver.resolve !== "function") {
+      throw new Error("Browser project authority is not configured.");
+    }
+    if (!Object.isFrozen(P0_BROWSER_PROJECT_AUTHORITY_V1)) {
+      throw new Error("Browser project authority is not configured.");
+    }
+  }
+
+  async render(
+    principal: AuthenticatedSessionPrincipal,
+    rawRequest: unknown,
+    signal?: AbortSignal
+  ): Promise<{
     readonly pixels: Uint8Array;
     readonly width: number;
     readonly height: number;
     readonly time: number;
     readonly quality: RenderQuality;
-    readonly cpuMs: number;
   }> {
-    const project = loadProject(JSON.stringify(request.project, jsonReplacer));
-    const width = positiveInteger(request.width, "width", 960);
-    const height = positiveInteger(request.height, "height", 960);
-    if (width * height > 921_600) throw new RangeError("Preview pixel budget exceeds 921600 pixels.");
-    const time = finiteTime(request.time, project);
-    const quality = request.quality ?? "preview";
-    if (quality !== "draft" && quality !== "preview" && quality !== "final") {
-      throw new TypeError(`Unsupported preview quality ${String(quality)}.`);
+    if (this.closing) throw new ProjectServiceError("SERVICE_CLOSING");
+    signal?.throwIfAborted();
+    const validated = P0_BROWSER_PROJECT_AUTHORITY_V1.validateEditorPreviewRequest(rawRequest);
+    if (!validated.valid) {
+      const code = validated.error.code;
+      throw new ProjectServiceError(code === "PROJECT_TOO_LARGE" ? "PROJECT_TOO_LARGE"
+        : code === "UNSUPPORTED_CONTRACT" ? "UNSUPPORTED_CONTRACT"
+          : code === "BROWSER_PROJECT_UNSAFE" ? "BROWSER_PROJECT_UNSAFE" : "MALFORMED_REQUEST");
     }
-    const renderProject = structuredClone(project);
-    renderProject.metadata = { ...renderProject.metadata, timeContractVersion: "1.1.0" };
-    for (const composition of renderProject.compositions) {
+    const request: EditorPreviewRequestV1 = validated.value;
+    const materialized = await materializeBrowserProjectV1(principal, request.editableProject, this.resolver, signal);
+    signal?.throwIfAborted();
+    const project = structuredClone(materialized.project);
+    const { width, height, quality } = request.frame;
+    const time = Math.min(
+      Math.max(0, request.frame.time),
+      Math.max(0, project.duration - 1 / project.fps)
+    );
+    for (const composition of project.compositions) {
       for (const layer of composition.layers) {
         for (const effect of layer.effects) effect.renderQuality = quality;
       }
     }
-    const started = performance.now();
-    const producer = createProjectFrameProducer(
-      renderProject,
-      await verifiedMedia(renderProject, this.mediaRoot),
-      {
-        timeContractVersion: "1.1.0",
-        coverageAssets: coverageAssets(renderProject)
-      }
-    );
+    const coverageAssets = new Map<string, CoverageBuffer>([["builtin://brush/round", makeBrushCoverage()]]);
+    const producer = createProjectFrameProducer(project, materialized.media, {
+      timeContractVersion: "1.1.0",
+      coverageAssets,
+      resolveRasterSource: (context) => resolveFormal2dRasterSourceV1({
+        layer: context.layer,
+        compositionWidth: context.composition.width,
+        compositionHeight: context.composition.height,
+        renderWidth: context.request.width,
+        renderHeight: context.request.height,
+        projectSeed: context.project.seed,
+        projectTime: context.projectTime.projectTime,
+        layerTime: context.layerTime.localTime,
+        ...(signal === undefined ? {} : { signal })
+      }) as LayerRasterSource
+    });
     const pixels = await producer({
       frame: Math.floor(time * project.fps + 1e-9),
       time,
@@ -125,40 +145,85 @@ export class EditorPreviewService {
       fps: project.fps,
       width,
       height
-    });
-    return { pixels, width, height, time, quality, cpuMs: performance.now() - started };
+    }, signal);
+    signal?.throwIfAborted();
+    if (pixels.byteLength !== width * height * 4) throw new Error("Invalid preview output.");
+    return { pixels, width, height, time, quality };
+  }
+
+  track(controller: AbortController): () => void {
+    if (this.closing) controller.abort(new ProjectServiceError("SERVICE_CLOSING"));
+    this.active.add(controller);
+    return () => { this.active.delete(controller); };
+  }
+
+  async close(): Promise<void> {
+    this.closing = true;
+    for (const controller of this.active) controller.abort(new ProjectServiceError("SERVICE_CLOSING"));
+    const deadline = Date.now() + 5_000;
+    while (this.active.size > 0 && Date.now() < deadline) {
+      await new Promise<void>((resolveWait) => setTimeout(resolveWait, Math.min(10, deadline - Date.now())));
+    }
   }
 }
 
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
-  response.statusCode = status;
-  response.setHeader("content-type", "application/json; charset=utf-8");
-  response.end(JSON.stringify(body));
+function errorDetails(error: unknown): { status: number; code: string } {
+  if (error instanceof ProjectServiceError) return { status: error.status, code: error.code };
+  if (typeof error === "object" && error !== null && "status" in error && "code" in error) {
+    const candidate = error as { status: unknown; code: unknown };
+    if (typeof candidate.status === "number" && typeof candidate.code === "string") {
+      return { status: candidate.status, code: candidate.code };
+    }
+  }
+  return { status: 500, code: "PREVIEW_RENDER_FAILED" };
 }
 
-export function createEditorPreviewApi(service = new EditorPreviewService()) {
+export function createEditorPreviewApi(
+  service: EditorPreviewService,
+  auth?: Pick<AuthSessionService, "authorize">
+) {
   return async (request: IncomingMessage, response: ServerResponse, next: () => void): Promise<void> => {
     const url = new URL(request.url ?? "/", "http://localhost");
     if (url.pathname !== "/api/editor-preview") return next();
+    if (request.method !== "POST") return next();
+    let release = (): void => undefined;
+    let removeDisconnectListeners = (): void => undefined;
     try {
-      if (request.method !== "POST") {
-        sendJson(response, 405, { error: "Editor preview requires POST." });
-        return;
-      }
-      const result = await service.render(await jsonBody(request) as EditorPreviewRequest);
+      if (auth === undefined) throw { status: 401, code: "UNAUTHENTICATED" };
+      const principal = await auth.authorize(request, response, "project:preview", true);
+      const controller = new AbortController();
+      release = service.track(controller);
+      const abort = (): void => controller.abort();
+      const close = (): void => { if (!response.writableEnded) abort(); };
+      request.once("aborted", abort);
+      response.once("close", close);
+      removeDisconnectListeners = () => {
+        request.off("aborted", abort);
+        response.off("close", close);
+      };
+      const body = await jsonBody(request, controller.signal);
+      const result = await service.render(principal, body, controller.signal);
+      controller.signal.throwIfAborted();
       response.statusCode = 200;
       response.setHeader("content-type", "application/octet-stream");
       response.setHeader("content-length", String(result.pixels.byteLength));
+      response.setHeader("cache-control", "no-store");
+      response.setHeader("x-content-type-options", "nosniff");
       response.setHeader("x-cmfx-width", String(result.width));
       response.setHeader("x-cmfx-height", String(result.height));
       response.setHeader("x-cmfx-time", String(result.time));
       response.setHeader("x-cmfx-quality", result.quality);
       response.setHeader("x-cmfx-time-contract", "1.1.0");
-      response.setHeader("x-cmfx-renderer", "g5-createProjectFrameProducer");
-      response.setHeader("x-cmfx-cpu-ms", result.cpuMs.toFixed(3));
+      response.setHeader("x-cmfx-renderer", "createProjectFrameProducer");
       response.end(Buffer.from(result.pixels));
-    } catch (cause) {
-      sendJson(response, 400, { error: cause instanceof Error ? cause.message : String(cause) });
+    } catch (error) {
+      if (!response.headersSent && !response.destroyed) {
+        const details = errorDetails(error);
+        sendSafeProjectError(response, details.status, details.code);
+      }
+    } finally {
+      removeDisconnectListeners();
+      release();
     }
   };
 }

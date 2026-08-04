@@ -10,6 +10,7 @@ import {
   AAC_PCM_SAMPLE_RATE,
   AAC_WAV_HEADER_ALLOWANCE_BYTES,
   OwnedTaskStore,
+  OwnerMediaResolverError,
   TenantMediaStore,
   boundedAacTranscodeArgs,
   decodeAudioPreview,
@@ -371,13 +372,19 @@ describe("Stage 7R media ingress", () => {
       sourcePath: avifPath,
       claimedMime: "image/avif"
     });
-    await expect(store.resolve(tenantB, importedA.asset.id)).rejects.toThrow("access denied");
+    const denied = await store.resolve(tenantB, importedA.asset.id).catch((error: unknown) => error);
+    expect(denied).toBeInstanceOf(OwnerMediaResolverError);
+    expect(denied).toMatchObject({
+      code: "OWNER_NOT_FOUND",
+      message: "Asset not found or access denied."
+    });
     expect(store.list(tenantB)).toEqual([]);
     const importedB = await store.import(tenantB, {
       sourcePath: avifPath,
       claimedMime: "image/avif"
     });
     expect(importedB.asset.id).toBe(importedA.asset.id);
+    expect(importedB.storedPath).not.toBe(importedA.storedPath);
     await expect(store.resolve(tenantB, importedB.asset.id)).resolves.toMatchObject({
       asset: { id: importedA.asset.id }
     });
@@ -391,7 +398,7 @@ describe("Stage 7R media ingress", () => {
       asset: { id: importedA.asset.id }
     });
     await expect(restarted.resolve({ tenantId: "tenant-c", userId: "owner" }, importedA.asset.id))
-      .rejects.toThrow("access denied");
+      .rejects.toMatchObject({ code: "OWNER_NOT_FOUND", message: "Asset not found or access denied." });
   }, 60_000);
 });
 

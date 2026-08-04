@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { validateContract } from "@codemotion/schema";
 import { makeTextExtrudeRasterFixture } from "@codemotion/effects-3d";
+import { createProjectFrameProducer } from "@codemotion/exporter";
 import { resolveLayerTimeSample, resolveProjectTimeSample } from "@codemotion/timeline";
 import { P0_EDITOR_EFFECTS, createP0EffectInstance, effectParameterFields } from "../src/effect-catalog.js";
 import { createStarterProject, mainLayers } from "../src/model.js";
-import { EditorPreviewService } from "../src/preview-task-service.js";
 import { EditorStore } from "../src/store.js";
 
 function isolateLayer(project: ReturnType<typeof createStarterProject>, layerId: string): void {
@@ -29,6 +29,23 @@ function realShapeSource(width: number, height: number) {
       strokeWidth: 0
     }]
   };
+}
+
+async function renderProject(project: ReturnType<typeof createStarterProject>, quality: "preview" | "final") {
+  for (const composition of project.compositions) {
+    for (const layer of composition.layers) {
+      for (const effect of layer.effects) effect.renderQuality = quality;
+    }
+  }
+  const pixels = await createProjectFrameProducer(project, new Map(), { timeContractVersion: "1.1.0" })({
+    frame: 30,
+    time: 1,
+    deltaTime: 1 / 30,
+    fps: 30,
+    width: 64,
+    height: 36
+  });
+  return { pixels, time: 1, quality };
 }
 
 describe("Stage 5R editor integration", () => {
@@ -92,9 +109,8 @@ describe("Stage 5R editor integration", () => {
       rasterSource: realShapeSource(64, 36)
     } as unknown as typeof layer.properties;
     layer.effects = [createP0EffectInstance(P0_EDITOR_EFFECTS[0]!.effectId, 1, "effect.shared.motion")];
-    const service = new EditorPreviewService();
-    const preview = await service.render({ project, time: 1, width: 64, height: 36, quality: "preview" });
-    const final = await service.render({ project, time: 1, width: 64, height: 36, quality: "final" });
+    const preview = await renderProject(project, "preview");
+    const final = await renderProject(project, "final");
     expect(preview.pixels).toHaveLength(64 * 36 * 4);
     expect(preview.pixels.some((byte) => byte !== 0)).toBe(true);
     expect(final.pixels.some((byte) => byte !== 0)).toBe(true);
@@ -118,7 +134,7 @@ describe("Stage 5R editor integration", () => {
       rasterSource: fixture.rasterInput.source
     } as unknown as typeof layer.properties;
     layer.effects = [createP0EffectInstance("fx.text.textExtrude3D", 1, "effect.shared.t08")];
-    const result = await new EditorPreviewService().render({ project, time: 1, width: 64, height: 36 });
+    const result = await renderProject(project, "preview");
     expect(result.pixels.some((byte) => byte !== 0)).toBe(true);
   });
 });

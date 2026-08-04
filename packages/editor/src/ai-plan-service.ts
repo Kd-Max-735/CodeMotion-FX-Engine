@@ -11,6 +11,7 @@ import {
   VolcengineArkProvider,
   parseAiPlanningInputV1,
   planAnimation,
+  serializeAiPlanCompletedResultV2,
   type AiAssetReference,
   type AiPlanningInputV1,
   type AiTaskPrincipal,
@@ -121,15 +122,23 @@ export class AiPlanService {
 
   get configured(): boolean { return this.provider !== undefined; }
 
+  private browserView(task: InternalTask): AiPlanTaskView {
+    const view = structuredClone(task.view);
+    if (view.status === "completed" && view.result !== undefined) {
+      return { ...view, result: serializeAiPlanCompletedResultV2(view.result) } as unknown as AiPlanTaskView;
+    }
+    return view;
+  }
+
   list(rawPrincipal: AiSessionPrincipal): AiPlanTaskView[] {
     const owner = ownerOf(authorizedPrincipal(rawPrincipal));
-    return this.tasks.list(owner).map(({ value }) => structuredClone(value.view))
+    return this.tasks.list(owner).map(({ value }) => this.browserView(value))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   get(rawPrincipal: AiSessionPrincipal, id: string): AiPlanTaskView {
     const owner = ownerOf(authorizedPrincipal(rawPrincipal));
-    return structuredClone(this.tasks.get(owner, id).value.view);
+    return this.browserView(this.tasks.get(owner, id).value);
   }
 
   async create(rawPrincipal: AiSessionPrincipal, rawInput: unknown): Promise<AiPlanTaskView> {
@@ -173,7 +182,7 @@ export class AiPlanService {
       };
       this.tasks.put(ownerOf(session), id, task);
       this.start(task);
-      return structuredClone(task.view);
+      return this.browserView(task);
     } finally {
       this.pendingCreations.delete(controller);
       settleCreation();
@@ -195,7 +204,7 @@ export class AiPlanService {
     if (task.view.status !== "running") throw new Error("只有运行中的任务可以取消。");
     task.view = { ...task.view, status: "cancelling", updatedAt: new Date().toISOString() };
     task.controller.abort(new ProviderError("cancelled", "Provider request was cancelled."));
-    return structuredClone(task.view);
+    return this.browserView(task);
   }
 
   private async resolveResources(
@@ -420,8 +429,20 @@ export function createAiPlanApi(
       const code = error instanceof AiAuthorizationError
         ? error.status === 401 ? "UNAUTHENTICATED" : "FORBIDDEN"
         : error instanceof AuthHttpError ? error.code : "AI_PLAN_REQUEST_REJECTED";
+      const messages: Readonly<Record<string, string>> = Object.freeze({
+        UNAUTHENTICATED: "Authentication is required.",
+        FORBIDDEN: "The required permission is missing.",
+        REQUEST_ORIGIN_REJECTED: "The request origin was rejected.",
+        NOT_FOUND: "The requested object was not found.",
+        AI_PLAN_REQUEST_REJECTED: "The AI planning request was rejected."
+      });
       sendJson(response, status, {
-        error: { code, message: error instanceof Error ? error.message : "AI planning request failed.", retryable: false }
+        error: {
+          code,
+          message: messages[code] ?? "The AI planning request was rejected.",
+          retryable: false,
+          requestId: `req_${randomUUID()}`
+        }
       });
     }
   };

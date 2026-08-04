@@ -328,7 +328,7 @@ describe("AI plan server authorization and isolation", () => {
     expect(provider.requests).toEqual([]);
   });
 
-  it("scopes list, get, cancel, Storyboard, DSL, preview, and trace to tenant plus user", async () => {
+  it("scopes safe completed results to tenant plus user without raw DSL or trace", async () => {
     const provider = new RecordingProvider();
     const service = new AiPlanService(provider, new OwnedAssetResolver());
     const owner = principal("tenant-a", "user-a");
@@ -338,11 +338,14 @@ describe("AI plan server authorization and isolation", () => {
     const completed = await waitForTerminal(service, owner, created.id);
     expect(completed.status).toBe("completed");
     expect(completed.result).toMatchObject({
+      contract: "ai-plan-result/v2",
       storyboard: expect.any(Object),
-      dsl: expect.any(Object),
-      preview: expect.any(Object),
-      trace: expect.any(Object)
+      editableProject: expect.objectContaining({ contract: "browser-project/v1" }),
+      preview: expect.objectContaining({ width: 160, height: 90, quality: "draft" })
     });
+    expect(completed.result).not.toHaveProperty("dsl");
+    expect(completed.result).not.toHaveProperty("trace");
+    expect(completed.result).not.toHaveProperty("understanding");
 
     expect(service.list(owner).map((task) => task.id)).toEqual([created.id]);
     expect(service.list(otherTenant)).toEqual([]);

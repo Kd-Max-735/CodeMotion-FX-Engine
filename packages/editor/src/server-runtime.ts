@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { TenantMediaStore, type MediaLimits } from "@codemotion/exporter";
 import {
   AuthSessionService,
@@ -10,7 +10,9 @@ import {
   type ProductionAuthEnvironment
 } from "./auth-session-service.js";
 import { AiPlanService, createAiPlanApi, createProductionAiPlanService } from "./ai-plan-service.js";
+import { ExportTaskService, createExportApi } from "./export-task-service.js";
 import { MediaAssetService } from "./media-asset-service.js";
+import { EditorPreviewService, createEditorPreviewApi, sendSafeProjectError } from "./preview-task-service.js";
 
 type Middleware = (request: IncomingMessage, response: ServerResponse, next: () => void) => Promise<void>;
 
@@ -21,6 +23,7 @@ export interface ServerRuntimeOptions {
   readonly publicOrigin?: string;
   readonly mediaRoot: string;
   readonly uploadTempRoot: string;
+  readonly exportRoot?: string;
   readonly env?: ProductionAuthEnvironment;
   readonly mediaLimits?: Partial<MediaLimits>;
   readonly fetch?: typeof fetch;
@@ -35,6 +38,8 @@ export interface ServerRuntime {
   readonly mediaStore: TenantMediaStore;
   readonly mediaAssets: MediaAssetService;
   readonly aiPlans: AiPlanService;
+  readonly previews: EditorPreviewService;
+  readonly exports: ExportTaskService;
   readonly handle: Middleware;
   close(): Promise<void>;
   dispose(): Promise<void>;
@@ -44,6 +49,7 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
   const env = options.env ?? process.env;
   const mediaRoot = resolve(options.mediaRoot);
   const uploadTempRoot = resolve(options.uploadTempRoot);
+  const exportRoot = resolve(options.exportRoot ?? join(mediaRoot, "..", "exports"));
   const authOptions = options.mode === "development"
     ? developmentAuthOptionsFromEnvironment(env, {
       configureServer: options.configureServer === true,
@@ -70,6 +76,8 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
     .update(authOptions.sessionSecret).update(randomBytes(32)).digest();
   const mediaAssets = new MediaAssetService({ store: mediaStore, auth, uploadTempRoot, cursorSecret });
   const aiPlans = options.createAiPlans?.(mediaStore) ?? createProductionAiPlanService(mediaStore);
+  const previews = new EditorPreviewService(mediaStore);
+  const exports = await new ExportTaskService({ resolver: mediaStore, outputRoot: exportRoot }).initialize();
   const handlers: Middleware[] = [
     auth.handle(),
     mediaAssets.handle(),
@@ -77,12 +85,21 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
       aiPlans,
       (request, response) => auth.resolveSession(request, response),
       (request, response) => auth.authorize(request, response, "ai:plan", true).then(() => undefined)
-    )
+    ),
+    createEditorPreviewApi(previews, auth),
+    createExportApi(exports, auth)
   ];
   let closing = false;
   let closePromise: Promise<void> | undefined;
   const handle: Middleware = async (request, response, next) => {
-    if (closing) { next(); return; }
+    if (closing) {
+      if ((request.url ?? "").startsWith("/api/")) {
+        sendSafeProjectError(response, 503, "SERVICE_CLOSING");
+        return;
+      }
+      next();
+      return;
+    }
     let index = 0;
     const dispatch = async (): Promise<void> => {
       const handler = handlers[index++];
@@ -96,8 +113,8 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
   const close = (): Promise<void> => {
     if (closePromise !== undefined) return closePromise;
     closing = true;
-    closePromise = Promise.all([mediaAssets.close(), aiPlans.close()]).then(() => undefined);
+    closePromise = Promise.all([mediaAssets.close(), aiPlans.close(), previews.close(), exports.close()]).then(() => undefined);
     return closePromise;
   };
-  return { auth, mediaStore, mediaAssets, aiPlans, handle, close, dispose: close };
+  return { auth, mediaStore, mediaAssets, aiPlans, previews, exports, handle, close, dispose: close };
 }

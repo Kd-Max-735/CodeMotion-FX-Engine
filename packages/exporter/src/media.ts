@@ -68,6 +68,18 @@ export interface VerifiedStoredMedia extends ImportedMedia {
   readonly trustedBytes: number;
 }
 
+export type OwnerMediaResolverErrorCodeV1 =
+  | "OWNER_NOT_FOUND"
+  | "STORAGE_UNAVAILABLE"
+  | "INTEGRITY_FAILED"
+  | "ASSET_CHANGED";
+
+export class OwnerMediaResolverError extends Error {
+  constructor(readonly code: OwnerMediaResolverErrorCodeV1) {
+    super(code === "OWNER_NOT_FOUND" ? "Asset not found or access denied." : "Owner media resolution failed.");
+  }
+}
+
 export interface StoredMediaVerificationOptions {
   readonly asset: AssetDefinition;
   readonly storageDirectory: string;
@@ -913,8 +925,9 @@ function ownedAssetKey(owner: OwnerContext, assetId: string): string {
   return JSON.stringify([owner.tenantId, owner.userId, assetId]);
 }
 
-function tenantStorageSegment(tenantId: string): string {
-  return createHash("sha256").update("codemotion-tenant\0").update(tenantId).digest("hex");
+function ownerStorageSegment(owner: OwnerContext): string {
+  return createHash("sha256").update("codemotion-owner\0")
+    .update(owner.tenantId).update("\0").update(owner.userId).digest("hex");
 }
 
 export class TenantMediaStore {
@@ -924,6 +937,7 @@ export class TenantMediaStore {
   private readonly hydrated: Promise<void>;
   private mutation: Promise<void> = Promise.resolve();
   private hydrationComplete = false;
+  private hydrationAvailable = true;
 
   constructor(private readonly options: TenantMediaStoreOptions) {
     this.storageRoot = resolve(options.storageRoot);
@@ -979,14 +993,29 @@ export class TenantMediaStore {
 
   async resolve(owner: OwnerContext, assetId: string, signal?: AbortSignal): Promise<VerifiedStoredMedia> {
     assertOwnerContext(owner);
+    signal?.throwIfAborted();
     await this.hydrated;
-    const record = this.records.get(ownedAssetKey(owner, assetId));
-    if (record === undefined) throw new Error("Asset not found or access denied.");
-    return verifyStoredMediaAsset({
-      asset: record.imported.asset,
-      storageDirectory: this.ownerStorageDirectory(owner),
-      ...(signal === undefined ? {} : { signal })
-    });
+    if (!this.hydrationAvailable) throw new OwnerMediaResolverError("STORAGE_UNAVAILABLE");
+    const key = ownedAssetKey(owner, assetId);
+    const record = this.records.get(key);
+    if (record === undefined) throw new OwnerMediaResolverError("OWNER_NOT_FOUND");
+    let verified: VerifiedStoredMedia;
+    try {
+      verified = await verifyStoredMediaAsset({
+        asset: record.imported.asset,
+        storageDirectory: this.ownerStorageDirectory(owner),
+        ...(signal === undefined ? {} : { signal })
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (error instanceof OwnerMediaResolverError) throw error;
+      throw new OwnerMediaResolverError("INTEGRITY_FAILED");
+    }
+    signal?.throwIfAborted();
+    if (this.records.get(key) !== record || verified.asset.id !== assetId) {
+      throw new OwnerMediaResolverError("ASSET_CHANGED");
+    }
+    return verified;
   }
 
   list(owner: OwnerContext): readonly AssetDefinition[] {
@@ -1006,7 +1035,7 @@ export class TenantMediaStore {
   }
 
   private ownerStorageDirectory(owner: OwnerContext): string {
-    return join(this.storageRoot, tenantStorageSegment(owner.tenantId));
+    return join(this.storageRoot, ownerStorageSegment(owner));
   }
 
   private assertHydrated(): void {
@@ -1038,10 +1067,12 @@ export class TenantMediaStore {
       parsed = JSON.parse(await readFile(this.indexPath, "utf8"));
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code === "ENOENT") return;
+      this.hydrationAvailable = false;
       this.options.audit?.({ event: "media-index-load-failed" });
       return;
     }
     if (!isPersistedIndexEnvelope(parsed)) {
+      this.hydrationAvailable = false;
       this.options.audit?.({ event: "media-index-load-failed" });
       return;
     }

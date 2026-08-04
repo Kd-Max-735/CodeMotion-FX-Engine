@@ -1,8 +1,12 @@
 import { createHash, randomBytes as nodeRandomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  APPLICATION_SCOPES,
+  isApplicationScope,
+  type ApplicationScope
+} from "@codemotion/schema";
+export type { ApplicationScope } from "@codemotion/schema";
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
-
-export type ApplicationScope = "ai:plan" | "assets:read" | "assets:write";
 
 export interface AuthenticatedSessionPrincipal {
   readonly tenantId: string;
@@ -86,7 +90,7 @@ export class AuthHttpError extends Error {
   }
 }
 
-const SCOPES = new Set<ApplicationScope>(["ai:plan", "assets:read", "assets:write"]);
+const SCOPES: ReadonlySet<ApplicationScope> = new Set(APPLICATION_SCOPES);
 const DEV_ENVIRONMENT_NAMES = [
   "CODEMOTION_DEV_AUTH", "CODEMOTION_DEV_TENANT_ID", "CODEMOTION_DEV_USER_ID", "CODEMOTION_DEV_SCOPES"
 ] as const;
@@ -135,7 +139,7 @@ function validIdentifier(value: unknown): value is string {
 
 function parseScopes(value: unknown): ApplicationScope[] {
   if (typeof value !== "string") return [];
-  return [...new Set(value.split(/\s+/).filter((scope): scope is ApplicationScope => SCOPES.has(scope as ApplicationScope)))];
+  return [...new Set(value.split(/\s+/).filter(isApplicationScope))];
 }
 
 function parseCookies(request: IncomingMessage): Map<string, string> {
@@ -333,6 +337,17 @@ export class AuthSessionService {
     if (!sameDigest(session.csrfDigest, cookieDigest) || !sameDigest(session.csrfDigest, headerDigest)) {
       throw new AuthHttpError(403, "REQUEST_ORIGIN_REJECTED");
     }
+  }
+
+  verifySameOriginDownload(request: IncomingMessage): void {
+    const referer = request.headers.referer;
+    if (request.headers["sec-fetch-site"] !== "same-origin" || typeof referer !== "string") {
+      throw new AuthHttpError(403, "REQUEST_ORIGIN_REJECTED");
+    }
+    let refererOrigin: string;
+    try { refererOrigin = new URL(referer).origin; }
+    catch { throw new AuthHttpError(403, "REQUEST_ORIGIN_REJECTED"); }
+    if (refererOrigin !== this.origin.origin) throw new AuthHttpError(403, "REQUEST_ORIGIN_REJECTED");
   }
 
   handle() {
