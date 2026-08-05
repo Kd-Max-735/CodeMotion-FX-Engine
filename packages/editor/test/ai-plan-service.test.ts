@@ -219,6 +219,30 @@ async function apiPost(
   }
 }
 
+async function apiGet(
+  service: AiPlanService,
+  path: string,
+  resolver: NonNullable<Parameters<typeof createAiPlanApi>[1]>
+): Promise<Response> {
+  const handler = createAiPlanApi(service, resolver);
+  const server = createServer((request, response) => {
+    void handler(request, response, () => {
+      response.statusCode = 404;
+      response.end();
+    });
+  });
+  await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  try {
+    const { port } = server.address() as AddressInfo;
+    return await fetch(`http://127.0.0.1:${port}${path}`);
+  } finally {
+    await new Promise<void>((resolveClose, rejectClose) => server.close((error) => {
+      if (error) rejectClose(error);
+      else resolveClose();
+    }));
+  }
+}
+
 describe("AI plan server authorization and isolation", () => {
   it("rejects missing identity, resolver failure, and missing scope before body, assets, or provider", async () => {
     const provider = new RecordingProvider();
@@ -328,6 +352,22 @@ describe("AI plan server authorization and isolation", () => {
     expect(provider.requests).toEqual([]);
   });
 
+  it("keeps Provider response bodies and validation details out of browser task errors", async () => {
+    const provider = new SavedProgressProvider();
+    const service = new AiPlanService(provider, new OwnedAssetResolver());
+    const owner = principal();
+    const created = await service.create(owner, input());
+    const secret = "RAW_MODEL_BODY_AND_AJV_DETAILS";
+    provider.fail(new ProviderError("provider_response", `${secret}: /storyboard/layers must match schema`));
+    const failed = await waitForTerminal(service, owner, created.id);
+    expect(failed).toMatchObject({
+      status: "failed",
+      error: { code: "provider_response", retryable: false }
+    });
+    expect(JSON.stringify(failed)).not.toContain(secret);
+    expect(JSON.stringify(failed)).not.toContain("/storyboard/layers");
+  });
+
   it("scopes safe completed results to tenant plus user without raw DSL or trace", async () => {
     const provider = new RecordingProvider();
     const service = new AiPlanService(provider, new OwnedAssetResolver());
@@ -346,6 +386,15 @@ describe("AI plan server authorization and isolation", () => {
     expect(completed.result).not.toHaveProperty("dsl");
     expect(completed.result).not.toHaveProperty("trace");
     expect(completed.result).not.toHaveProperty("understanding");
+
+    const response = await apiGet(service, `/api/ai-plans/${created.id}`, () => owner);
+    const json = await response.json() as { task: Record<string, unknown> };
+    expect(response.status).toBe(200);
+    expect(Object.keys(json.task).sort()).toEqual([
+      "createdAt", "events", "id", "modalities", "phase", "result", "status", "updatedAt"
+    ]);
+    expect(JSON.stringify(json)).not.toMatch(/"(?:dsl|understanding|trace|provider|principal|resources|input)"/i);
+    expect(json.task.result).toMatchObject({ contract: "ai-plan-result/v2" });
 
     expect(service.list(owner).map((task) => task.id)).toEqual([created.id]);
     expect(service.list(otherTenant)).toEqual([]);

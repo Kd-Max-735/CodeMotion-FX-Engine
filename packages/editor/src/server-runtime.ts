@@ -71,13 +71,41 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
     ...(options.mediaLimits === undefined ? {} : { limits: options.mediaLimits }),
     ...(options.mediaAudit === undefined ? {} : { audit: options.mediaAudit })
   });
-  await Promise.all([auth.initialize(), mediaStore.initialize()]);
+  const initialization = await Promise.allSettled([auth.initialize(), mediaStore.initialize()]);
+  const initializationFailures = initialization
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason);
+  if (initializationFailures.length === 1) throw initializationFailures[0];
+  if (initializationFailures.length > 1) {
+    throw new AggregateError(initializationFailures, "Server runtime foundations failed to initialize.");
+  }
   const cursorSecret = createHash("sha256").update("codemotion-media-cursor-secret-v1\0")
     .update(authOptions.sessionSecret).update(randomBytes(32)).digest();
-  const mediaAssets = new MediaAssetService({ store: mediaStore, auth, uploadTempRoot, cursorSecret });
-  const aiPlans = options.createAiPlans?.(mediaStore) ?? createProductionAiPlanService(mediaStore);
-  const previews = new EditorPreviewService(mediaStore);
-  const exports = await new ExportTaskService({ resolver: mediaStore, outputRoot: exportRoot }).initialize();
+  let mediaAssets: MediaAssetService | undefined;
+  let aiPlans: AiPlanService | undefined;
+  let previews: EditorPreviewService | undefined;
+  let exports: ExportTaskService | undefined;
+  try {
+    mediaAssets = new MediaAssetService({ store: mediaStore, auth, uploadTempRoot, cursorSecret });
+    aiPlans = options.createAiPlans?.(mediaStore) ?? createProductionAiPlanService(mediaStore);
+    previews = new EditorPreviewService(mediaStore);
+    exports = new ExportTaskService({ resolver: mediaStore, outputRoot: exportRoot });
+    await exports.initialize();
+  } catch (error) {
+    const cleanup = await Promise.allSettled([
+      mediaAssets?.close(),
+      aiPlans?.close(),
+      previews?.close(),
+      exports?.close()
+    ]);
+    const cleanupFailures = cleanup
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError([error, ...cleanupFailures], "Server runtime initialization and cleanup failed.");
+    }
+    throw error;
+  }
   const handlers: Middleware[] = [
     auth.handle(),
     mediaAssets.handle(),

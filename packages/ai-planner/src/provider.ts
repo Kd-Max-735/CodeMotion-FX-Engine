@@ -179,6 +179,16 @@ export type ProviderErrorCode =
   | "provider_response"
   | "security";
 
+export type ProviderFailureReason =
+  | "NO_OUTPUT"
+  | "INVALID_JSON"
+  | "SCHEMA_INVALID"
+  | "PLANNING_CONSTRAINT"
+  | "SHOT_RANGE"
+  | "ASSET_BINDING"
+  | "RESPONSE_ENVELOPE"
+  | "MODEL_MISMATCH";
+
 export class ProviderError extends Error {
   readonly code: ProviderErrorCode;
   readonly retryable: boolean;
@@ -203,6 +213,12 @@ export interface ProviderAuditRecord {
   readonly ownerFingerprint: string;
   readonly taskFingerprint: string;
   readonly errorCode?: ProviderErrorCode;
+  readonly reason?: ProviderFailureReason;
+  readonly attempt?: 1 | 2;
+  readonly safeCounts?: Readonly<{
+    outputCharacters?: number;
+    validationErrors?: number;
+  }>;
 }
 
 export type ProviderAuditSink = (record: ProviderAuditRecord) => void;

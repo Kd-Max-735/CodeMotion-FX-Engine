@@ -1,4 +1,6 @@
 import type { MotionProject } from "@codemotion/core";
+import { P0_BROWSER_PROJECT_AUTHORITY_V1 } from "@codemotion/effects-2d";
+import type { BrowserProjectEnvelopeV1, EditorPreviewRequestV1 } from "@codemotion/schema";
 import type { FrameContext, TextureHandle } from "@codemotion/renderer-api";
 import {
   WEBGL_PIPELINE_VALIDATION_EFFECT,
@@ -7,7 +9,7 @@ import {
 } from "@codemotion/renderer-webgl";
 import { evaluateNumber, resolveLayerTime, secondsToFrame } from "@codemotion/timeline";
 import { isLabPipelineEffect } from "./lab-effect.js";
-import { preparePreviewProject } from "./preview-raster.js";
+import { authenticatedPost } from "./ai-plan-client.js";
 
 export interface PreviewStats {
   backend: "WebGL2" | "G5 Shared" | "Unavailable";
@@ -22,12 +24,6 @@ export interface PreviewStats {
   error?: string;
 }
 
-function jsonReplacer(_key: string, value: unknown): unknown {
-  return ArrayBuffer.isView(value)
-    ? Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
-    : value;
-}
-
 export class ProjectPreviewRenderer {
   private controller: AbortController | undefined;
 
@@ -36,25 +32,45 @@ export class ProjectPreviewRenderer {
     this.controller = undefined;
   }
 
-  async render(project: MotionProject, time: number, target: HTMLCanvasElement): Promise<PreviewStats> {
+  async render(editableProject: BrowserProjectEnvelopeV1, time: number, target: HTMLCanvasElement): Promise<PreviewStats> {
     this.controller?.abort();
     const controller = new AbortController();
     this.controller = controller;
     const started = performance.now();
+    const project = editableProject.project;
     const aspect = project.width / project.height;
     const width = Math.min(240, project.width);
     const height = Math.max(1, Math.round(width / aspect));
     try {
-      const previewProject = await preparePreviewProject(project, width, height, time);
+      const request: EditorPreviewRequestV1 = {
+        contract: "preview-request/v1",
+        editableProject,
+        frame: { time, width, height, quality: "preview" }
+      };
+      const checked = P0_BROWSER_PROJECT_AUTHORITY_V1.validateEditorPreviewRequest(request);
+      if (!checked.valid) throw new Error(checked.error.message);
       const response = await fetch("/api/editor-preview", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ project: previewProject, time, width, height, quality: "preview" }, jsonReplacer),
-        signal: controller.signal
+        ...authenticatedPost(JSON.stringify(checked.value), "application/json", controller.signal)
       });
       if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as { error?: string };
-        throw new Error(body.error ?? `Preview failed with HTTP ${response.status}.`);
+        if (response.status === 401) {
+          window.dispatchEvent(new Event("cmfx:unauthenticated"));
+          throw new Error("登录已失效，请重新登录。");
+        }
+        if (response.status === 403) throw new Error("当前会话缺少预览权限。");
+        if ([404, 409, 422, 429, 503].includes(response.status)) throw new Error("预览暂时不可用，请检查工程或稍后重试。");
+        throw new Error("预览请求失败。");
+      }
+      if ((response.headers.get("content-type") ?? "").toLowerCase() !== "application/octet-stream"
+        || response.headers.get("x-content-type-options")?.toLowerCase() !== "nosniff"
+        || !response.headers.get("cache-control")?.toLowerCase().includes("no-store")
+        || response.headers.get("x-cmfx-width") !== String(width)
+        || response.headers.get("x-cmfx-height") !== String(height)
+        || response.headers.get("x-cmfx-quality") !== "preview"
+        || response.headers.get("x-cmfx-time-contract") !== "1.1.0"
+        || !Number.isFinite(Number(response.headers.get("x-cmfx-time")))
+        || !response.headers.get("x-cmfx-renderer")) {
+        throw new Error("预览响应未通过安全校验。");
       }
       const pixels = new Uint8ClampedArray(await response.arrayBuffer());
       if (pixels.length !== width * height * 4) throw new Error("Preview returned an invalid RGBA frame.");
@@ -66,8 +82,8 @@ export class ProjectPreviewRenderer {
       return {
         backend: "G5 Shared",
         cpuMs: Number(response.headers.get("x-cmfx-cpu-ms") ?? performance.now() - started),
-        drawCalls: previewProject.compositions[0]?.layers.filter((layer) => layer.visible).length ?? 0,
-        textures: previewProject.compositions[0]?.layers.filter((layer) => layer.visible).length ?? 0,
+        drawCalls: project.compositions[0]?.layers.filter((layer) => layer.visible).length ?? 0,
+        textures: project.compositions[0]?.layers.filter((layer) => layer.visible).length ?? 0,
         width,
         height,
         quality: "preview",

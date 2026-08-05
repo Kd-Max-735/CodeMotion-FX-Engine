@@ -19,10 +19,11 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AI_CANVAS_RATIOS, aiPlanApi, buildAiPlanningInput, type AiPlanTaskView } from "./ai-plan-client.js";
+import { AI_CANVAS_RATIOS, aiPlanApi, buildAiPlanningInput, type BrowserAiPlanTaskView } from "./ai-plan-client.js";
 import {
   mediaAssetApi,
   sessionApi,
+  BrowserApiError,
   type AiAssetPurpose,
   type BrowserAssetSummaryV1,
   type BrowserMediaKind,
@@ -30,7 +31,7 @@ import {
 } from "./media-asset-client.js";
 import type { EditorStore } from "./store.js";
 
-const phaseLabels: Record<AiPlanTaskView["phase"], string> = {
+const phaseLabels: Record<BrowserAiPlanTaskView["phase"], string> = {
   accepted: "服务端已接受",
   validate: "复核素材完整性",
   upload: "上传至 Provider",
@@ -68,9 +69,14 @@ export function AiPlanner({ store }: { store: EditorStore }) {
   const project = snapshot.document.project;
   const fileInput = useRef<HTMLInputElement>(null);
   const uploadController = useRef<AbortController | undefined>(undefined);
+  const assetListController = useRef<AbortController | undefined>(undefined);
+  const actionControllers = useRef(new Set<AbortController>());
   const [session, setSession] = useState<BrowserSessionV1>();
   const [sessionLoading, setSessionLoading] = useState(true);
   const [devCode, setDevCode] = useState("");
+  const [devBindingStarted, setDevBindingStarted] = useState(() => sessionStorage.getItem("cmfx.dev.binding") === "1");
+  const [devSubmitting, setDevSubmitting] = useState(false);
+  const [devFeedback, setDevFeedback] = useState<string>();
   const [assets, setAssets] = useState<BrowserAssetSummaryV1[]>([]);
   const [assetCursor, setAssetCursor] = useState<string | null>(null);
   const [assetKind, setAssetKind] = useState<BrowserMediaKind | "all">("all");
@@ -90,7 +96,7 @@ export function AiPlanner({ store }: { store: EditorStore }) {
   const [requiredText, setRequiredText] = useState("");
   const [forbiddenContent, setForbiddenContent] = useState("");
   const [colors, setColors] = useState(["#ff5a3c"]);
-  const [tasks, setTasks] = useState<AiPlanTaskView[]>([]);
+  const [tasks, setTasks] = useState<BrowserAiPlanTaskView[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [configured, setConfigured] = useState<boolean>();
   const [message, setMessage] = useState<string>();
@@ -99,10 +105,11 @@ export function AiPlanner({ store }: { store: EditorStore }) {
   const scopes = new Set(session?.principal.scopes ?? []);
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? tasks[0];
 
-  const readSession = useCallback(async () => {
+  const readSession = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     setSessionLoading(true);
     try {
-      const next = await sessionApi.read();
+      const next = await sessionApi.read(signal);
+      if (signal?.aborted) return false;
       setSession((current) => {
         if (identity(current) !== identity(next)) {
           setAssets([]);
@@ -113,13 +120,17 @@ export function AiPlanner({ store }: { store: EditorStore }) {
         return next;
       });
       setMessage(undefined);
-    } catch {
+      return true;
+    } catch (error) {
+      if (signal?.aborted || error instanceof DOMException && error.name === "AbortError") return false;
       setSession(undefined);
       setAssets([]);
       setSelected({});
       setTasks([]);
       setConfigured(undefined);
-    } finally { setSessionLoading(false); }
+      if (error instanceof BrowserApiError && error.status !== 401) setMessage(error.message);
+      return false;
+    } finally { if (!signal?.aborted) setSessionLoading(false); }
   }, []);
 
   const handleRequestError = useCallback((error: unknown, fallback: string) => {
@@ -129,38 +140,80 @@ export function AiPlanner({ store }: { store: EditorStore }) {
 
   const loadAssets = useCallback(async (append = false) => {
     if (!session || !session.principal.scopes.includes("assets:read")) return;
+    assetListController.current?.abort();
+    const controller = new AbortController();
+    assetListController.current = controller;
     setAssetsLoading(true);
     try {
       const page = await mediaAssetApi.list({
         limit: 50,
         ...(append && assetCursor ? { cursor: assetCursor } : {}),
         ...(assetKind === "all" ? {} : { kind: assetKind })
-      });
+      }, controller.signal);
+      if (controller.signal.aborted) return;
       setAssets((current) => append ? [...current, ...page.items] : page.items);
       setAssetCursor(page.nextCursor);
       setMessage(undefined);
-    } catch (error) { handleRequestError(error, "素材加载失败。"); }
-    finally { setAssetsLoading(false); }
+    } catch (error) {
+      if (!controller.signal.aborted) handleRequestError(error, "素材加载失败。");
+    } finally {
+      if (assetListController.current === controller) {
+        assetListController.current = undefined;
+        setAssetsLoading(false);
+      }
+    }
   }, [sessionKey, assetCursor, assetKind, handleRequestError]);
 
-  const loadTasks = useCallback(async () => {
-    if (!session || !session.principal.scopes.includes("ai:plan")) return;
+  const loadTasks = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
+    if (!session || !session.principal.scopes.includes("ai:plan")) return false;
     try {
-      const response = await aiPlanApi.list();
+      const response = await aiPlanApi.list(signal);
+      if (signal?.aborted) return false;
       setConfigured(response.configured);
       setTasks(response.tasks);
-    } catch (error) { handleRequestError(error, "任务加载失败。"); }
+      return response.tasks.some((task) => task.status === "running" || task.status === "cancelling");
+    } catch (error) {
+      if (!signal?.aborted && (!(error instanceof DOMException) || error.name !== "AbortError")) {
+        handleRequestError(error, "任务加载失败。");
+      }
+      return false;
+    }
   }, [sessionKey, handleRequestError]);
 
-  useEffect(() => { void readSession(); }, [readSession]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void readSession(controller.signal);
+    return () => controller.abort();
+  }, [readSession]);
   useEffect(() => { if (sessionKey) void loadAssets(false); }, [sessionKey, assetKind]);
   useEffect(() => {
     if (!sessionKey || !scopes.has("ai:plan")) return;
-    void loadTasks();
-    const timer = window.setInterval(() => { void loadTasks(); }, 1_000);
-    return () => window.clearInterval(timer);
+    const controller = new AbortController();
+    void loadTasks(controller.signal);
+    return () => controller.abort();
   }, [sessionKey]);
-  useEffect(() => () => uploadController.current?.abort(), []);
+  const hasActiveTask = tasks.some((task) => task.status === "running" || task.status === "cancelling");
+  useEffect(() => {
+    if (!sessionKey || !scopes.has("ai:plan") || !hasActiveTask) return;
+    const controller = new AbortController();
+    let pending = false;
+    const timer = window.setInterval(() => {
+      if (pending) return;
+      pending = true;
+      void loadTasks(controller.signal).finally(() => { pending = false; });
+    }, 1_000);
+    return () => { window.clearInterval(timer); controller.abort(); };
+  }, [sessionKey, hasActiveTask, loadTasks]);
+  useEffect(() => () => {
+    const upload = uploadController.current;
+    const assetList = assetListController.current;
+    uploadController.current = undefined;
+    assetListController.current = undefined;
+    upload?.abort();
+    assetList?.abort();
+    for (const controller of actionControllers.current) controller.abort();
+    actionControllers.current.clear();
+  }, []);
 
   const applyRatio = (next: keyof typeof AI_CANVAS_RATIOS) => {
     const [nextWidth, nextHeight] = AI_CANVAS_RATIOS[next];
@@ -188,9 +241,11 @@ export function AiPlanner({ store }: { store: EditorStore }) {
         handleRequestError(error, "上传失败。");
       }
     } finally {
-      if (uploadController.current === controller) uploadController.current = undefined;
-      setUploading(false);
-      if (fileInput.current) fileInput.current.value = "";
+      if (uploadController.current === controller) {
+        uploadController.current = undefined;
+        setUploading(false);
+        if (fileInput.current) fileInput.current.value = "";
+      }
     }
   };
 
@@ -229,33 +284,74 @@ export function AiPlanner({ store }: { store: EditorStore }) {
 
   const createTask = async () => {
     if (!canSubmit) return;
+    const controller = new AbortController();
+    actionControllers.current.add(controller);
     setSubmitting(true);
     setMessage(undefined);
     try {
-      const { task } = await aiPlanApi.create(input);
+      const { task } = await aiPlanApi.create(input, controller.signal);
       setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
       setSelectedTaskId(task.id);
-    } catch (error) { handleRequestError(error, "任务创建失败。"); }
-    finally { setSubmitting(false); }
+    } catch (error) {
+      if (!controller.signal.aborted) handleRequestError(error, "任务创建失败。");
+    } finally {
+      actionControllers.current.delete(controller);
+      if (!controller.signal.aborted) setSubmitting(false);
+    }
   };
 
   const cancelTask = async (id: string) => {
+    const controller = new AbortController();
+    actionControllers.current.add(controller);
     try {
-      const { task } = await aiPlanApi.cancel(id);
+      const { task } = await aiPlanApi.cancel(id, controller.signal);
       setTasks((current) => current.map((item) => item.id === id ? task : item));
-    } catch (error) { handleRequestError(error, "取消失败。"); }
+    } catch (error) {
+      if (!controller.signal.aborted) handleRequestError(error, "取消失败。");
+    } finally { actionControllers.current.delete(controller); }
+  };
+
+  const finishDevelopmentLogin = async () => {
+    if (devSubmitting || !devCode) return;
+    if (!devBindingStarted) {
+      setMessage("尚未绑定本地一次性 code，请先完成绑定。");
+      return;
+    }
+    setDevSubmitting(true);
+    setMessage(undefined);
+    const controller = new AbortController();
+    actionControllers.current.add(controller);
+    try {
+      await sessionApi.finishDevelopmentLogin(devCode, controller.signal);
+      setDevFeedback("会话已创建，正在验证。");
+      sessionStorage.removeItem("cmfx.dev.binding");
+      if (!await readSession()) setMessage("服务端会话不可用，请重新登录。");
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const rejected = error instanceof BrowserApiError && error.code === "DEV_LOGIN_REJECTED";
+      if (rejected) {
+        setDevBindingStarted(false);
+        setDevFeedback(undefined);
+        setDevCode("");
+        sessionStorage.removeItem("cmfx.dev.binding");
+      }
+      setMessage(error instanceof Error ? error.message : "开发登录失败，请重新取得 code。");
+    } finally {
+      actionControllers.current.delete(controller);
+      if (!controller.signal.aborted) setDevSubmitting(false);
+    }
   };
 
   if (!session && !sessionLoading) {
     const loopback = location.hostname === "127.0.0.1" || location.hostname === "[::1]" || location.hostname === "::1";
-    return <main className="ai-planner"><header className="ai-header"><button className="icon-button" aria-label="返回工作台" title="返回工作台" onClick={() => store.setView("workbench")}><ArrowLeft size={18} /></button><div><span className="eyebrow">SECURE SESSION</span><h1>AI 动画规划</h1></div></header><section className="ai-auth-panel"><ShieldAlert size={28} /><h2>需要服务端会话</h2><p>认证成功后才能读取素材或创建规划任务。</p><div className="ai-auth-actions"><button className="primary-command" onClick={() => sessionApi.startProductionLogin()}><LogIn size={16} />账号登录</button>{loopback && <button className="secondary-command" onClick={() => sessionApi.startDevelopmentLogin()}>绑定本地一次性 code</button>}</div>{loopback && <form onSubmit={(event) => { event.preventDefault(); void sessionApi.finishDevelopmentLogin(devCode).then(readSession).catch((error: Error) => setMessage(error.message)); }}><label className="ai-field">终端一次性 code<input type="password" autoComplete="one-time-code" value={devCode} onChange={(event) => setDevCode(event.target.value)} /></label><button className="primary-command" disabled={!devCode}>完成开发登录</button></form>}{message && <div className="ai-error" role="alert"><AlertTriangle size={16} /><span>{message}</span></div>}</section></main>;
+    return <main className="ai-planner"><header className="ai-header"><button className="icon-button" aria-label="返回工作台" title="返回工作台" onClick={() => store.setView("workbench")}><ArrowLeft size={18} /></button><div><span className="eyebrow">SECURE SESSION</span><h1>AI 动画规划</h1></div></header><section className="ai-auth-panel"><ShieldAlert size={28} /><h2>需要服务端会话</h2><p>认证成功后才能读取素材或创建规划任务。</p><div className="ai-auth-actions">{!loopback && <button className="primary-command" onClick={() => sessionApi.startProductionLogin()}><LogIn size={16} />账号登录</button>}{loopback && <button className="secondary-command" disabled={devBindingStarted} onClick={() => { setMessage(undefined); setDevBindingStarted(true); setDevFeedback("已绑定，请在 5 分钟内输入终端 code。"); sessionStorage.setItem("cmfx.dev.binding", "1"); sessionApi.startDevelopmentLogin(); }}>{devBindingStarted ? "已绑定，请输入 code" : "绑定本地一次性 code"}</button>}</div>{devFeedback && <div role="status">{devFeedback}</div>}{loopback && <form onSubmit={(event) => { event.preventDefault(); void finishDevelopmentLogin(); }}><label className="ai-field">终端一次性 code<input type="password" autoComplete="one-time-code" value={devCode} disabled={devSubmitting} onChange={(event) => setDevCode(event.target.value)} /><small>code 单次有效，绑定后 5 分钟过期；服务重启后需重新取得。</small></label><button className="primary-command" disabled={!devCode || !devBindingStarted || devSubmitting}>{devSubmitting ? <LoaderCircle className="spin" size={16} /> : null}完成开发登录</button></form>}{message && <div className="ai-error" role="alert"><AlertTriangle size={16} /><span>{message}</span></div>}</section></main>;
   }
 
   return <main className="ai-planner">
     <header className="ai-header">
       <button className="icon-button" aria-label="返回工作台" title="返回工作台" onClick={() => store.setView("workbench")}><ArrowLeft size={18} /></button>
       <div><span className="eyebrow">MULTIMODAL PLANNER</span><h1>AI 动画规划</h1></div>
-      {session && <div className="ai-session"><span>{session.principal.userId}</span><button className="icon-button" aria-label="退出登录" title="退出登录" onClick={() => void sessionApi.logout().then(readSession).catch((error: Error) => setMessage(error.message))}><LogOut size={15} /></button></div>}
+      {session && <div className="ai-session"><span>{session.principal.userId}</span><button className="icon-button" aria-label="退出登录" title="退出登录" onClick={() => void sessionApi.logout().then(() => readSession()).catch((error: Error) => setMessage(error.message))}><LogOut size={15} /></button></div>}
       <span className={`ai-provider-state ${configured ? "ready" : "offline"}`}><i />{configured ? "Provider 已连接" : configured === false ? "Provider 未配置" : "检查服务状态"}</span>
     </header>
     {message && <div className="ai-error" role="alert"><AlertTriangle size={16} /><span>{message}</span><button className="icon-button" aria-label="关闭错误" onClick={() => setMessage(undefined)}><X size={14} /></button></div>}
@@ -288,7 +384,7 @@ export function AiPlanner({ store }: { store: EditorStore }) {
         {tasks.length > 0 && <div className="ai-task-list" aria-label="AI 任务列表">{tasks.map((task) => <button key={task.id} className={task.id === selectedTask?.id ? "selected" : ""} onClick={() => setSelectedTaskId(task.id)}><span>{task.status}</span><b>{phaseLabels[task.phase]}</b><small>{new Date(task.createdAt).toLocaleTimeString()}</small></button>)}</div>}
         {selectedTask && (selectedTask.status === "running" || selectedTask.status === "cancelling") && <div className="ai-progress" role="status"><span><LoaderCircle className="spin" size={16} /><b>{phaseLabels[selectedTask.phase]}</b><small>{selectedTask.status === "cancelling" ? "正在取消" : selectedTask.progress?.localAssetId ?? "模型请求"}</small></span><div className="ai-progress-indeterminate"><i /></div></div>}
         {selectedTask?.error && <div className="ai-task-error" role="alert"><ShieldAlert size={18} /><span><b>{selectedTask.error.code}</b><small>{selectedTask.error.message}</small></span></div>}
-        {!selectedTask?.result ? <div className="ai-result-empty"><Sparkles size={28} /><b>Storyboard 与 DSL</b><span>服务端完成结构化校验后显示结果。</span></div> : <div className="ai-results"><section className="ai-result-band"><div className="ai-section-head"><div><span className="eyebrow">STORYBOARD</span><h2>镜头与效果</h2></div><b>{selectedTask.result.storyboard.shots.length} SHOTS</b></div><div className="storyboard-list">{selectedTask.result.storyboard.shots.map((shot) => <article key={shot.id}><span className="shot-time">{shot.range.start.toFixed(2)}–{shot.range.end.toFixed(2)}s</span><div><b>{shot.description}</b><small>{shot.layers.map((layer) => layer.description).join(" · ")}</small></div><div>{shot.effects.map((effect) => <code key={`${effect.effectId}-${effect.targetLayerId}`}>{effect.effectId}</code>)}</div></article>)}</div></section><button className="primary-command enter-editor" onClick={() => store.importProject(JSON.stringify(selectedTask.result!.dsl))}><Play size={16} />进入编辑器继续编辑</button></div>}
+        {!selectedTask?.result ? <div className="ai-result-empty"><Sparkles size={28} /><b>安全规划结果</b><span>服务端完成结构化校验后显示结果。</span></div> : <div className="ai-results"><section className="ai-result-band"><div className="ai-section-head"><div><span className="eyebrow">STORYBOARD</span><h2>镜头与效果</h2></div><b>{selectedTask.result.storyboard.shots.length} SHOTS</b></div><div className="storyboard-list">{selectedTask.result.storyboard.shots.map((shot) => <article key={shot.id}><span className="shot-time">{shot.range.start.toFixed(2)}–{shot.range.end.toFixed(2)}s</span><div><b>{shot.description}</b><small>{shot.layers.map((layer) => layer.description).join(" · ")}</small></div><div>{shot.effects.map((effect) => <code key={`${effect.effectId}-${effect.targetLayerId}`}>{effect.effectId}</code>)}</div></article>)}</div>{selectedTask.result.issues.map((issue) => <div className="ai-error" key={`${issue.code}-${issue.message}`}><AlertTriangle size={14} /><span><b>{issue.code}</b> {issue.message}</span></div>)}</section><button className="primary-command enter-editor" onClick={() => store.adoptEditableProject(selectedTask.result!.editableProject)}><Play size={16} />在 Editor 中打开</button></div>}
       </section>
     </div>
   </main>;

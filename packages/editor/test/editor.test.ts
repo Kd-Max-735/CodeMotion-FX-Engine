@@ -47,10 +47,10 @@ describe("stage 4 editor", () => {
     expect(store.propertyValue(field("transform.position", "x"))).toBe(720);
     store.addKeyframe("transform.scale");
     store.toggleLayer("layer.accent", "visible");
-    store.addPipelineEffect("layer.accent");
+    store.addEffect("layer.accent", "fx.motion.fade", 0);
     const edited = mainLayers(store.getSnapshot().document.project).find((layer) => layer.id === "layer.accent");
     expect(edited?.visible).toBe(false);
-    expect(edited?.effects[0]?.effectId).toBe(LAB_PIPELINE_EFFECT_ID);
+    expect(edited?.effects[0]?.effectId).toBe("fx.motion.fade");
     expect(validateContract("MotionProject", store.getSnapshot().document.project).valid).toBe(true);
     store.undo();
     expect(mainLayers(store.getSnapshot().document.project).find((layer) => layer.id === "layer.accent")?.effects).toHaveLength(0);
@@ -75,7 +75,7 @@ describe("stage 4 editor", () => {
     try {
       const storage = new MemoryStorage();
       const store = new EditorStore(storage, createStarterProject("Recovery source"));
-      store.addPipelineEffect("layer.accent");
+      store.addEffect("layer.accent", "fx.motion.fade", 0);
       expect(store.getSnapshot().saveStatus).toBe("dirty");
       vi.advanceTimersByTime(500);
       expect(store.getSnapshot().saveStatus).toBe("saved");
@@ -85,11 +85,8 @@ describe("stage 4 editor", () => {
       const firstEnvelope = JSON.parse(autosave!) as { projectJson: string };
       const firstLoaded = loadProject(firstEnvelope.projectJson);
       const firstEffect = mainLayers(firstLoaded).find((layer) => layer.id === "layer.accent")?.effects[0];
-      expect(firstEffect).toMatchObject({
-        effectId: LAB_PIPELINE_EFFECT_ID,
-        enabled: true,
-        params: { strength: { mode: "constant", value: 1 } }
-      });
+      expect(firstEffect).toMatchObject({ effectId: "fx.motion.fade", enabled: true });
+      expect(firstEnvelope).toHaveProperty("editableProject.contract", "browser-project/v1");
 
       const restarted = new EditorStore(storage, createStarterProject("Blank"));
       expect(restarted.getSnapshot().recoverable).toBe(true);
@@ -100,7 +97,7 @@ describe("stage 4 editor", () => {
       expect(recoveredLayer?.effects).toHaveLength(1);
       expect(recoveredLayer?.effects[0]).toEqual(firstEffect);
 
-      restarted.addPipelineEffect("layer.accent");
+      restarted.addEffect("layer.accent", "fx.motion.fade", 0);
       vi.advanceTimersByTime(500);
       expect(restarted.getSnapshot().saveStatus).toBe("saved");
       expect(mainLayers(loadAutosave(storage)).find((layer) => layer.id === "layer.accent")?.effects).toHaveLength(2);

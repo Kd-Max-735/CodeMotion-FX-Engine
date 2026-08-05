@@ -73,7 +73,7 @@ describe("Stage 5R editor integration", () => {
     expect(store.getSnapshot().selectedEffectId).toBe(first.id);
     store.toggleEffect("layer.accent", first.id);
     expect(mainLayers(store.getSnapshot().document.project)[1]!.effects[0]!.enabled).toBe(false);
-    store.applyEffectPreset("layer.accent", first.id, 2);
+    store.applyEffectPreset("layer.accent", first.id, 0);
     const field = effectParameterFields(firstDefinition).find((entry) => entry.keyframeable)!;
     store.setTime(2);
     store.addEffectKeyframe("layer.accent", first.id, field);

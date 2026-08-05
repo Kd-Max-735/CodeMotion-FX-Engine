@@ -1,5 +1,6 @@
 import { CommandHistory, type EffectInstance, type JsonValue, type LayerDefinition, type MotionProject, type UndoableCommand } from "@codemotion/core";
-import { loadProject, saveProject, validateContract } from "@codemotion/schema";
+import { P0_BROWSER_PROJECT_AUTHORITY_V1 } from "@codemotion/effects-2d";
+import { loadProject, saveProject, validateContract, type BrowserProjectConstraintsV1, type BrowserProjectEnvelopeV1 } from "@codemotion/schema";
 import {
   evaluateAnimatable,
   evaluateAnimatableAt,
@@ -37,6 +38,7 @@ export interface StorageLike {
 
 export interface EditorSnapshot {
   document: Readonly<EditorDocument>;
+  editableProject: BrowserProjectEnvelopeV1;
   view: WorkspaceView;
   currentTime: number;
   zoom: number;
@@ -46,6 +48,37 @@ export interface EditorSnapshot {
   recoverable: boolean;
   error: LocatedError | null;
   revision: number;
+}
+
+const EMPTY_CONSTRAINTS: BrowserProjectConstraintsV1 = Object.freeze({
+  style: Object.freeze([]),
+  brand: Object.freeze({
+    colors: Object.freeze([]),
+    tone: Object.freeze([]),
+    requiredText: Object.freeze([]),
+    forbiddenContent: Object.freeze([]),
+    logoAssetIds: Object.freeze([])
+  })
+});
+
+function safeEnvelope(project: MotionProject, constraints: BrowserProjectConstraintsV1): BrowserProjectEnvelopeV1 {
+  const localProject = structuredClone(project);
+  localProject.metadata = { timeContractVersion: "1.1.0" };
+  let needsFont = false;
+  for (const composition of localProject.compositions) {
+    for (const layer of composition.layers) {
+      if (layer.type !== "text") continue;
+      layer.properties.fontFamily = "Codemotion Planner Unicode Bitmap";
+      needsFont = true;
+    }
+  }
+  localProject.fonts = needsFont ? [{
+    id: "font.codemotion.unicode-bitmap-v1",
+    family: "Codemotion Planner Unicode Bitmap"
+  }] : [];
+  const result = P0_BROWSER_PROJECT_AUTHORITY_V1.sanitizeBrowserProject(localProject, constraints);
+  if (!result.valid) throw new Error(result.error.message);
+  return result.value;
 }
 
 class DocumentCommand implements UndoableCommand<EditorDocument> {
@@ -117,13 +150,17 @@ export class EditorStore {
   private autosaveTimer: ReturnType<typeof setTimeout> | undefined;
   private snapshotValue: EditorSnapshot;
   private revision = 0;
+  private constraints: BrowserProjectConstraintsV1;
 
   constructor(private readonly storage?: StorageLike, project: MotionProject = createStarterProject()) {
-    const document = { project, selectedLayerId: mainLayers(project)[1]?.id ?? mainLayers(project)[0]?.id ?? null };
+    const initial = safeEnvelope(project, EMPTY_CONSTRAINTS);
+    this.constraints = initial.constraints;
+    const document = { project: initial.project, selectedLayerId: mainLayers(initial.project)[1]?.id ?? mainLayers(initial.project)[0]?.id ?? null };
     this.history = new CommandHistory(document, { maxDepth: 100 });
     this.selectedLayerId = document.selectedLayerId;
     this.snapshotValue = {
       document,
+      editableProject: initial,
       view: "workbench",
       currentTime: 0,
       zoom: 52,
@@ -144,16 +181,30 @@ export class EditorStore {
   getSnapshot = (): EditorSnapshot => this.snapshotValue;
 
   private publish(patch: Partial<Omit<EditorSnapshot, "document" | "revision">> = {}): void {
+    const editableProject: BrowserProjectEnvelopeV1 = {
+      contract: "browser-project/v1",
+      project: this.history.state.project,
+      constraints: this.constraints
+    };
     this.snapshotValue = {
       ...this.snapshotValue,
       ...patch,
       document: { project: this.history.state.project, selectedLayerId: this.selectedLayerId },
+      editableProject,
       revision: ++this.revision
     };
     this.listeners.forEach((listener) => listener());
   }
 
   private execute(label: string, apply: (draft: EditorDocument) => void): void {
+    const candidate = structuredClone(this.history.state);
+    apply(candidate);
+    const checked = P0_BROWSER_PROJECT_AUTHORITY_V1.validateBrowserProjectEnvelope({
+      contract: "browser-project/v1",
+      project: candidate.project,
+      constraints: this.constraints
+    });
+    if (!checked.valid) throw new Error(checked.error.message);
     this.history.execute(new DocumentCommand(label, apply));
     this.publish({ saveStatus: "dirty", error: null });
     this.scheduleAutosave();
@@ -176,7 +227,9 @@ export class EditorStore {
   selectEffect(effectId: string | null): void { this.publish({ selectedEffectId: effectId }); }
 
   newProject(name: string, width: number, height: number, fps: number): void {
-    const project = createStarterProject(name, width, height, fps);
+    const envelope = safeEnvelope(createStarterProject(name, width, height, fps), EMPTY_CONSTRAINTS);
+    const project = envelope.project;
+    this.constraints = envelope.constraints;
     this.selectedLayerId = "layer.accent";
     this.history = new CommandHistory({ project, selectedLayerId: "layer.accent" }, { maxDepth: 100 });
     this.publish({ view: "editor", currentTime: 0, selectedEffectId: null, saveStatus: "dirty", error: null });
@@ -184,10 +237,22 @@ export class EditorStore {
   }
 
   importProject(json: string): void {
-    const project = loadProject(json);
+    const parsed = JSON.parse(json) as unknown;
+    const checked = P0_BROWSER_PROJECT_AUTHORITY_V1.validateBrowserProjectEnvelope(parsed);
+    const envelope = checked.valid ? checked.value : safeEnvelope(loadProject(json), EMPTY_CONSTRAINTS);
+    this.adoptEditableProject(envelope);
+  }
+
+  adoptEditableProject(value: unknown): void {
+    const checked = P0_BROWSER_PROJECT_AUTHORITY_V1.validateBrowserProjectEnvelope(value);
+    if (!checked.valid) throw new Error(checked.error.message);
+    const envelope = structuredClone(checked.value);
+    const project = envelope.project;
+    this.constraints = envelope.constraints;
     this.selectedLayerId = mainLayers(project)[0]?.id ?? null;
     this.history = new CommandHistory({ project, selectedLayerId: this.selectedLayerId }, { maxDepth: 100 });
     this.publish({ view: "editor", currentTime: 0, selectedEffectId: null, saveStatus: "saved", error: null });
+    this.scheduleAutosave();
   }
 
   undo(): void { this.history.undo(); this.publish({ saveStatus: "dirty" }); this.scheduleAutosave(); }
@@ -507,8 +572,10 @@ export class EditorStore {
     if (!this.storage) return;
     this.publish({ saveStatus: "saving" });
     try {
-      const projectJson = saveProject(this.history.state.project, { space: 0 });
-      this.storage.setItem(AUTOSAVE_KEY, JSON.stringify({ savedAt: Date.now(), projectJson }));
+      const editableProject = P0_BROWSER_PROJECT_AUTHORITY_V1.validateBrowserProjectEnvelope(this.snapshotValue.editableProject);
+      if (!editableProject.valid) throw new Error(editableProject.error.message);
+      const projectJson = saveProject(editableProject.value.project, { space: 0 });
+      this.storage.setItem(AUTOSAVE_KEY, JSON.stringify({ savedAt: Date.now(), editableProject: editableProject.value, projectJson }));
       const recents = this.recents().filter((item) => item.id !== this.history.state.project.id);
       recents.unshift({ id: this.history.state.project.id, name: this.history.state.project.name, savedAt: Date.now() });
       this.storage.setItem(RECENTS_KEY, JSON.stringify(recents.slice(0, 8)));
@@ -528,9 +595,9 @@ export class EditorStore {
     const raw = this.storage?.getItem(AUTOSAVE_KEY);
     if (!raw) return;
     try {
-      const parsed = JSON.parse(raw) as { projectJson?: unknown };
-      if (typeof parsed.projectJson !== "string") throw new Error("自动保存记录缺少工程数据");
-      this.importProject(parsed.projectJson);
+      const parsed = JSON.parse(raw) as { editableProject?: unknown };
+      if (parsed.editableProject === undefined) throw new Error("Autosave is missing the safe project envelope.");
+      this.adoptEditableProject(parsed.editableProject);
       this.publish({ recoverable: false });
     } catch (error) {
       const located = locateProjectError(error, this.history.state.project);

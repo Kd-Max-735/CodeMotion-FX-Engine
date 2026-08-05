@@ -1,193 +1,145 @@
-import type { AssetDefinition, MotionProject } from "@codemotion/core";
+import { P0_BROWSER_PROJECT_AUTHORITY_V1 } from "@codemotion/effects-2d";
+import type {
+  BrowserProjectEnvelopeV1,
+  ExportCreateRequestV1,
+  ExportSettingsV1,
+  ExportTaskViewV1
+} from "@codemotion/schema";
+import type { MotionProject } from "@codemotion/core";
+import { authenticatedPost } from "./ai-plan-client.js";
 
-export type ExportFormat = "png-sequence" | "gif" | "webm" | "mp4";
-export type ExportTaskStatus = "queued" | "running" | "completed" | "failed";
-
-const MAX_EXPORT_DIMENSION = 8192;
-const MAX_EXPORT_PIXELS = 33_554_432;
-
-export interface ExportSettings {
-  format: ExportFormat;
-  width: number;
-  height: number;
-  fps: number;
-  duration: number;
-  alpha: boolean;
-  audio: boolean;
-}
-
-export interface ExportTaskFailure {
-  stage: "render" | "inspect" | "encode" | "validation";
-  frame: number;
-  time: number;
-  recoverFromFrame: number;
-  message: string;
-}
-
-export interface ExportTaskView {
-  id: string;
-  projectName: string;
-  format: ExportFormat;
-  status: ExportTaskStatus;
-  progress: number;
-  completedFrames: number;
-  frameCount: number;
-  createdAt: string;
-  updatedAt: string;
-  logs: readonly string[];
-  settings: ExportSettings;
-  video: {
-    codec: string;
-    audioCodec?: string;
-    width: number;
-    height: number;
-    fps: number;
-    duration: number;
-  };
-  estimatedBytes: number;
-  outputBytes?: number;
-  downloadName?: string;
-  failure?: ExportTaskFailure;
-  machine: { mode: "local"; platform: string; node: string; ffmpeg: string };
-}
-
+export type ExportFormat = ExportSettingsV1["format"];
+export type ExportSettings = ExportSettingsV1;
+export type ExportTaskView = ExportTaskViewV1;
 export interface AssetView {
-  id: string;
-  kind: "image" | "video" | "audio";
-  label: string;
-  mime: string;
-  codec: string;
-  dimensions?: string;
-  duration: number;
-  bytes: number;
-  shortHash: string;
-  valid: boolean;
-  issue?: string;
+  readonly id: string;
+  readonly kind: string;
+  readonly label: string;
+  readonly valid?: boolean;
+  readonly shortHash?: string;
 }
 
 export class ExportApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly code = `HTTP_${status}`) {
     super(message);
   }
 }
 
-function numberMetadata(asset: AssetDefinition, key: string): number {
-  const value = asset.metadata[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function stringMetadata(asset: AssetDefinition, key: string): string {
-  const value = asset.metadata[key];
-  return typeof value === "string" ? value : "unknown";
-}
-
-export function projectMedia(project: MotionProject): AssetView[] {
-  return project.assets
-    .filter((asset): asset is AssetDefinition & { type: "image" | "video" | "audio" } =>
-      asset.type === "image" || asset.type === "video" || asset.type === "audio")
-    .map((asset) => {
-      const verified = asset.metadata.decodeVerified === true;
-      const addressed = /^media:\/\/[a-f0-9]{64}\.[a-z0-9]+$/i.test(asset.uri);
-      const width = numberMetadata(asset, "width");
-      const height = numberMetadata(asset, "height");
-      const hash = asset.hash?.replace(/^sha256:/, "") ?? asset.uri.slice(8).split(".")[0] ?? "";
-      const valid = verified && addressed;
-      return {
-        id: asset.id,
-        kind: asset.type,
-        label: `${asset.type.toUpperCase()} · ${asset.id.slice(0, 18)}`,
-        mime: stringMetadata(asset, "mime"),
-        codec: stringMetadata(asset, "codec"),
-        ...(width > 0 && height > 0 ? { dimensions: `${width} x ${height}` } : {}),
-        duration: numberMetadata(asset, "duration"),
-        bytes: numberMetadata(asset, "bytes"),
-        shortHash: hash.slice(0, 12),
-        valid,
-        ...(!valid ? { issue: verified ? "资源 URI 不是已验证的内容寻址格式" : "资源未通过真实解码验证" } : {})
-      };
-    });
-}
+const ERROR_MESSAGES: Readonly<Record<number, string>> = {
+  400: "导出请求合同无效。",
+  401: "登录已失效，请重新登录。",
+  403: "当前会话缺少导出权限。",
+  404: "导出任务不存在或不可访问。",
+  409: "导出任务状态冲突，请刷新后重试。",
+  413: "工程超过导出限制。",
+  422: "工程或导出设置未通过校验。",
+  429: "导出请求过于频繁，请稍后重试。",
+  503: "导出服务暂时不可用。"
+};
 
 export function estimateExportBytes(settings: Pick<ExportSettings, "format" | "width" | "height" | "fps" | "duration" | "audio">): number {
   const frames = Math.ceil(settings.fps * settings.duration);
-  const pixels = settings.width * settings.height;
   const ratio = settings.format === "png-sequence" ? 1.2 : settings.format === "gif" ? 0.35 : 0.045;
-  const audio = settings.audio ? Math.ceil(settings.duration * 24_000) : 0;
-  return Math.ceil(pixels * frames * ratio + audio);
+  return Math.ceil(settings.width * settings.height * frames * ratio + (settings.audio ? settings.duration * 24_000 : 0));
 }
 
-function referencedMediaIds(project: MotionProject): { visual: string[]; audio: string[] } {
-  const visual = new Set<string>();
-  const visited = new Set<string>();
-  const visit = (compositionId: string): void => {
-    if (visited.has(compositionId)) return;
-    visited.add(compositionId);
-    const composition = project.compositions.find((entry) => entry.id === compositionId);
-    for (const layer of composition?.layers ?? []) {
-      if ((layer.type === "image" || layer.type === "video") && layer.source !== undefined) {
-        visual.add(layer.source.assetId);
-      } else if (layer.type === "composition") {
-        visit(layer.properties.compositionId);
-      }
-    }
-  };
-  const main = project.compositions[0];
-  if (main !== undefined) visit(main.id);
-  return {
-    visual: [...visual],
-    audio: [...new Set(project.audioTracks.map((track) => track.assetId))]
-  };
+export function validateExportSettings(editableProject: BrowserProjectEnvelopeV1 | MotionProject, settings: ExportSettings): string[] {
+  if (!("contract" in editableProject)) return ["Browser project envelope required."];
+  const request: ExportCreateRequestV1 = { contract: "export-request/v1", editableProject, settings };
+  const result = P0_BROWSER_PROJECT_AUTHORITY_V1.validateExportCreateRequest(request);
+  return result.valid ? [] : [result.error.message];
 }
 
-export function validateExportSettings(project: MotionProject, settings: ExportSettings): string[] {
-  const media = projectMedia(project);
-  const references = referencedMediaIds(project);
-  const visuals = references.visual.map((id) => media.find((asset) => asset.id === id));
-  const audios = references.audio.map((id) => media.find((asset) => asset.id === id));
-  const issues: string[] = [];
-  if (visuals.some((asset) => asset === undefined)) issues.push("工程图层引用了缺失的图片或视频资源。");
-  else if (visuals.some((asset) => !asset?.valid)) issues.push("工程图层引用了未通过解码验证的视觉资源。");
-  if (!Number.isInteger(settings.width) || settings.width < 2 || !Number.isInteger(settings.height) || settings.height < 2) issues.push("导出尺寸必须是大于 1 的整数。");
-  else if (settings.width > MAX_EXPORT_DIMENSION || settings.height > MAX_EXPORT_DIMENSION
-    || settings.width * settings.height > MAX_EXPORT_PIXELS) issues.push("导出尺寸超过本地渲染预算。");
-  if (!Number.isInteger(settings.fps) || settings.fps < 1 || settings.fps > 120) issues.push("帧率必须是 1 至 120 的整数。");
-  if (!Number.isFinite(settings.duration) || settings.duration <= 0 || settings.duration > project.duration) issues.push("导出时长必须大于 0 且不超过工程时长。");
-  if (settings.format === "mp4" && settings.alpha) issues.push("MP4 不支持透明通道。");
-  if ((settings.format === "gif" || settings.format === "png-sequence") && settings.audio) issues.push(`${settings.format === "gif" ? "GIF" : "PNG 序列"}不支持音轨。`);
-  if (settings.audio) {
-    if (audios.length === 0) issues.push("启用音轨时工程必须包含音频轨道。");
-    else if (audios.length > 1) issues.push("阶段 6 每次导出支持一条工程音轨。");
-    else if (!audios[0]?.valid || audios[0].kind !== "audio") issues.push(audios[0]?.issue ?? "工程音轨资源无效。");
-    else if (audios[0].duration > 0 && audios[0].duration < settings.duration) issues.push(`音频仅 ${audios[0].duration.toFixed(2)} 秒，短于导出时长。`);
+export function projectMedia(editableProject: BrowserProjectEnvelopeV1 | MotionProject): AssetView[] {
+  const project = "contract" in editableProject ? editableProject.project : editableProject;
+  return project.assets.map((asset) => ({ id: asset.id, kind: asset.type, label: asset.id }));
+}
+
+function task(value: unknown): ExportTaskView {
+  const result = P0_BROWSER_PROJECT_AUTHORITY_V1.validateExportTaskView(value);
+  if (!result.valid) throw new ExportApiError("服务端返回了无效导出任务。", 500, "INVALID_RESPONSE");
+  return result.value;
+}
+
+async function request(path: string, init: RequestInit = {}): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetch(path, { credentials: "same-origin", ...init });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new ExportApiError("导出服务未运行或网络不可达。", 0, "SERVICE_UNREACHABLE");
   }
-  for (const visual of visuals) {
-    if (visual?.kind === "video" && visual.duration > 0 && visual.duration < settings.duration) {
-      issues.push(`视频仅 ${visual.duration.toFixed(2)} 秒，短于导出时长。`);
-    }
+  const body = await response.json().catch(() => ({})) as { error?: { code?: unknown } };
+  if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event("cmfx:unauthenticated"));
+    throw new ExportApiError(
+      ERROR_MESSAGES[response.status] ?? "导出服务请求失败。",
+      response.status,
+      typeof body.error?.code === "string" ? body.error.code : `HTTP_${response.status}`
+    );
   }
-  return issues;
-}
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
-  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` })) as T & { error?: string };
-  if (!response.ok) throw new ExportApiError(body.error ?? `HTTP ${response.status}`, response.status);
   return body;
 }
 
-function jsonReplacer(_key: string, value: unknown): unknown {
-  return ArrayBuffer.isView(value)
-    ? Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
-    : value;
-}
+const CONTENT_TYPES: Readonly<Record<ExportFormat, string>> = {
+  "png-sequence": "application/zip",
+  gif: "image/gif",
+  webm: "video/webm",
+  mp4: "video/mp4"
+};
 
 export const exportApi = {
-  list: () => request<{ tasks: ExportTaskView[] }>("/api/editor-exports"),
-  create: (project: MotionProject, settings: ExportSettings) => request<{ task: ExportTaskView }>("/api/editor-exports", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ project, settings }, jsonReplacer)
-  }),
-  retry: (id: string) => request<{ task: ExportTaskView }>(`/api/editor-exports/${encodeURIComponent(id)}/retry`, { method: "POST" }),
-  downloadUrl: (id: string) => `/api/editor-exports/${encodeURIComponent(id)}/download`
+  list: async (signal?: AbortSignal) => {
+    const body = await request("/api/editor-exports", signal === undefined ? {} : { signal }) as Record<string, unknown>;
+    if (typeof body !== "object" || body === null || Array.isArray(body) || Object.keys(body).length !== 1
+      || !Array.isArray(body.tasks)) throw new ExportApiError("服务端返回了无效任务列表。", 500, "INVALID_RESPONSE");
+    return { tasks: body.tasks.map(task) };
+  },
+  get: async (id: string, signal?: AbortSignal) => {
+    const body = await request(`/api/editor-exports/${encodeURIComponent(id)}`, signal === undefined ? {} : { signal }) as { task?: unknown };
+    return { task: task(body.task) };
+  },
+  create: async (editableProject: BrowserProjectEnvelopeV1, settings: ExportSettings, signal?: AbortSignal) => {
+    const input: ExportCreateRequestV1 = { contract: "export-request/v1", editableProject, settings };
+    const checked = P0_BROWSER_PROJECT_AUTHORITY_V1.validateExportCreateRequest(input);
+    if (!checked.valid) throw new ExportApiError(checked.error.message, 422, checked.error.code);
+    const body = await request("/api/editor-exports", authenticatedPost(JSON.stringify(checked.value), "application/json", signal)) as { task?: unknown };
+    return { task: task(body.task) };
+  },
+  cancel: async (id: string, signal?: AbortSignal) => {
+    const body = await request(`/api/editor-exports/${encodeURIComponent(id)}/cancel`, authenticatedPost(undefined, undefined, signal)) as { task?: unknown };
+    return { task: task(body.task) };
+  },
+  retry: async (id: string, signal?: AbortSignal) => {
+    const body = await request(`/api/editor-exports/${encodeURIComponent(id)}/retry`, authenticatedPost(undefined, undefined, signal)) as { task?: unknown };
+    return { task: task(body.task) };
+  },
+  download: async (current: ExportTaskView, signal?: AbortSignal) => {
+    let response: Response;
+    try {
+      response = await fetch(`/api/editor-exports/${encodeURIComponent(current.id)}/download`, {
+        credentials: "same-origin",
+        ...(signal === undefined ? {} : { signal })
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      throw new ExportApiError("下载服务未运行或网络不可达。", 0, "SERVICE_UNREACHABLE");
+    }
+    if (!response.ok) {
+      if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event("cmfx:unauthenticated"));
+      throw new ExportApiError(ERROR_MESSAGES[response.status] ?? "下载失败。", response.status);
+    }
+    const contentType = (response.headers.get("content-type") ?? "").split(";", 1)[0]!.toLowerCase();
+    if (contentType !== CONTENT_TYPES[current.format]
+      || response.headers.get("x-content-type-options")?.toLowerCase() !== "nosniff"
+      || !response.headers.get("cache-control")?.toLowerCase().includes("no-store")) {
+      throw new ExportApiError("下载响应未通过安全校验。", 500, "INVALID_RESPONSE");
+    }
+    const blob = await response.blob();
+    const declared = Number(response.headers.get("content-length"));
+    if (blob.size < 1 || (Number.isFinite(declared) && declared >= 0 && declared !== blob.size)) {
+      throw new ExportApiError("下载文件长度无效。", 500, "INVALID_RESPONSE");
+    }
+    return { blob, name: current.downloadName ?? `codemotion.${current.format}` };
+  }
 };

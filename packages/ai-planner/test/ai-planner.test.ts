@@ -9,6 +9,7 @@ import { GROUP_2_P0_EFFECTS, P0_EFFECTS, P0_EFFECTS_BY_ID } from "@codemotion/ef
 import { importMedia } from "@codemotion/exporter";
 import {
   ARK_V1_MODEL,
+  MODEL_PLANNING_JSON_SCHEMA,
   OfflineMockProvider,
   ProviderError,
   VolcengineArkProvider,
@@ -1332,6 +1333,198 @@ describe("AI planner", () => {
   });
 
   it.each([
+    ["invalid JSON", "{not-json", "INVALID_JSON"],
+    ["schema-invalid JSON", JSON.stringify(normalized()), "SCHEMA_INVALID"]
+  ] as const)("repairs first-attempt %s with exactly one same-model generation", async (_label, firstText, reason) => {
+    const audits: ProviderAuditRecord[] = [];
+    const requests: Record<string, unknown>[] = [];
+    const fetchSpy = vi.fn<typeof fetch>(async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return responseJson({
+        model: ARK_V1_MODEL,
+        output: [{ content: [{ type: "output_text", text: requests.length === 1
+          ? firstText
+          : JSON.stringify(planningEnvelope(normalized())) }] }],
+        usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 }
+      });
+    });
+    const provider = new VolcengineArkProvider({
+      apiKey: "unit-test-key-that-is-not-real",
+      fetchImpl: fetchSpy,
+      audit: (record) => audits.push(record)
+    });
+    const result = await provider.understand({ principal: principal(), prompt: "bounded repair" });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.trace.usage.totalTokens).toBe(10);
+    expect(audits.find((record) => record.reason === reason)).toMatchObject({ attempt: 1, errorCode: "provider_response" });
+    expect(JSON.stringify(requests[1])).toContain(`Previous safe failure category: ${reason}`);
+    expect(requests.every((body) => body.model === ARK_V1_MODEL)).toBe(true);
+  });
+
+  it("stops after two failed structured generations without exposing raw output or Ajv errors", async () => {
+    const raw = "RAW_MODEL_RESPONSE_MUST_NOT_ESCAPE";
+    const audits: ProviderAuditRecord[] = [];
+    const requestBodies: string[] = [];
+    const fetchSpy = vi.fn<typeof fetch>(async (_url, init) => {
+      requestBodies.push(String(init?.body));
+      return responseJson({
+        model: ARK_V1_MODEL,
+        output: [{ content: [{ type: "output_text", text: `{${raw}` }] }]
+      });
+    });
+    const provider = new VolcengineArkProvider({
+      apiKey: "unit-test-key-that-is-not-real",
+      fetchImpl: fetchSpy,
+      audit: (record) => audits.push(record)
+    });
+    const error = await provider.understand({ principal: principal(), prompt: "fail safely" }).catch((cause) => cause);
+    expect(error).toMatchObject({ code: "provider_response", retryable: false });
+    expect(error.message).not.toContain(raw);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(audits.filter((record) => record.reason === "INVALID_JSON")).toHaveLength(2);
+    expect(JSON.stringify(audits)).not.toContain(raw);
+    expect(requestBodies[1]).not.toContain(raw);
+  });
+
+  it("does not structurally retry a model-mismatch security failure", async () => {
+    const fetchSpy = vi.fn<typeof fetch>(async () => responseJson({
+      model: "hostile-other-model",
+      output: [{ content: [{ type: "output_text", text: JSON.stringify(planningEnvelope(normalized())) }] }]
+    }));
+    const provider = new VolcengineArkProvider({ apiKey: "unit-test-key-that-is-not-real", fetchImpl: fetchSpy });
+    await expect(provider.understand({ principal: principal(), prompt: "model authority" }))
+      .rejects.toMatchObject({ code: "security" });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry asset-binding security failures and audits only a safe reason", async () => {
+    const envelope = planningEnvelope(normalized()) as { storyboard: { layers: Array<Record<string, unknown>>; shots: Array<{ layerIds: string[] }> } };
+    envelope.storyboard.layers.push({
+      id: "layer_unverified",
+      type: "image",
+      localAssetId: "asset_ffffffffffffffffffffffff",
+      description: "unverified"
+    });
+    envelope.storyboard.shots[0]!.layerIds.push("layer_unverified");
+    const audits: ProviderAuditRecord[] = [];
+    const fetchSpy = vi.fn<typeof fetch>(async () => responseJson({
+      model: ARK_V1_MODEL,
+      output: [{ content: [{ type: "output_text", text: JSON.stringify(envelope) }] }]
+    }));
+    const provider = new VolcengineArkProvider({
+      apiKey: "unit-test-key-that-is-not-real",
+      fetchImpl: fetchSpy,
+      audit: (record) => audits.push(record)
+    });
+    await expect(provider.understand({ principal: principal(), prompt: "asset authority" }))
+      .rejects.toMatchObject({ code: "security" });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(audits.find((record) => record.reason === "ASSET_BINDING"))
+      .toMatchObject({ attempt: 1, errorCode: "security" });
+  });
+
+  it("does not send a second generation when aborted during the bounded retry wait", async () => {
+    const controller = new AbortController();
+    const fetchSpy = vi.fn<typeof fetch>(async () => {
+      setTimeout(() => controller.abort(), 10);
+      return responseJson({ model: ARK_V1_MODEL, output: [{ content: [{ type: "output_text", text: "not-json" }] }] });
+    });
+    const provider = new VolcengineArkProvider({ apiKey: "unit-test-key-that-is-not-real", fetchImpl: fetchSpy });
+    await expect(provider.understand({ principal: principal(), prompt: "abort retry", signal: controller.signal }))
+      .rejects.toMatchObject({ code: "cancelled" });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects server-authoritative planning fields while preserving model text byte-for-byte", async () => {
+    const model = planningEnvelope(normalized()) as ReturnType<typeof planningEnvelope> & Record<string, unknown>;
+    const storyboard = (model as { storyboard: Record<string, unknown> }).storyboard;
+    const exactText = "Exact model text\nwith\ttabs Required";
+    (storyboard.layers as Array<Record<string, unknown>>).find((layer) => layer.type === "text")!.text = exactText;
+    storyboard.duration = 9;
+    storyboard.width = 640;
+    storyboard.height = 360;
+    storyboard.fps = 12;
+    storyboard.style = ["model-style"];
+    storyboard.brand = { colors: [], tone: [], requiredText: [], forbiddenContent: [], logoAssetIds: [] };
+    (storyboard.shots as Array<Record<string, unknown>>)[0]!.end = 2;
+    const planning = {
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      durationSeconds: 2,
+      style: ["second", "first"],
+      brand: {
+        colors: ["#112233", "#AABBCC"],
+        tone: ["quiet", "precise"],
+        requiredText: ["Required"],
+        forbiddenContent: ["never-show"],
+        logoAssetIds: []
+      }
+    };
+    const provider = new VolcengineArkProvider({
+      apiKey: "unit-test-key-that-is-not-real",
+      fetchImpl: async () => responseJson({
+        model: ARK_V1_MODEL,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify(model) }] }]
+      })
+    });
+    const result = await provider.understand({ principal: principal(), prompt: "authority projection", planning });
+    expect(result.storyboard).toMatchObject({ width: 1920, height: 1080, fps: 30, duration: 2 });
+    expect(result.storyboard.style).toEqual(planning.style);
+    expect(result.storyboard.brand).toEqual(planning.brand);
+    expect(result.storyboard.layers.find((layer) => layer.type === "text")?.text).toBe(exactText);
+  });
+
+  it("isolates frozen request schemas from hostile planning access, prior mutation, and concurrent calls", async () => {
+    const captured: Array<{ schema: Record<string, unknown>; prompt: string }> = [];
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        input: Array<{ content: Array<{ text?: string }> }>;
+        text: { format: { schema: Record<string, unknown> } };
+      };
+      const prompt = body.input[0]!.content[0]!.text ?? "";
+      captured.push({ schema: body.text.format.schema, prompt });
+      const duration = prompt.includes('"durationSeconds":2') ? 2 : 3;
+      const envelope = planningEnvelope(normalized()) as { storyboard: { duration: number; shots: Array<{ end: number }> } };
+      envelope.storyboard.duration = duration;
+      envelope.storyboard.shots[0]!.end = duration;
+      return responseJson({
+        model: ARK_V1_MODEL,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify(envelope) }] }]
+      });
+    };
+    const provider = new VolcengineArkProvider({ apiKey: "unit-test-key-that-is-not-real", fetchImpl });
+    let widthReads = 0;
+    const hostilePlanning = new Proxy({
+      get width() { widthReads += 1; return 800; },
+      height: 450,
+      fps: 24,
+      durationSeconds: 2,
+      style: [],
+      brand: { colors: [], tone: [], requiredText: [], forbiddenContent: [], logoAssetIds: [] }
+    }, {
+      get(target, property, receiver) {
+        if (property === "$schema" || property === "const") throw new Error("schema injection attempted");
+        return Reflect.get(target, property, receiver);
+      }
+    });
+    const otherPlanning = { ...hostilePlanning, width: 900, durationSeconds: 3 };
+    const [first, second] = await Promise.all([
+      provider.understand({ principal: principal(), prompt: "schema one", planning: hostilePlanning }),
+      provider.understand({ principal: principal(), prompt: "schema two", planning: otherPlanning })
+    ]);
+    expect(widthReads).toBe(2);
+    expect(first.storyboard).toMatchObject({ width: 800, duration: 2 });
+    expect(second.storyboard).toMatchObject({ width: 900, duration: 3 });
+    expect(captured).toHaveLength(2);
+    expect(captured[0]!.schema).toEqual(MODEL_PLANNING_JSON_SCHEMA);
+    expect(captured[1]!.schema).toEqual(MODEL_PLANNING_JSON_SCHEMA);
+    captured[0]!.schema.additionalProperties = true;
+    expect(captured[1]!.schema.additionalProperties).toBe(false);
+    expect((MODEL_PLANNING_JSON_SCHEMA as Record<string, unknown>).additionalProperties).toBe(false);
+  });
+
+  it.each([
     ["below", 10 * 1024 * 1024 - 1, true],
     ["exact", 10 * 1024 * 1024, true],
     ["above", 10 * 1024 * 1024 + 1, false]
@@ -1414,6 +1607,23 @@ describe("AI planner", () => {
     })).rejects.toBeInstanceOf(ProviderError);
   });
 
+  it.each([
+    [401, "authentication"],
+    [429, "rate_limited"],
+    [504, "timeout"],
+    [422, "invalid_input"]
+  ] as const)("does not regenerate or transport-retry a %s Responses API failure", async (status, code) => {
+    const fetchSpy = vi.fn<typeof fetch>(async () => responseJson({ error: { message: "vendor-private" } }, status));
+    const provider = new VolcengineArkProvider({
+      apiKey: "unit-test-key-that-is-not-real",
+      maxRetries: 2,
+      fetchImpl: fetchSpy
+    });
+    await expect(provider.understand({ principal: principal(), prompt: "non-retryable response" }))
+      .rejects.toMatchObject({ code });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("bounds retries, cancellation and the server-side rate gate", async () => {
     let attempts = 0;
     const success = {
@@ -1430,10 +1640,9 @@ describe("AI planner", () => {
         return attempts === 1 ? responseJson({}, 503) : responseJson(success);
       }
     });
-    await expect(retrying.understand({ principal: principal(), prompt: "retry" })).resolves.toMatchObject({
-      trace: { modelId: ARK_V1_MODEL }
-    });
-    expect(attempts).toBe(2);
+    await expect(retrying.understand({ principal: principal(), prompt: "retry" }))
+      .rejects.toMatchObject({ code: "provider_unavailable" });
+    expect(attempts).toBe(1);
 
     const rateLimited = new VolcengineArkProvider({
       apiKey: "unit-test-key-that-is-not-real",

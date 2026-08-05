@@ -206,15 +206,13 @@ async function expectRejectedBeforeQueue(
 }
 
 describe("Stage 7R owner-aware export service", () => {
-  it("exposes only verified redacted media metadata", () => {
-    const views = projectMedia(authoritativeProject);
-    expect(views).toHaveLength(3);
-    expect(views.every((asset) => asset.valid)).toBe(true);
+  it("keeps browser media state opaque and free of trusted metadata", () => {
+    const views = projectMedia(envelope);
+    expect(views).toHaveLength(2);
+    expect(views.every((asset) => Object.keys(asset).sort().join(",") === "id,kind,label")).toBe(true);
     expect(JSON.stringify(views)).not.toContain(input);
     expect(JSON.stringify(views)).not.toContain(mediaRoot);
-    expect(views.map((asset) => asset.shortHash)).toEqual(expect.arrayContaining([
-      image.asset.hash!.slice(7, 19), audio.asset.hash!.slice(7, 19), video.asset.hash!.slice(7, 19)
-    ]));
+    expect(JSON.stringify(views)).not.toMatch(/hash|mime|codec|path|metadata/i);
   });
 
   it("renders referenced media and evaluates a real P0 effect at fixed project time", async () => {
@@ -236,20 +234,11 @@ describe("Stage 7R owner-aware export service", () => {
       .not.toBe(createHash("sha256").update(middle).digest("hex"));
   });
 
-  it("retains format, duration, missing, unverified, and render-budget validation evidence", () => {
-    expect(validateExportSettings(authoritativeProject, { ...settings("mp4"), alpha: true })).toContain("MP4 不支持透明通道。");
-    expect(validateExportSettings(authoritativeProject, { ...settings("gif"), audio: true })).toContain("GIF不支持音轨。");
-    const missing = structuredClone(authoritativeProject);
-    missing.compositions[0]!.layers[0]!.source = { assetId: "missing" };
-    expect(validateExportSettings(missing, settings("mp4"))).toContain("工程图层引用了缺失的图片或视频资源。");
-    const videoProject = withMedia(structuredClone(authoritativeProject), video, audio);
-    expect(validateExportSettings(videoProject, { ...settings("mp4"), duration: 0.5 })
-      .some((issue) => issue.startsWith("视频仅") && issue.endsWith("短于导出时长。"))).toBe(true);
-    const unverified = structuredClone(authoritativeProject);
-    unverified.assets.find((asset) => asset.id === image.asset.id)!.metadata.decodeVerified = false;
-    expect(validateExportSettings(unverified, settings("png-sequence"))).toContain("工程图层引用了未通过解码验证的视觉资源。");
-    expect(validateExportSettings(authoritativeProject, { ...settings("mp4"), width: 8192, height: 8192 }))
-      .toContain("导出尺寸超过本地渲染预算。");
+  it("validates export settings only through the safe browser envelope", () => {
+    expect(validateExportSettings(envelope, { ...settings("mp4"), alpha: true })).toHaveLength(1);
+    expect(validateExportSettings(envelope, { ...settings("gif"), audio: true })).toHaveLength(1);
+    expect(validateExportSettings(envelope, { ...settings("mp4"), width: 8192, height: 8192 })).toHaveLength(1);
+    expect(validateExportSettings(authoritativeProject, settings("mp4"))).toEqual(["Browser project envelope required."]);
   });
 
   it.each([

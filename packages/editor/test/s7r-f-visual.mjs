@@ -6,7 +6,6 @@ import react from "@vitejs/plugin-react";
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
 import { createServerRuntime } from "../dist/server-runtime.js";
-import { createEditorPreviewApi, EditorPreviewService } from "../dist/preview-task-service.js";
 
 const editorRoot = resolve(import.meta.dirname, "..");
 const workspaceRoot = resolve(editorRoot, "../..");
@@ -22,7 +21,7 @@ process.env.NODE_ENV = "development";
 process.env.CODEMOTION_DEV_AUTH = "1";
 process.env.CODEMOTION_DEV_TENANT_ID = "qa-tenant";
 process.env.CODEMOTION_DEV_USER_ID = "qa-user";
-process.env.CODEMOTION_DEV_SCOPES = "ai:plan assets:read assets:write";
+process.env.CODEMOTION_DEV_SCOPES = "ai:plan assets:read assets:write project:preview export:create export:read";
 
 const mediaRoot = resolve(workspaceRoot, "tmp/stage-7r-f-media");
 
@@ -38,7 +37,8 @@ function task(status = "running") {
     events: [],
     createdAt: "2026-07-31T08:00:00.000Z",
     updatedAt: "2026-07-31T08:00:01.000Z",
-    modalities: ["text", "image"]
+    modalities: ["text", "image"],
+    ...(status === "cancelled" ? { error: { code: "cancelled", message: "分析已取消。", retryable: false } } : {})
   };
 }
 
@@ -55,7 +55,8 @@ async function assertLayout(page, label) {
 
 async function authenticate(page) {
   await page.goto(origin, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "打开 AI 规划" }).click();
+  const openPlanner = page.getByRole("button", { name: "打开 AI 规划" });
+  if (await openPlanner.count()) await openPlanner.click();
   await page.getByRole("heading", { name: "需要服务端会话" }).waitFor();
   const binding = page.waitForResponse((response) => response.url().endsWith("/auth/dev/login"));
   await page.getByRole("button", { name: "绑定本地一次性 code" }).click();
@@ -159,7 +160,7 @@ async function runQa(context) {
   assert(evidence.create.body.brand.forbiddenContent.join("|") === "水印|竞品", "forbiddenContent did not remain structured.");
   assert(Boolean(evidence.create.headers["x-cmfx-csrf"]), "Create omitted CSRF.");
   await desktop.getByRole("button", { name: "取消" }).click();
-  await desktop.getByText("cancelled").waitFor();
+  await desktop.locator(".ai-task-list button").first().getByText("cancelled", { exact: true }).waitFor();
   assert(Boolean(evidence.cancel.headers["x-cmfx-csrf"]), "Cancel omitted CSRF.");
   await assertLayout(desktop, "desktop planner");
   await desktop.screenshot({ path: resolve(outputDir, "planner-desktop.png"), fullPage: true });
@@ -262,7 +263,6 @@ async function main() {
     });
     resources.runtime = "acquired";
 
-    const preview = createEditorPreviewApi(new EditorPreviewService(mediaRoot));
     server = await createServer({
       root: editorRoot,
       configFile: false,
@@ -270,7 +270,6 @@ async function main() {
         name: "s7r-f-runtime",
         configureServer(vite) {
           vite.middlewares.use(runtime.handle);
-          vite.middlewares.use(preview);
         }
       }],
       server: { host, port, strictPort: true }

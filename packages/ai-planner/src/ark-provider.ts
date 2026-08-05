@@ -14,9 +14,11 @@ import {
   type ModelProvider,
   type ModelStoryboard,
   type NormalizedUnderstanding,
+  type PlanningContext,
   type ProviderAuditRecord,
   type ProviderAuditSink,
   type ProviderErrorCode,
+  type ProviderFailureReason,
   type ProviderProgress,
   type UnderstandingRequest,
   type UnderstandingResult
@@ -29,6 +31,24 @@ const FILES_LIMIT = 512 * 1024 * 1024;
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const ACTIVE = "active";
 const PROCESSING = "processing";
+const GENERATION_ATTEMPTS = 2;
+const GENERATION_RETRY_DELAY_MS = 250;
+
+interface SafeDiagnosticCounts {
+  readonly outputCharacters?: number;
+  readonly validationErrors?: number;
+}
+
+class PlanningResponseError extends ProviderError {
+  constructor(
+    readonly reason: ProviderFailureReason,
+    message: string,
+    readonly safeCounts: SafeDiagnosticCounts = {},
+    code: "provider_response" | "security" = "provider_response"
+  ) {
+    super(code, message);
+  }
+}
 
 interface ArkProviderOptions {
   readonly apiKey: string;
@@ -348,11 +368,11 @@ function parseArkFile(value: unknown): ArkFile {
 
 function extractOutputText(body: unknown): string {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    throw new ProviderError("provider_response", "Responses API returned an invalid response object.");
+    throw new PlanningResponseError("RESPONSE_ENVELOPE", "Responses API returned an invalid response object.");
   }
   const root = body as Record<string, unknown>;
   if (typeof root.output_text === "string") return root.output_text;
-  if (!Array.isArray(root.output)) throw new ProviderError("provider_response", "Responses API returned no output.");
+  if (!Array.isArray(root.output)) throw new PlanningResponseError("NO_OUTPUT", "Responses API returned no output.");
   for (const output of root.output) {
     if (typeof output !== "object" || output === null || !("content" in output) || !Array.isArray(output.content)) continue;
     for (const content of output.content) {
@@ -362,7 +382,40 @@ function extractOutputText(body: unknown): string {
       }
     }
   }
-  throw new ProviderError("provider_response", "Responses API returned no output text.");
+  throw new PlanningResponseError("NO_OUTPUT", "Responses API returned no output text.");
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+function requestPlanningSchema(): typeof MODEL_PLANNING_JSON_SCHEMA {
+  return deepFreeze(structuredClone(MODEL_PLANNING_JSON_SCHEMA));
+}
+
+function effectParameterSnapshots(params: Record<string, unknown>): readonly Record<string, unknown>[] {
+  const base: Record<string, unknown> = {};
+  const keyframes = new Map<string, unknown[]>();
+  for (const [name, value] of Object.entries(params)) {
+    if (typeof value !== "object" || value === null || Array.isArray(value) || !("mode" in value)) {
+      base[name] = value;
+      continue;
+    }
+    const animatable = value as Record<string, unknown>;
+    if (animatable.mode === "constant") {
+      base[name] = animatable.value;
+    } else if (animatable.mode === "keyframes" && Array.isArray(animatable.keyframes)) {
+      const values = animatable.keyframes.flatMap((item) =>
+        typeof item === "object" && item !== null && "value" in item ? [(item as Record<string, unknown>).value] : []);
+      if (values.length > 0) {
+        base[name] = values[0];
+        keyframes.set(name, values);
+      }
+    }
+  }
+  return [base, ...[...keyframes].flatMap(([name, values]) => values.map((value) => ({ ...base, [name]: value })))];
 }
 
 function usage(body: unknown, hasAudio: boolean): UnderstandingResult["trace"]["usage"] {
@@ -417,7 +470,78 @@ function combineSignal(parent: AbortSignal | undefined, timeoutMs: number): { si
   };
 }
 
-function assertInput(request: UnderstandingRequest): void {
+function throwIfProviderAborted(signal: AbortSignal, cause?: unknown): void {
+  if (!signal.aborted) return;
+  if (signal.reason instanceof ProviderError) throw signal.reason;
+  throw new ProviderError("cancelled", "Provider request was cancelled.", { cause });
+}
+
+async function providerDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  try {
+    await delay(milliseconds, undefined, { signal });
+  } catch (cause) {
+    throwIfProviderAborted(signal, cause);
+    throw cause;
+  }
+}
+
+function assertStringArray(
+  value: unknown,
+  name: string,
+  maxItems: number,
+  maxLength: number,
+  pattern?: RegExp
+): asserts value is string[] {
+  if (!Array.isArray(value) || value.length > maxItems
+    || value.some((item) => typeof item !== "string" || item.length > maxLength || (pattern !== undefined && !pattern.test(item)))) {
+    throw new ProviderError("invalid_input", `${name} is outside ai-task/v1 limits.`);
+  }
+}
+
+function snapshotPlanning(value: UnderstandingRequest["planning"]): PlanningContext {
+  const source = value ?? {
+    width: 1280,
+    height: 720,
+    fps: 24,
+    durationSeconds: 6,
+    style: [],
+    brand: { colors: [], tone: [], requiredText: [], forbiddenContent: [], logoAssetIds: [] }
+  };
+  try {
+    const brand = source.brand;
+    const style = source.style;
+    const colors = brand.colors;
+    const tone = brand.tone;
+    const requiredText = brand.requiredText;
+    const forbiddenContent = brand.forbiddenContent;
+    const logoAssetIds = brand.logoAssetIds;
+    assertStringArray(style, "Planning style", 16, 200);
+    assertStringArray(colors, "Planning brand colors", 16, 9, /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/);
+    assertStringArray(tone, "Planning brand tone", 16, 200);
+    assertStringArray(requiredText, "Planning required text", 16, 500);
+    assertStringArray(forbiddenContent, "Planning forbidden content", 16, 500);
+    assertStringArray(logoAssetIds, "Planning logo asset IDs", 8, 128);
+    return deepFreeze({
+      width: source.width,
+      height: source.height,
+      fps: source.fps,
+      durationSeconds: source.durationSeconds,
+      style: [...style],
+      brand: {
+        colors: [...colors],
+        tone: [...tone],
+        requiredText: [...requiredText],
+        forbiddenContent: [...forbiddenContent],
+        logoAssetIds: [...logoAssetIds]
+      }
+    });
+  } catch (cause) {
+    if (cause instanceof ProviderError) throw cause;
+    throw new ProviderError("invalid_input", "Planning constraints could not be read safely.", { cause });
+  }
+}
+
+function assertInput(request: UnderstandingRequest, planning: PlanningContext): void {
   const principal = request.principal;
   if (typeof principal !== "object" || principal === null
     || !/^[\s\S]{1,256}$/.test(principal.tenantId)
@@ -447,16 +571,13 @@ function assertInput(request: UnderstandingRequest): void {
       throw new ProviderError("invalid_input", "Video fps must be in [0.2, 5].");
     }
   }
-  const planning = request.planning;
-  if (planning !== undefined) {
-    if (!Number.isInteger(planning.width) || planning.width < 2 || planning.width > 8192
-      || !Number.isInteger(planning.height) || planning.height < 2 || planning.height > 8192
-      || planning.width * planning.height > 33_554_432
-      || !Number.isInteger(planning.fps) || planning.fps < 1 || planning.fps > 60
-      || !Number.isFinite(planning.durationSeconds)
-      || planning.durationSeconds < 0.5 || planning.durationSeconds > 60) {
-      throw new ProviderError("invalid_input", "Planning canvas, fps, or duration is outside ai-task/v1 limits.");
-    }
+  if (!Number.isInteger(planning.width) || planning.width < 2 || planning.width > 8192
+    || !Number.isInteger(planning.height) || planning.height < 2 || planning.height > 8192
+    || planning.width * planning.height > 33_554_432
+    || !Number.isInteger(planning.fps) || planning.fps < 1 || planning.fps > 60
+    || !Number.isFinite(planning.durationSeconds)
+    || planning.durationSeconds < 0.5 || planning.durationSeconds > 60) {
+    throw new ProviderError("invalid_input", "Planning canvas, fps, or duration is outside ai-task/v1 limits.");
   }
 }
 
@@ -473,24 +594,15 @@ const MODEL_EFFECT_CATALOG = Object.freeze(P0_EFFECTS.map((effect) => Object.fre
   defaultPreset: effect.defaultPreset
 })));
 
-function planningInstruction(request: UnderstandingRequest): string {
-  const planning = request.planning ?? {
-    width: 1280,
-    height: 720,
-    fps: 24,
-    durationSeconds: 6,
-    style: [],
-    brand: {
-      colors: [],
-      tone: [],
-      requiredText: [],
-      forbiddenContent: [],
-      logoAssetIds: []
-    }
-  };
+function planningInstruction(planning: PlanningContext): string {
   return [
     `Planning constraints: ${JSON.stringify(planning)}`,
-    `Authoritative ordered 40-effect catalog: ${JSON.stringify(MODEL_EFFECT_CATALOG)}`
+    "Copy width, height, fps, and durationSeconds into Storyboard width, height, fps, and duration without inference.",
+    "Copy style and every brand array value exactly. Do not translate, rewrite, sort, append, or remove array items.",
+    "Copy supplied localAssetId values exactly and never invent an asset ID.",
+    "Every requiredText value must occur verbatim in visible text-layer text; forbiddenContent must not occur.",
+    `Authoritative ordered 40-effect catalog: ${JSON.stringify(MODEL_EFFECT_CATALOG)}`,
+    "Choose effects only from that catalog and copy sourceId, effectId, effectVersion, and valid params exactly."
   ].join("\n");
 }
 
@@ -580,7 +692,9 @@ export class VolcengineArkProvider implements ModelProvider {
   }
 
   async understand(request: UnderstandingRequest): Promise<UnderstandingResult> {
-    assertInput(request);
+    const planning = snapshotPlanning(request.planning);
+    assertInput(request, planning);
+    const schema = requestPlanningSchema();
     const linked = combineSignal(request.signal, request.timeoutMs ?? 120_000);
     const scope = auditScope(request.principal);
     const operation = this.gate.run<UnderstandingResult>(request.principal, linked.signal, async () => {
@@ -601,7 +715,7 @@ export class VolcengineArkProvider implements ModelProvider {
         }
         const content: Array<Record<string, unknown>> = [{
           type: "input_text",
-          text: `${STRUCTURE_INSTRUCTION}\n${planningInstruction(request)}\nUser request: ${sanitizeUserText(request.prompt)}`
+          text: `${STRUCTURE_INSTRUCTION}\n${planningInstruction(planning)}\nUser request: ${sanitizeUserText(request.prompt)}`
         }];
         for (const resource of prepared) {
           content.push({
@@ -633,46 +747,115 @@ export class VolcengineArkProvider implements ModelProvider {
           }
         }
         emit(request.onProgress, { phase: "infer" });
-        const response = await this.jsonRequest("responses.create", `${this.baseUrl}/responses`, {
-          method: "POST",
-          body: JSON.stringify({
-            model: ARK_V1_MODEL,
-            input: [{ role: "user", content }],
-            text: {
-              format: {
-                type: "json_schema",
-                name: "codemotion_ai_task_v1",
-                strict: true,
-                schema: MODEL_PLANNING_JSON_SCHEMA
-              }
+        const usageRecords: UnderstandingResult["trace"]["usage"][] = [];
+        let retryReason: ProviderFailureReason | undefined;
+        for (let attempt = 1 as 1 | 2; attempt <= GENERATION_ATTEMPTS; attempt = (attempt + 1) as 1 | 2) {
+          throwIfProviderAborted(linked.signal);
+          const attemptContent = attempt === 1 ? content : [
+            ...content,
+            {
+              type: "input_text",
+              text: `Correction request. Previous safe failure category: ${retryReason ?? "STRUCTURED_OUTPUT_INVALID"}. Regenerate the complete ai-task/v1 JSON contract only. Do not quote or discuss the previous response.`
             }
-          }),
-          headers: { "content-type": "application/json" }
-        }, linked.signal, scope, ARK_V1_MODEL);
-        const text = extractOutputText(response.body);
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          throw new ProviderError("provider_response", "Model output was not valid JSON.");
-        }
-        const planned = this.validatePlanning(parsed, prepared, request);
-        const model = typeof response.body === "object" && response.body !== null && "model" in response.body
-          ? response.body.model : undefined;
-        if (model !== ARK_V1_MODEL) throw new ProviderError("security", "Provider response model did not match the V1 model.");
-        return {
-          contract: "ai-task/v1",
-          understanding: planned.understanding,
-          storyboard: planned.storyboard,
-          trace: {
-            provider: this.id,
-            modelId: ARK_V1_MODEL,
-            requestFingerprint: response.requestFingerprint,
-            inputHash: this.inputHash(request, prepared),
-            latencyMs: Date.now() - started,
-            usage: usage(response.body, prepared.some((item) => item.input.modality === "audio"))
+          ];
+          const response = await this.jsonRequest("responses.create", `${this.baseUrl}/responses`, {
+            method: "POST",
+            body: JSON.stringify({
+              model: ARK_V1_MODEL,
+              input: [{ role: "user", content: attemptContent }],
+              text: {
+                format: {
+                  type: "json_schema",
+                  name: "codemotion_ai_task_v1",
+                  strict: true,
+                  schema
+                }
+              }
+            }),
+            headers: { "content-type": "application/json" }
+          }, linked.signal, scope, ARK_V1_MODEL, undefined, undefined, attempt);
+          usageRecords.push(usage(response.body, prepared.some((item) => item.input.modality === "audio")));
+          try {
+            const model = typeof response.body === "object" && response.body !== null && "model" in response.body
+              ? response.body.model : undefined;
+            if (model !== ARK_V1_MODEL) {
+              throw new PlanningResponseError(
+                "MODEL_MISMATCH",
+                "Provider response model did not match the V1 model.",
+                {},
+                "security"
+              );
+            }
+            const outputText = extractOutputText(response.body);
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(outputText);
+            } catch {
+              throw new PlanningResponseError(
+                "INVALID_JSON",
+                "Model output was not valid JSON.",
+                { outputCharacters: outputText.length }
+              );
+            }
+            const planned = this.validatePlanning(parsed, prepared, planning, schema);
+            const combinedUsage = usageRecords.reduce<UnderstandingResult["trace"]["usage"]>((total, item) => ({
+              inputTokens: total.inputTokens + item.inputTokens,
+              outputTokens: total.outputTokens + item.outputTokens,
+              totalTokens: total.totalTokens + item.totalTokens,
+              estimatedCostCny: {
+                lowerBound: Number((total.estimatedCostCny.lowerBound + item.estimatedCostCny.lowerBound).toFixed(8)),
+                upperBound: Number((total.estimatedCostCny.upperBound + item.estimatedCostCny.upperBound).toFixed(8)),
+                pricingSource: item.estimatedCostCny.pricingSource,
+                note: usageRecords.length > 1
+                  ? "Estimate includes both bounded structured-generation attempts; actual billing prevails."
+                  : item.estimatedCostCny.note
+              }
+            }), {
+              inputTokens: 0,
+              outputTokens: 0,
+              totalTokens: 0,
+              estimatedCostCny: {
+                lowerBound: 0,
+                upperBound: 0,
+                pricingSource: "https://www.volcengine.com/docs/82379/1544106",
+                note: "No token usage was returned; zero is not a billing assertion."
+              }
+            });
+            return {
+              contract: "ai-task/v1",
+              understanding: planned.understanding,
+              storyboard: planned.storyboard,
+              trace: {
+                provider: this.id,
+                modelId: ARK_V1_MODEL,
+                requestFingerprint: response.requestFingerprint,
+                inputHash: this.inputHash(request, prepared),
+                latencyMs: Date.now() - started,
+                usage: combinedUsage
+              }
+            };
+          } catch (cause) {
+            if (!(cause instanceof PlanningResponseError)) throw cause;
+            this.audit?.({
+              ...scope,
+              endpoint: "responses.create",
+              modelId: ARK_V1_MODEL,
+              status: response.status,
+              latencyMs: response.latencyMs,
+              requestFingerprint: response.requestFingerprint,
+              errorCode: cause.code,
+              reason: cause.reason,
+              attempt,
+              safeCounts: cause.safeCounts
+            });
+            if (cause.code !== "provider_response" || attempt === GENERATION_ATTEMPTS) {
+              throw new ProviderError(cause.code, cause.message, { cause });
+            }
+            retryReason = cause.reason;
+            await providerDelay(GENERATION_RETRY_DELAY_MS, linked.signal);
           }
-        };
+        }
+        throw new ProviderError("provider_response", "Structured model output failed validation.");
       } finally {
         const cleanupSignal = AbortSignal.timeout(30_000);
         for (const localAssetId of remoteByLocalId.keys()) {
@@ -840,10 +1023,12 @@ export class VolcengineArkProvider implements ModelProvider {
     scope: AuditScope,
     modelId?: typeof ARK_V1_MODEL,
     localAssetId?: string,
-    bodyFactory?: () => NonNullable<RequestInit["body"]>
+    bodyFactory?: () => NonNullable<RequestInit["body"]>,
+    generationAttempt?: 1 | 2
   ): Promise<HttpResult> {
     let lastCause: unknown;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+    const requestRetries = endpoint === "responses.create" ? 0 : this.maxRetries;
+    for (let attempt = 0; attempt <= requestRetries; attempt += 1) {
       const started = Date.now();
       try {
         const response = await this.fetchImpl(url, {
@@ -869,7 +1054,8 @@ export class VolcengineArkProvider implements ModelProvider {
             latencyMs,
             requestFingerprint: fingerprint,
             ...(modelId === undefined ? {} : { modelId }),
-            ...(localAssetId === undefined ? {} : { localAssetId })
+            ...(localAssetId === undefined ? {} : { localAssetId }),
+            ...(generationAttempt === undefined ? {} : { attempt: generationAttempt })
           });
           return {
             status: response.status,
@@ -887,9 +1073,10 @@ export class VolcengineArkProvider implements ModelProvider {
           requestFingerprint: fingerprint,
           errorCode: code,
           ...(modelId === undefined ? {} : { modelId }),
-          ...(localAssetId === undefined ? {} : { localAssetId })
+          ...(localAssetId === undefined ? {} : { localAssetId }),
+          ...(generationAttempt === undefined ? {} : { attempt: generationAttempt })
         });
-        if (!isRetryable(response.status) || attempt === this.maxRetries) {
+        if (!isRetryable(response.status) || attempt === requestRetries) {
           throw new ProviderError(code, safeMessage(response.status), {
             retryable: isRetryable(response.status),
             status: response.status
@@ -903,7 +1090,7 @@ export class VolcengineArkProvider implements ModelProvider {
         }
         if (cause instanceof ProviderError && !cause.retryable) throw cause;
         lastCause = cause;
-        if (attempt === this.maxRetries) {
+        if (attempt === requestRetries) {
           if (cause instanceof ProviderError) throw cause;
           throw new ProviderError("provider_unavailable", "Provider network request failed.", {
             retryable: true,
@@ -919,16 +1106,49 @@ export class VolcengineArkProvider implements ModelProvider {
   private validatePlanning(
     value: unknown,
     resources: readonly PreparedResource[],
-    request: UnderstandingRequest
+    planning: PlanningContext,
+    schema: typeof MODEL_PLANNING_JSON_SCHEMA
   ): { understanding: NormalizedUnderstanding; storyboard: ModelStoryboard } {
     const ajv = new Ajv2020({ allErrors: true, strict: true });
-    const validate = ajv.compile(MODEL_PLANNING_JSON_SCHEMA);
-    if (!validate(value)) throw new ProviderError("provider_response", "Structured AI plan failed schema validation.");
-    const envelope = value as {
+    const validate = ajv.compile(schema);
+    if (!validate(value)) {
+      throw new PlanningResponseError(
+        "SCHEMA_INVALID",
+        "Structured AI plan failed schema validation.",
+        { validationErrors: validate.errors?.length ?? 0 }
+      );
+    }
+    const modelEnvelope = structuredClone(value) as {
       contract: "ai-task/v1";
       understanding: NormalizedUnderstanding;
       storyboard: ModelStoryboard;
     };
+    const envelope = {
+      contract: modelEnvelope.contract,
+      understanding: modelEnvelope.understanding,
+      storyboard: {
+        ...modelEnvelope.storyboard,
+        duration: planning.durationSeconds,
+        width: planning.width,
+        height: planning.height,
+        fps: planning.fps,
+        style: [...planning.style],
+        brand: {
+          colors: [...planning.brand.colors],
+          tone: [...planning.brand.tone],
+          requiredText: [...planning.brand.requiredText],
+          forbiddenContent: [...planning.brand.forbiddenContent],
+          logoAssetIds: [...planning.brand.logoAssetIds]
+        }
+      }
+    } satisfies { contract: "ai-task/v1"; understanding: NormalizedUnderstanding; storyboard: ModelStoryboard };
+    if (!validate(envelope)) {
+      throw new PlanningResponseError(
+        "PLANNING_CONSTRAINT",
+        "Server-authoritative planning projection failed schema validation.",
+        { validationErrors: validate.errors?.length ?? 0 }
+      );
+    }
     const result = envelope.understanding;
     const expectedImages = resources.filter((item) => item.input.modality === "image").map((item) => item.input.localAssetId);
     const expectedAudio = resources.filter((item) => item.input.modality === "audio").map((item) => item.input.localAssetId);
@@ -944,21 +1164,74 @@ export class VolcengineArkProvider implements ModelProvider {
       || new Set(storyboardAssetIds).size !== storyboardAssetIds.length
       || storyboardAssetIds.some((id) => !expectedVisual.has(id!))
       || [...expectedVisual].some((id) => !storyboardAssetIds.includes(id))) {
-      throw new ProviderError("security", "Storyboard asset bindings did not exactly match verified visual inputs.");
-    }
-    const requestedPlanning = request.planning;
-    if (requestedPlanning !== undefined
-      && (envelope.storyboard.width !== requestedPlanning.width
-        || envelope.storyboard.height !== requestedPlanning.height
-        || envelope.storyboard.fps !== requestedPlanning.fps
-        || envelope.storyboard.duration !== requestedPlanning.durationSeconds
-        || JSON.stringify(envelope.storyboard.style) !== JSON.stringify(requestedPlanning.style)
-        || JSON.stringify(envelope.storyboard.brand) !== JSON.stringify(requestedPlanning.brand))) {
-      throw new ProviderError("provider_response", "Model Storyboard did not preserve planning constraints.");
+      throw new PlanningResponseError(
+        "ASSET_BINDING",
+        "Storyboard asset bindings did not exactly match verified visual inputs.",
+        {},
+        "security"
+      );
     }
     for (const item of result.video) {
       for (const shot of item.shots) {
-        if (shot.range.end < shot.range.start) throw new ProviderError("provider_response", "Video time range is reversed.");
+        if (shot.range.end < shot.range.start) {
+          throw new PlanningResponseError("SHOT_RANGE", "Video time range is reversed.");
+        }
+      }
+    }
+    const layersById = new Map(envelope.storyboard.layers.map((layer) => [layer.id, layer]));
+    if (layersById.size !== envelope.storyboard.layers.length) {
+      throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard layer IDs were not unique.");
+    }
+    const visibleText = envelope.storyboard.layers
+      .filter((layer): layer is Extract<ModelStoryboard["layers"][number], { type: "text" }> => layer.type === "text")
+      .map((layer) => layer.text);
+    if (planning.brand.requiredText.some((required) => !visibleText.some((text) => text.includes(required)))) {
+      throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard omitted required visible brand text.");
+    }
+    if (planning.brand.forbiddenContent.some((forbidden) => forbidden.length > 0
+      && visibleText.some((text) => text.toLowerCase().includes(forbidden.toLowerCase())))) {
+      throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard contained forbidden brand text.");
+    }
+    if (planning.brand.logoAssetIds.some((id) => !expectedImages.includes(id))) {
+      throw new PlanningResponseError(
+        "ASSET_BINDING",
+        "Planning logo IDs did not match verified image inputs.",
+        {},
+        "security"
+      );
+    }
+    const shotIds = new Set<string>();
+    for (const shot of envelope.storyboard.shots) {
+      if (shotIds.has(shot.id)) {
+        throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard shot IDs were not unique.");
+      }
+      shotIds.add(shot.id);
+      if (shot.end <= shot.start || shot.end > envelope.storyboard.duration) {
+        throw new PlanningResponseError("SHOT_RANGE", "Storyboard shot range was outside the authoritative duration.");
+      }
+      const shotLayerIds = new Set(shot.layerIds);
+      if (shotLayerIds.size !== shot.layerIds.length || shot.layerIds.some((id) => !layersById.has(id))) {
+        throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard shot referenced duplicate or unknown layers.");
+      }
+      for (const selection of shot.effects) {
+        const definition = P0_EFFECTS.find((effect) => effect.effectId === selection.effectId);
+        if (definition === undefined || definition.sourceId !== selection.sourceId
+          || definition.version !== selection.effectVersion) {
+          throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard effect did not match the authoritative catalog.");
+        }
+        if (!shotLayerIds.has(selection.targetLayerId)) {
+          throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard effect target was outside its shot.");
+        }
+        const validateParams = new Ajv2020({ allErrors: true, strict: false }).compile(definition.parameterSchema);
+        const mergedParams = { ...structuredClone(definition.defaultPreset), ...selection.params };
+        const snapshots = effectParameterSnapshots(mergedParams);
+        if (snapshots.some((params) => !validateParams(params))) {
+          throw new PlanningResponseError(
+            "PLANNING_CONSTRAINT",
+            "Storyboard effect params failed the authoritative catalog schema.",
+            { validationErrors: validateParams.errors?.length ?? 0 }
+          );
+        }
       }
     }
     return { understanding: result, storyboard: envelope.storyboard };
@@ -966,11 +1239,21 @@ export class VolcengineArkProvider implements ModelProvider {
 
   private assertExactAssetIds(modality: string, expected: readonly string[], actual: readonly string[]): void {
     if (actual.length !== expected.length || new Set(actual).size !== actual.length) {
-      throw new ProviderError("security", `Model output ${modality} IDs were duplicate, missing, or extra.`);
+      throw new PlanningResponseError(
+        "ASSET_BINDING",
+        `Model output ${modality} IDs were duplicate, missing, or extra.`,
+        {},
+        "security"
+      );
     }
     const expectedSet = new Set(expected);
     if (actual.some((id) => !expectedSet.has(id)) || expected.some((id) => !actual.includes(id))) {
-      throw new ProviderError("security", `Model output ${modality} IDs did not match verified inputs.`);
+      throw new PlanningResponseError(
+        "ASSET_BINDING",
+        `Model output ${modality} IDs did not match verified inputs.`,
+        {},
+        "security"
+      );
     }
   }
 

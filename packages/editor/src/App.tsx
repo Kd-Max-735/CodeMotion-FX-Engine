@@ -42,6 +42,7 @@ import {
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { evaluateAnimatable } from "@codemotion/timeline";
 import type { JsonValue, LayerDefinition, MotionProject, Vector3 } from "@codemotion/core";
+import type { ApplicationScope } from "@codemotion/schema";
 import { EFFECT_DRAG_MIME, isLabPipelineEffect } from "./lab-effect.js";
 import {
   P0_EDITOR_EFFECTS,
@@ -55,8 +56,9 @@ import { CorePreviewRenderer, ProjectPreviewRenderer, type PreviewStats } from "
 import { RenderCenter } from "./RenderCenter.js";
 import { AiPlanner } from "./AiPlanner.js";
 import { EditorStore } from "./store.js";
+import { sessionApi } from "./media-asset-client.js";
 
-interface AppProps { store: EditorStore }
+interface AppProps { store: EditorStore; scopes?: readonly ApplicationScope[] | undefined }
 
 const IconButton = ({ label, disabled, onClick, children, active = false, pressed }: {
   label: string;
@@ -77,12 +79,27 @@ function Brand({ compact = false }: { compact?: boolean }) {
 
 export function App({ store }: AppProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const [scopes, setScopes] = useState<readonly ApplicationScope[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void sessionApi.read(controller.signal).then((session) => {
+      if (!controller.signal.aborted) setScopes(session.principal.scopes);
+    }).catch((error) => {
+      if (!controller.signal.aborted && (!(error instanceof DOMException) || error.name !== "AbortError")) setScopes([]);
+    });
+    return () => controller.abort();
+  }, [snapshot.view]);
+  useEffect(() => {
+    const unauthenticated = () => { setScopes([]); store.setView("ai-planner"); };
+    window.addEventListener("cmfx:unauthenticated", unauthenticated);
+    return () => window.removeEventListener("cmfx:unauthenticated", unauthenticated);
+  }, [store]);
   return (
     <div className="app-shell">
       {snapshot.view === "workbench" && <Workbench store={store} />}
-      {snapshot.view === "editor" && <Editor store={store} />}
+      {snapshot.view === "editor" && <Editor store={store} scopes={scopes} />}
       {snapshot.view === "lab" && <EffectLab store={store} />}
-      {snapshot.view === "render-center" && <RenderCenter store={store} />}
+      {snapshot.view === "render-center" && <RenderCenter store={store} scopes={scopes} />}
       {snapshot.view === "ai-planner" && <AiPlanner store={store} />}
     </div>
   );
@@ -162,7 +179,7 @@ function Workbench({ store }: AppProps) {
   );
 }
 
-function Editor({ store }: AppProps) {
+function Editor({ store, scopes }: AppProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const project = snapshot.document.project;
   useEffect(() => {
@@ -202,7 +219,7 @@ function Editor({ store }: AppProps) {
       {snapshot.error && <div className="error-strip" role="alert"><Zap size={16} /><button onClick={() => snapshot.error?.layerId && store.selectLayer(snapshot.error.layerId)}><b>{snapshot.error.message}</b><span>{[snapshot.error.layerId, snapshot.error.effectId, snapshot.error.parameter].filter(Boolean).join(" / ") || snapshot.error.path}</span></button><IconButton label="关闭错误" onClick={() => store.clearError()}><X size={15} /></IconButton></div>}
       <div className="editor-body">
         <LayerPanel store={store} />
-        <CanvasViewport store={store} />
+        <CanvasViewport store={store} scopes={scopes} />
         <PropertyPanel store={store} />
       </div>
       <Timeline store={store} />
@@ -258,7 +275,7 @@ function LayerPanel({ store }: AppProps) {
   );
 }
 
-function CanvasViewport({ store }: AppProps) {
+function CanvasViewport({ store, scopes = [] }: AppProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const canvas = useRef<HTMLCanvasElement>(null);
   const renderer = useMemo(() => new ProjectPreviewRenderer(), []);
@@ -271,9 +288,13 @@ function CanvasViewport({ store }: AppProps) {
   const selected = findLayer(project, snapshot.document.selectedLayerId);
   useEffect(() => {
     let active = true;
+    if (!scopes.includes("project:preview")) {
+      setStats({ backend: "Unavailable", cpuMs: 0, drawCalls: 0, textures: 0, width: 0, height: 0, error: "当前会话缺少预览权限。" });
+      return () => { active = false; };
+    }
     const frame = requestAnimationFrame(() => {
       if (active && canvas.current) {
-        void renderer.render(project, snapshot.currentTime, canvas.current)
+        void renderer.render(snapshot.editableProject, snapshot.currentTime, canvas.current)
           .then((next) => { if (active) setStats(next); })
           .catch((cause) => {
             if (active && (!(cause instanceof DOMException) || cause.name !== "AbortError")) {
@@ -286,7 +307,7 @@ function CanvasViewport({ store }: AppProps) {
       active = false;
       cancelAnimationFrame(frame);
     };
-  }, [renderer, project, snapshot.currentTime, snapshot.revision]);
+  }, [renderer, project, scopes, snapshot.currentTime, snapshot.revision]);
   useEffect(() => () => renderer.dispose(), [renderer]);
   const selectionRect = selected ? canvasLayerRect(project, selected, snapshot.currentTime) : undefined;
   const dropEffect = (event: DragEvent) => {

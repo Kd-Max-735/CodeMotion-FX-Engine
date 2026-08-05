@@ -17,11 +17,12 @@ import {
   type AiTaskPrincipal,
   type LocalResourceInput,
   type ModelProvider,
+  type PlannedAnimation,
   type ProviderErrorCode,
   type ProviderProgress,
   type UnderstandingResult
 } from "@codemotion/ai-planner";
-import type { AiPlanTaskView } from "./ai-plan-client.js";
+import type { AiPlanCompletedResultV2 } from "@codemotion/schema";
 import { AuthHttpError } from "./auth-session-service.js";
 
 export interface AiSessionPrincipal {
@@ -34,8 +35,42 @@ export interface AiAssetResolver {
   resolve(owner: OwnerContext, assetId: string, signal?: AbortSignal): Promise<VerifiedStoredMedia>;
 }
 
+type AiPlanStatus = "running" | "cancelling" | "completed" | "failed" | "cancelled";
+
+interface AiPlanSafeError {
+  readonly code: ProviderErrorCode | "planning";
+  readonly message: string;
+  readonly retryable: boolean;
+}
+
+interface InternalAiPlanTaskView {
+  readonly id: string;
+  readonly status: AiPlanStatus;
+  readonly phase: ProviderProgress["phase"] | "accepted" | "plan";
+  readonly progress?: ProviderProgress;
+  readonly events: readonly ProviderProgress[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly modalities: readonly ("text" | "image" | "audio" | "video")[];
+  readonly result?: PlannedAnimation;
+  readonly error?: AiPlanSafeError;
+}
+
+export interface AiPlanBrowserTaskView {
+  readonly id: string;
+  readonly status: AiPlanStatus;
+  readonly phase: ProviderProgress["phase"] | "accepted" | "plan";
+  readonly progress?: ProviderProgress;
+  readonly events: readonly ProviderProgress[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly modalities: readonly ("text" | "image" | "audio" | "video")[];
+  readonly result?: AiPlanCompletedResultV2;
+  readonly error?: AiPlanSafeError;
+}
+
 interface InternalTask {
-  view: AiPlanTaskView;
+  view: InternalAiPlanTaskView;
   controller: AbortController;
   input: AiPlanningInputV1;
   principal: AiTaskPrincipal;
@@ -93,7 +128,7 @@ function expectedAssetTypes(reference: AiAssetReference): readonly string[] {
   return ["audio"];
 }
 
-function errorView(error: unknown): NonNullable<AiPlanTaskView["error"]> {
+function errorView(error: unknown): AiPlanSafeError {
   if (error instanceof ProviderError) {
     return { code: error.code, message: safeErrors[error.code], retryable: error.retryable };
   }
@@ -122,26 +157,36 @@ export class AiPlanService {
 
   get configured(): boolean { return this.provider !== undefined; }
 
-  private browserView(task: InternalTask): AiPlanTaskView {
-    const view = structuredClone(task.view);
-    if (view.status === "completed" && view.result !== undefined) {
-      return { ...view, result: serializeAiPlanCompletedResultV2(view.result) } as unknown as AiPlanTaskView;
-    }
-    return view;
+  private browserView(task: InternalTask): AiPlanBrowserTaskView {
+    const view = task.view;
+    return structuredClone({
+      id: view.id,
+      status: view.status,
+      phase: view.phase,
+      events: view.events,
+      createdAt: view.createdAt,
+      updatedAt: view.updatedAt,
+      modalities: view.modalities,
+      ...(view.progress === undefined ? {} : { progress: view.progress }),
+      ...(view.error === undefined ? {} : { error: view.error }),
+      ...(view.status === "completed" && view.result !== undefined
+        ? { result: serializeAiPlanCompletedResultV2(view.result) }
+        : {})
+    });
   }
 
-  list(rawPrincipal: AiSessionPrincipal): AiPlanTaskView[] {
+  list(rawPrincipal: AiSessionPrincipal): AiPlanBrowserTaskView[] {
     const owner = ownerOf(authorizedPrincipal(rawPrincipal));
     return this.tasks.list(owner).map(({ value }) => this.browserView(value))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  get(rawPrincipal: AiSessionPrincipal, id: string): AiPlanTaskView {
+  get(rawPrincipal: AiSessionPrincipal, id: string): AiPlanBrowserTaskView {
     const owner = ownerOf(authorizedPrincipal(rawPrincipal));
     return this.browserView(this.tasks.get(owner, id).value);
   }
 
-  async create(rawPrincipal: AiSessionPrincipal, rawInput: unknown): Promise<AiPlanTaskView> {
+  async create(rawPrincipal: AiSessionPrincipal, rawInput: unknown): Promise<AiPlanBrowserTaskView> {
     this.assertAccepting();
     const session = authorizedPrincipal(rawPrincipal);
     if (!this.provider) throw new Error("服务端 Provider 未配置。");
@@ -198,7 +243,7 @@ export class AiPlanService {
 
   dispose(): Promise<void> { return this.close(); }
 
-  cancel(rawPrincipal: AiSessionPrincipal, id: string): AiPlanTaskView {
+  cancel(rawPrincipal: AiSessionPrincipal, id: string): AiPlanBrowserTaskView {
     const owner = ownerOf(authorizedPrincipal(rawPrincipal));
     const task = this.tasks.get(owner, id).value;
     if (task.view.status !== "running") throw new Error("只有运行中的任务可以取消。");

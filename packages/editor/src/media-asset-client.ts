@@ -1,6 +1,7 @@
 import { csrfToken } from "./ai-plan-client.js";
+import { validateApplicationScopes, type ApplicationScope } from "@codemotion/schema";
 
-export type ApplicationScope = "ai:plan" | "assets:read" | "assets:write";
+export type { ApplicationScope } from "@codemotion/schema";
 export type AiAssetPurpose = "reference-image" | "reference-video" | "reference-audio" | "logo";
 export type BrowserMediaKind = "image" | "svg" | "audio" | "video";
 
@@ -28,13 +29,20 @@ export interface BrowserAssetSummaryV1 {
   readonly allowedPurposes: readonly AiAssetPurpose[];
 }
 
+export function hasApplicationScope(session: BrowserSessionV1 | undefined, scope: ApplicationScope): boolean {
+  return session?.principal.scopes.includes(scope) === true;
+}
+
 export class BrowserApiError extends Error {
   constructor(readonly status: number, readonly code: string, readonly retryable: boolean) {
-    super(messageFor(status));
+    super(messageFor(status, code));
   }
 }
 
-function messageFor(status: number): string {
+function messageFor(status: number, code: string): string {
+  if (code === "SERVICE_UNREACHABLE") return "认证服务未运行，请启动或重新启动开发服务器。";
+  if (code === "DEV_LOGIN_REJECTED") return "一次性 code 已过期、已使用或尚未绑定，请重新取得 code。";
+  if (code === "REQUEST_ORIGIN_REJECTED" || code === "LOGIN_ORIGIN_REJECTED") return "当前页面 Origin 被认证服务拒绝。";
   if (status === 401) return "登录已失效，请重新登录。";
   if (status === 403) return "当前账号缺少所需权限。";
   if (status === 409) return "请求状态冲突，请刷新后重试。";
@@ -42,13 +50,22 @@ function messageFor(status: number): string {
   if (status === 415) return "不支持此文件格式。";
   if (status === 422) return "文件未通过安全验证。";
   if (status === 429) return "上传过于频繁，请稍后重试。";
+  if (status === 500) return "服务响应不可用，请重新登录。";
+  if (status === 503) return "服务暂时不可用，请稍后重试。";
   return "服务请求失败。";
 }
 
 async function browserRequest(path: string, init: RequestInit = {}): Promise<unknown> {
-  const response = await fetch(path, { credentials: "same-origin", ...init });
+  let response: Response;
+  try {
+    response = await fetch(path, { credentials: "same-origin", ...init });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new BrowserApiError(0, "SERVICE_UNREACHABLE", true);
+  }
   const body = await response.json().catch(() => ({})) as { error?: { code?: unknown; retryable?: unknown } };
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event("cmfx:unauthenticated"));
     throw new BrowserApiError(
       response.status,
       typeof body.error?.code === "string" ? body.error.code : `HTTP_${response.status}`,
@@ -65,12 +82,19 @@ function csrfHeaders(): HeadersInit {
 }
 
 function session(value: unknown): BrowserSessionV1 {
-  if (typeof value !== "object" || value === null) throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  if (typeof value !== "object" || value === null || Array.isArray(value)
+    || Object.keys(value).length !== 2 || !Object.hasOwn(value, "authenticated") || !Object.hasOwn(value, "principal")) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
   const raw = value as { authenticated?: unknown; principal?: Record<string, unknown> };
   const principal = raw.principal;
-  if (raw.authenticated !== true || !principal || typeof principal.tenantId !== "string"
-    || typeof principal.userId !== "string" || typeof principal.expiresAt !== "number"
-    || !Array.isArray(principal.scopes) || principal.scopes.some((item) => !["ai:plan", "assets:read", "assets:write"].includes(String(item)))) {
+  if (raw.authenticated !== true || !principal || Array.isArray(principal)
+    || Object.keys(principal).length !== 4
+    || !["tenantId", "userId", "scopes", "expiresAt"].every((key) => Object.hasOwn(principal, key))
+    || typeof principal.tenantId !== "string" || principal.tenantId.length < 1 || principal.tenantId.length > 256
+    || typeof principal.userId !== "string" || principal.userId.length < 1 || principal.userId.length > 256
+    || typeof principal.expiresAt !== "number" || !Number.isInteger(principal.expiresAt)
+    || !validateApplicationScopes(principal.scopes)) {
     throw new BrowserApiError(500, "INVALID_RESPONSE", false);
   }
   return {
@@ -78,7 +102,7 @@ function session(value: unknown): BrowserSessionV1 {
     principal: {
       tenantId: principal.tenantId,
       userId: principal.userId,
-      scopes: [...principal.scopes] as ApplicationScope[],
+      scopes: [...principal.scopes],
       expiresAt: principal.expiresAt
     }
   };
@@ -114,15 +138,19 @@ function asset(value: unknown): BrowserAssetSummaryV1 {
 }
 
 export const sessionApi = {
-  read: async (): Promise<BrowserSessionV1> => session(await browserRequest("/api/session")),
+  read: async (signal?: AbortSignal): Promise<BrowserSessionV1> => session(await browserRequest(
+    "/api/session",
+    signal === undefined ? {} : { signal }
+  )),
   startProductionLogin: (): void => { window.location.assign("/auth/login"); },
   startDevelopmentLogin: (): void => { window.location.assign("/auth/dev/login"); },
-  finishDevelopmentLogin: async (code: string): Promise<void> => {
+  finishDevelopmentLogin: async (code: string, signal?: AbortSignal): Promise<void> => {
     await browserRequest("/auth/dev/session", {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code })
+      body: JSON.stringify({ code }),
+      ...(signal === undefined ? {} : { signal })
     });
   },
   logout: async (): Promise<void> => {
@@ -131,12 +159,15 @@ export const sessionApi = {
 };
 
 export const mediaAssetApi = {
-  list: async (options: { limit?: number; cursor?: string; kind?: BrowserMediaKind } = {}) => {
+  list: async (options: { limit?: number; cursor?: string; kind?: BrowserMediaKind } = {}, signal?: AbortSignal) => {
     const query = new URLSearchParams();
     if (options.limit !== undefined) query.set("limit", String(options.limit));
     if (options.cursor !== undefined) query.set("cursor", options.cursor);
     if (options.kind !== undefined) query.set("kind", options.kind);
-    const raw = await browserRequest(`/api/media-assets${query.size ? `?${query}` : ""}`) as { items?: unknown; nextCursor?: unknown };
+    const raw = await browserRequest(
+      `/api/media-assets${query.size ? `?${query}` : ""}`,
+      signal === undefined ? {} : { signal }
+    ) as { items?: unknown; nextCursor?: unknown };
     if (!Array.isArray(raw.items) || !(raw.nextCursor === null || typeof raw.nextCursor === "string")) {
       throw new BrowserApiError(500, "INVALID_RESPONSE", false);
     }

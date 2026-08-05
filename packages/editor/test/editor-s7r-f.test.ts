@@ -26,7 +26,15 @@ function json(value: unknown, status = 200): Response {
 describe("S7R-F browser contracts", () => {
   it("posts the exact ai-task/v1 body with same-origin credentials and CSRF", async () => {
     vi.stubGlobal("document", { cookie: "cmfx_dev_csrf=csrf-value" });
-    const fetchMock = vi.fn(async (_path: RequestInfo | URL, _init?: RequestInit) => json({ task: { id: "task-server" } }, 202));
+    const fetchMock = vi.fn(async (_path: RequestInfo | URL, _init?: RequestInit) => json({ task: {
+      id: "task-server",
+      status: "running",
+      phase: "accepted",
+      events: [],
+      createdAt: "2026-08-04T00:00:00.000Z",
+      updatedAt: "2026-08-04T00:00:00.000Z",
+      modalities: ["text", "image"]
+    } }, 202));
     vi.stubGlobal("fetch", fetchMock);
     const input = buildAiPlanningInput({
       prompt: "品牌片头",
@@ -178,7 +186,9 @@ describe("S7R-F editor interactions", () => {
   it("mounts one server runtime only in configureServer and removes stale Effect Lab labels", () => {
     const vite = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
     expect(vite.match(/createServerRuntime\(/g)).toHaveLength(1);
-    expect(vite).toContain("configureServer(server)");
+    expect(vite).toContain("configureServer(server: ViteDevServer)");
+    expect(vite).not.toContain("codemotion-export-api");
+    expect(vite).not.toContain("codemotion-editor-preview-api");
     expect(vite).not.toContain("configurePreviewServer(server) { server.middlewares.use(runtime");
     expect(vite).not.toContain("createAiPlanApi");
     expect(vite).not.toContain("TenantMediaStore");
