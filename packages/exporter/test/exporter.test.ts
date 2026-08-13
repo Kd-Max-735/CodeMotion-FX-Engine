@@ -382,13 +382,15 @@ describe("media input contract", () => {
     expect(verified.trustedBytes).toBe((await stat(imported.storedPath)).size);
   });
 
-  it("rejects an unchanged 11 MB image declared as 130 bytes without side effects", async () => {
-    const exactBytes = 11_534_447;
+  it("rejects an unchanged large image declared as 130 bytes without side effects", async () => {
     const largeImagePath = resolve(input, "declared-small.png");
-    const source = await readFile(imagePath);
-    const largeImage = Buffer.alloc(exactBytes);
-    source.copy(largeImage);
-    await writeFile(largeImagePath, largeImage);
+    await runProcess("ffmpeg", [
+      "-v", "error", "-y", "-f", "lavfi", "-i",
+      "nullsrc=s=2048x2048,noise=alls=100:allf=t+u",
+      "-frames:v", "1", "-compression_level", "0", largeImagePath
+    ]);
+    const exactBytes = (await stat(largeImagePath)).size;
+    expect(exactBytes).toBeGreaterThan(10 * 1024 * 1024);
     const verifyStorage = resolve(root, "verify-declared-small");
     const imported = await importMedia({
       sourcePath: largeImagePath,

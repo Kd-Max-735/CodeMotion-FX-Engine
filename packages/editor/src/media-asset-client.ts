@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import { csrfToken } from "./ai-plan-client.js";
 import { validateApplicationScopes, type ApplicationScope } from "@codemotion/schema";
 
@@ -41,10 +43,10 @@ export class BrowserApiError extends Error {
 
 function messageFor(status: number, code: string): string {
   if (code === "SERVICE_UNREACHABLE") return "认证服务未运行，请启动或重新启动开发服务器。";
-  if (code === "DEV_LOGIN_REJECTED") return "一次性 code 已过期、已使用或尚未绑定，请重新取得 code。";
   if (code === "REQUEST_ORIGIN_REJECTED" || code === "LOGIN_ORIGIN_REJECTED") return "当前页面 Origin 被认证服务拒绝。";
   if (status === 401) return "登录已失效，请重新登录。";
   if (status === 403) return "当前账号缺少所需权限。";
+  if (code === "ASSET_IN_USE") return "该素材正被当前工程或运行中的任务使用，暂时不能删除。";
   if (status === 409) return "请求状态冲突，请刷新后重试。";
   if (status === 413) return "文件超过服务端限制。";
   if (status === 415) return "不支持此文件格式。";
@@ -65,7 +67,9 @@ async function browserRequest(path: string, init: RequestInit = {}): Promise<unk
   }
   const body = await response.json().catch(() => ({})) as { error?: { code?: unknown; retryable?: unknown } };
   if (!response.ok) {
-    if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event("cmfx:unauthenticated"));
+    if (response.status === 401 && typeof window !== "undefined" && path !== "/api/session") {
+      window.dispatchEvent(new Event("cmfx:unauthenticated"));
+    }
     throw new BrowserApiError(
       response.status,
       typeof body.error?.code === "string" ? body.error.code : `HTTP_${response.status}`,
@@ -137,24 +141,44 @@ function asset(value: unknown): BrowserAssetSummaryV1 {
   };
 }
 
-export const sessionApi = {
-  read: async (signal?: AbortSignal): Promise<BrowserSessionV1> => session(await browserRequest(
+export function isLocalDevelopmentClient(): boolean {
+  return import.meta.env.DEV && typeof window !== "undefined" && window.location.origin === "http://127.0.0.1:4174";
+}
+
+let developmentAutoSessionPromise: Promise<void> | undefined;
+
+async function readSession(signal?: AbortSignal): Promise<BrowserSessionV1> {
+  return session(await browserRequest(
     "/api/session",
     signal === undefined ? {} : { signal }
-  )),
-  startProductionLogin: (): void => { window.location.assign("/auth/login"); },
-  startDevelopmentLogin: (): void => { window.location.assign("/auth/dev/login"); },
-  finishDevelopmentLogin: async (code: string, signal?: AbortSignal): Promise<void> => {
-    await browserRequest("/auth/dev/session", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code }),
-      ...(signal === undefined ? {} : { signal })
-    });
+  ));
+}
+
+export const sessionApi = {
+  read: readSession,
+  readWithDevelopmentFallback: async (signal?: AbortSignal): Promise<BrowserSessionV1> => {
+    try { return await readSession(signal); }
+    catch (error) {
+      if (!(error instanceof BrowserApiError) || error.status !== 401 || !isLocalDevelopmentClient()) throw error;
+      if (developmentAutoSessionPromise === undefined) {
+        developmentAutoSessionPromise = browserRequest("/auth/dev/auto-session", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+          ...(signal === undefined ? {} : { signal })
+        }).then(() => undefined).catch((cause) => {
+          developmentAutoSessionPromise = undefined;
+          throw cause;
+        });
+      }
+      await developmentAutoSessionPromise;
+      return readSession(signal);
+    }
   },
+  startProductionLogin: (): void => { window.location.assign("/auth/login"); },
   logout: async (): Promise<void> => {
     await browserRequest("/auth/logout", { method: "POST", headers: csrfHeaders() });
+    developmentAutoSessionPromise = undefined;
   }
 };
 
@@ -184,5 +208,12 @@ export const mediaAssetApi = {
       ...(signal === undefined ? {} : { signal })
     }) as { asset?: unknown };
     return asset(raw.asset);
+  },
+  delete: async (assetId: string, signal?: AbortSignal): Promise<void> => {
+    await browserRequest(`/api/media-assets/${encodeURIComponent(assetId)}`, {
+      method: "DELETE",
+      headers: csrfHeaders(),
+      ...(signal === undefined ? {} : { signal })
+    });
   }
 };

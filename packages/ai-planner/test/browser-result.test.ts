@@ -224,12 +224,18 @@ describe("AI completed browser result", () => {
       /textRasterSource|vectorRasterSource|glyphCoverage|parseSvgPathData|function\s+(?:textSource|shapeSource|inlineSvgSource)/u
     );
 
-    const textResult = await new OfflineMockProvider().understand({ principal, prompt: "formal text title" });
+    const textResult = await new OfflineMockProvider().understand({
+      principal,
+      prompt: "新增文字“Formal title”并使用打字机"
+    });
     const first = await planAnimation(textResult, { duration: 1, previewFrameLimit: 2 });
     const second = await planAnimation(textResult, { duration: 1, previewFrameLimit: 2 });
     expect(first.preview.frameHashes).toEqual(second.preview.frameHashes);
 
-    const vectorResult = await new OfflineMockProvider().understand({ principal, prompt: "ink contour vector" });
+    const vectorResult = await new OfflineMockProvider().understand({
+      principal,
+      prompt: "use fx.draw.inkSpread for an ink contour vector"
+    });
     const vector = await planAnimation(vectorResult, {
       duration: 1,
       previewFrameLimit: 2,
@@ -241,7 +247,10 @@ describe("AI completed browser result", () => {
 
   it("preserves model control characters until the formal adapter rejects them", async () => {
     rasterObservations.requests.length = 0;
-    const input = await new OfflineMockProvider().understand({ principal, prompt: "formal text title" });
+    const input = await new OfflineMockProvider().understand({
+      principal,
+      prompt: "新增文字“Formal title”并使用打字机"
+    });
     const modelText = String.fromCodePoint(65, 0, 66);
     const textLayer = input.storyboard.layers.find((layer) => layer.type === "text");
     if (textLayer?.type !== "text") throw new Error("Expected a model text layer.");
@@ -260,7 +269,10 @@ describe("AI completed browser result", () => {
   it("hands the formal three-glyph space source to the draft renderer unchanged", async () => {
     rasterObservations.formalSources.length = 0;
     rasterObservations.rendererSources.length = 0;
-    const input = await new OfflineMockProvider().understand({ principal, prompt: "formal text title" });
+    const input = await new OfflineMockProvider().understand({
+      principal,
+      prompt: "新增文字“Formal title”并使用打字机"
+    });
     const textLayer = input.storyboard.layers.find((layer) => layer.type === "text");
     if (textLayer?.type !== "text") throw new Error("Expected a model text layer.");
     textLayer.text = "A B";

@@ -1,8 +1,7 @@
 import { defineConfig, type Plugin, type PluginOption, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
-import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isAbsolute, relative, resolve } from "node:path";
+import { resolve } from "node:path";
 import { createServerRuntime } from "./src/server-runtime.js";
 
 const workspaceRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
@@ -12,19 +11,6 @@ type RuntimeFactory = (options: Parameters<typeof createServerRuntime>[0]) => Pr
 
 const defaultRuntimeFactory: RuntimeFactory = (options) => createServerRuntime(options);
 const RUNTIME_CLOSE_TIMEOUT_MS = 30_000;
-
-function developmentLoginCodeFile(): { write(code: string): void; clear(): void } | undefined {
-  const configured = process.env.CODEMOTION_DEV_LOGIN_CODE_FILE?.trim();
-  if (!configured) return undefined;
-  const root = resolve(workspaceRoot, "tmp");
-  const target = resolve(root, configured);
-  const fromRoot = relative(root, target);
-  if (!fromRoot || isAbsolute(fromRoot) || fromRoot === ".." || fromRoot.startsWith(`..\\`) || fromRoot.startsWith("../")) {
-    throw new Error("CODEMOTION_DEV_LOGIN_CODE_FILE must resolve to one file inside the workspace tmp directory.");
-  }
-  const write = (value: string): void => writeFileSync(target, value, { encoding: "utf8", mode: 0o600 });
-  return { write, clear: () => write("") };
-}
 
 function settledClose(callback: () => Promise<void>): Promise<void> {
   try {
@@ -57,7 +43,6 @@ export function createServerRuntimePlugin(
     async configureServer(server: ViteDevServer) {
       const host = "127.0.0.1";
       const port = 4174;
-      const loginCodeFile = developmentLoginCodeFile();
       let runtime: RuntimeLifecycle;
       try {
         runtime = await createRuntime({
@@ -66,11 +51,9 @@ export function createServerRuntimePlugin(
           listenHost: host,
           publicOrigin: `http://${host}:${port}`,
           mediaRoot: resolve(workspaceRoot, "tmp/stage-6-media"),
-          uploadTempRoot: resolve(workspaceRoot, "tmp/browser-upload"),
-          ...(loginCodeFile === undefined ? {} : { writeDevLoginCode: loginCodeFile.write })
+          uploadTempRoot: resolve(workspaceRoot, "tmp/browser-upload")
         });
       } catch (error) {
-        loginCodeFile?.clear();
         throw error;
       }
       const closeViteServer = server.close.bind(server);
@@ -83,10 +66,7 @@ export function createServerRuntimePlugin(
               boundedRuntimeClose(() => runtime.close()),
               settledClose(closeViteServer)
             ]);
-            let loginCodeResult: PromiseSettledResult<void> = { status: "fulfilled", value: undefined };
-            try { loginCodeFile?.clear(); }
-            catch (reason) { loginCodeResult = { status: "rejected", reason }; }
-            const failures = [runtimeResult, viteResult, loginCodeResult]
+            const failures = [runtimeResult, viteResult]
               .filter((result): result is PromiseRejectedResult => result.status === "rejected")
               .map((result) => result.reason);
             if (failures.length === 1) throw failures[0];
@@ -107,6 +87,6 @@ export default defineConfig({
     createServerRuntimePlugin()
   ],
   build: { outDir: "dist-app", emptyOutDir: true },
-  server: { port: 4174 },
+  server: { host: "127.0.0.1", port: 4174, strictPort: true },
   preview: { port: 4174 }
 });

@@ -40,7 +40,7 @@ export type Formal2dRasterErrorCodeV1 =
   | "RASTER_BUDGET_EXCEEDED";
 
 const ERROR_MESSAGES: Readonly<Record<Formal2dRasterErrorCodeV1, string>> = Object.freeze({
-  FONT_UNAVAILABLE: "Formal text rasterization is unavailable.",
+  FONT_UNAVAILABLE: "Noto Sans SC is unavailable or does not contain every requested character.",
   INLINE_SVG_INVALID: "Formal vector raster input is invalid.",
   RASTER_BUDGET_EXCEEDED: "Formal raster budget exceeded."
 });
@@ -86,7 +86,7 @@ class FormalRasterAbortError extends Error {
 
 const FONT_FAMILY = "Codemotion Planner Unicode Bitmap";
 const FONT_ID = "font.codemotion.unicode-bitmap-v1";
-const FONT_ALGORITHM_VERSION = "unicode-bitmap-v1.0.0";
+const FONT_ALGORITHM_VERSION = "noto-sans-sc-canvas-v1.0.0";
 const MAX_TEXT_SCALARS = 4_096;
 const MAX_GLYPH_COVERAGE_BYTES = 16 * 1024 * 1024;
 const MAX_PATH_BYTES = 64 * 1024;
@@ -330,29 +330,101 @@ function rawScalarCount(value: string): number | undefined {
   return count;
 }
 
-function glyphCoverage(
-  segment: string,
-  width: number,
-  height: number,
-  identity: string,
-  signal: AbortSignal | undefined
-): CoverageBuffer {
-  const data = new Uint8Array(width * height);
-  if (!/^\s+$/u.test(segment)) {
-    const bits = hashNumber(identity);
-    for (let y = 0; y < height; y += 1) {
-      abort(signal);
-      for (let x = 0; x < width; x += 1) {
-        const column = Math.min(4, Math.floor(x * 5 / width));
-        const row = Math.min(6, Math.floor(y * 7 / height));
-        const edge = column === 0 || column === 4 || row === 0 || row === 6;
-        const diagonal = (column + row + (bits & 3)) % 5 === 0;
-        const content = (bits >>> ((column + row * 5) % 31)) & 1;
-        data[y * width + x] = edge || diagonal || content === 1 ? 255 : 0;
+interface NodeFontRuntime {
+  readonly fontPath: string;
+  readonly hasGlyph: (scalar: string) => boolean;
+  readonly rasterize: (segment: string, pixelSize: number) => {
+    readonly coverage: CoverageBuffer;
+    readonly advance: number;
+  };
+}
+
+let nodeFontRuntime: NodeFontRuntime | undefined;
+
+function loadNodeFontRuntime(): NodeFontRuntime {
+  if (nodeFontRuntime) return nodeFontRuntime;
+  const processValue = runtimeProcess as (typeof runtimeProcess & {
+    readonly env?: Readonly<Record<string, string | undefined>>;
+  }) | undefined;
+  const moduleApi = processValue?.getBuiltinModule?.("node:module") as {
+    readonly createRequire?: (url: string) => (identifier: string) => unknown;
+  } | undefined;
+  if (!moduleApi?.createRequire) failure("FONT_UNAVAILABLE");
+  const require = moduleApi.createRequire(import.meta.url);
+  const fs = require("node:fs") as {
+    readonly existsSync: (path: string) => boolean;
+    readonly readFileSync: (path: string) => Uint8Array;
+  };
+  const candidates = [
+    processValue?.env?.CMFX_CJK_FONT_PATH,
+    "C:\\Windows\\Fonts\\Noto Sans SC (TrueType).otf",
+    "C:\\Windows\\Fonts\\NotoSansSC-VF.ttf",
+    "C:\\Windows\\Fonts\\Deng.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf",
+    "/System/Library/Fonts/PingFang.ttc"
+  ].filter((path): path is string => typeof path === "string" && path.length > 0);
+  const fontPath = candidates.find((path) => fs.existsSync(path));
+  if (!fontPath) failure("FONT_UNAVAILABLE");
+  try {
+    const canvas = require("@napi-rs/canvas") as {
+      readonly GlobalFonts: {
+        has(family: string): boolean;
+        registerFromPath(path: string, alias?: string): unknown;
+      };
+      readonly createCanvas: (width: number, height: number) => {
+        getContext(type: "2d"): {
+          font: string;
+          fillStyle: string;
+          textBaseline: "top";
+          measureText(text: string): { width: number };
+          fillText(text: string, x: number, y: number): void;
+          getImageData(x: number, y: number, width: number, height: number): { data: Uint8ClampedArray };
+        };
+      };
+    };
+    const opentype = require("opentype.js") as {
+      readonly parse: (buffer: ArrayBuffer) => { charToGlyphIndex(value: string): number };
+    };
+    if (!canvas.GlobalFonts.has(FONT_FAMILY)
+      && !canvas.GlobalFonts.registerFromPath(fontPath, FONT_FAMILY)) failure("FONT_UNAVAILABLE");
+    const bytes = fs.readFileSync(fontPath);
+    const font = opentype.parse(Uint8Array.from(bytes).buffer);
+    nodeFontRuntime = Object.freeze({
+      fontPath,
+      hasGlyph: (scalar: string) => /^\s$/u.test(scalar) || font.charToGlyphIndex(scalar) !== 0,
+      rasterize: (segment: string, pixelSize: number) => {
+        const probe = canvas.createCanvas(1, 1).getContext("2d");
+        probe.font = `500 ${pixelSize}px "${FONT_FAMILY}"`;
+        const advance = Math.max(1, Math.ceil(probe.measureText(segment).width));
+        const width = Math.max(1, advance + 4);
+        const height = Math.max(1, Math.ceil(pixelSize * 1.5) + 4);
+        const surface = canvas.createCanvas(width, height);
+        const context = surface.getContext("2d");
+        context.font = `500 ${pixelSize}px "${FONT_FAMILY}"`;
+        context.fillStyle = "#ffffff";
+        context.textBaseline = "top";
+        context.fillText(segment, 2, 2);
+        const rgba = context.getImageData(0, 0, width, height).data;
+        const data = new Uint8Array(width * height);
+        let visible = false;
+        for (let index = 0; index < data.length; index += 1) {
+          const alpha = rgba[index * 4 + 3] ?? 0;
+          data[index] = alpha;
+          visible ||= alpha > 0;
+        }
+        if (!visible && !/^\s+$/u.test(segment)) failure("FONT_UNAVAILABLE");
+        return {
+          advance: advance + 1,
+          coverage: Object.freeze({ width, height, data, rowOrder: "top-to-bottom" as const })
+        };
       }
-    }
+    });
+    return nodeFontRuntime;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && formalErrors.has(error)) throw error;
+    failure("FONT_UNAVAILABLE");
   }
-  return Object.freeze({ width, height, data, rowOrder: "top-to-bottom" as const });
 }
 
 function textSource(snapshot: Formal2dRasterRequestSnapshot): TextRasterSource {
@@ -373,18 +445,16 @@ function textSource(snapshot: Formal2dRasterRequestSnapshot): TextRasterSource {
   const text = textValue.normalize("NFC");
   const units = [...new Intl.Segmenter("und", { granularity: "grapheme" }).segment(text)];
   if (units.some((unit) => !supportedGrapheme(unit.segment))) failure("FONT_UNAVAILABLE");
-  const glyphWidth = Math.max(1, Math.round(
-    fontSize * 0.62 * snapshot.renderWidth / snapshot.compositionWidth
-  ));
-  const glyphHeight = Math.max(1, Math.round(
+  const runtime = loadNodeFontRuntime();
+  if (units.some((unit) => [...unit.segment].some((scalar) => !runtime.hasGlyph(scalar)))) {
+    failure("FONT_UNAVAILABLE");
+  }
+  const pixelSize = Math.max(1, Math.round(
     fontSize * snapshot.renderHeight / snapshot.compositionHeight
   ));
-  const coverageBytes = glyphWidth * glyphHeight * units.length;
-  if (!Number.isSafeInteger(coverageBytes) || coverageBytes > MAX_GLYPH_COVERAGE_BYTES) {
-    failure("RASTER_BUDGET_EXCEEDED");
-  }
   const identityPrefix = [
     FONT_ALGORITHM_VERSION,
+    runtime.fontPath,
     fontSize,
     snapshot.compositionWidth,
     snapshot.compositionHeight,
@@ -392,23 +462,39 @@ function textSource(snapshot: Formal2dRasterRequestSnapshot): TextRasterSource {
     snapshot.renderHeight,
     snapshot.projectSeed
   ].join("\u0000");
-  const glyphs: RasterGlyph[] = units.map((unit, index) => {
+  let coverageBytes = 0;
+  const renderedGlyphs = units.map((unit) => {
     abort(snapshot.signal);
-    const identity = `${identityPrefix}\u0000${unit.segment}`;
-    const coverage = glyphCoverage(unit.segment, glyphWidth, glyphHeight, identity, snapshot.signal);
+    const rendered = runtime.rasterize(unit.segment, pixelSize);
+    coverageBytes += rendered.coverage.data.byteLength;
+    if (!Number.isSafeInteger(coverageBytes) || coverageBytes > MAX_GLYPH_COVERAGE_BYTES) {
+      failure("RASTER_BUDGET_EXCEEDED");
+    }
+    return { unit, rendered };
+  });
+  const textWidth = renderedGlyphs.reduce((total, item) => total + item.rendered.advance, 0);
+  const textHeight = renderedGlyphs.reduce(
+    (maximum, item) => Math.max(maximum, item.rendered.coverage.height),
+    0
+  );
+  let cursor = Math.max(0, Math.floor((snapshot.renderWidth - textWidth) / 2));
+  const originY = Math.max(0, Math.floor((snapshot.renderHeight - textHeight) / 2));
+  const glyphs: RasterGlyph[] = renderedGlyphs.map(({ unit, rendered }) => {
+    const x = cursor;
+    cursor += rendered.advance;
     return Object.freeze({
-      glyphId: hashNumber(`${FONT_ALGORITHM_VERSION}\u0000${unit.segment}`),
+      glyphId: hashNumber(`${identityPrefix}\u0000${unit.segment}`),
       cluster: unit.index,
-      advance: glyphWidth + 1,
+      advance: rendered.advance,
       offsetX: 0,
       offsetY: 0,
       bounds: Object.freeze({
-        x: index * (glyphWidth + 1),
-        y: 0,
-        width: glyphWidth,
-        height: glyphHeight
+        x,
+        y: originY,
+        width: rendered.coverage.width,
+        height: rendered.coverage.height
       }),
-      coverage
+      coverage: rendered.coverage
     });
   });
   abort(snapshot.signal);
@@ -418,7 +504,7 @@ function textSource(snapshot: Formal2dRasterRequestSnapshot): TextRasterSource {
     font: Object.freeze({
       fontId: FONT_ID,
       assetId: FONT_ID,
-      assetHash: `builtin:${FONT_ID}:${FONT_ALGORITHM_VERSION}`,
+      assetHash: `system:noto-sans-sc:${FONT_ALGORITHM_VERSION}`,
       family: FONT_FAMILY,
       style: "normal",
       weight: 500,

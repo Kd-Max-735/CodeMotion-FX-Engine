@@ -313,10 +313,12 @@ function assertRuntimeInput(
     throw new TypeError(`${blueprint.effectId} requires real text glyph coverage.`);
   }
   if ((blueprint.category === "vector" || blueprint.category === "draw")
+    && !(blueprint.sourceId === "D01" && kind === "text")
     && kind !== "shape" && kind !== "svg") {
     throw new TypeError(`${blueprint.effectId} requires a real Shape/SVG path source.`);
   }
-  if ((blueprint.category === "light" || blueprint.category === "post")
+  const textNeonTarget = blueprint.effectId === "fx.light.neonGlow" && kind === "text";
+  if ((blueprint.category === "light" || blueprint.category === "post") && !textNeonTarget
     && kind !== "image" && kind !== "video") {
     throw new TypeError(`${blueprint.effectId} requires decoded RGBA image/video input.`);
   }
@@ -591,7 +593,7 @@ function renderText(
         const wordMode = booleanParam(params, "wordMode", false);
         const revealIndex = wordMode ? Math.floor(cell.index / 5) * 5 : cell.index;
         const revealedGlyphs = seconds * speed;
-        visibility = revealIndex <= revealedGlyphs ? 1 : 0;
+        visibility = revealIndex + 1 <= revealedGlyphs ? 1 : 0;
         const cursorWidth = numberParam(params, "cursorWidth", 0.08);
         const rasterCursorWidth = Math.max(cursorWidth, 12 / source.width);
         if (booleanParam(params, "cursor", true)
@@ -857,6 +859,23 @@ function renderVectorOrDraw(
   const output = emptyLike(source);
   const isDraw = blueprint.category === "draw";
   const raster = options.rasterInput.source;
+  if (blueprint.sourceId === "D01" && raster.kind === "text") {
+    const progress = effectProgress(blueprint, params, options);
+    const pressure = numberParam(params, "pressure", 0.7);
+    const variation = numberParam(params, "speedVariation", 0.25);
+    for (let y = 0; y < source.height; y += 1) {
+      for (let x = 0; x < source.width; x += 1) {
+        const sourceColor = read(source, x, y);
+        const u = source.width === 1 ? 0.5 : x / (source.width - 1);
+        const brush = effectRandom(options, "D01.text-brush", Math.floor(x / 3), Math.floor(y / 3), 1, 0, false);
+        const frontier = progress + (brush - 0.5) * (0.025 + pressure * 0.035)
+          + Math.sin((u + y / Math.max(1, source.height)) * 21) * variation * 0.015;
+        const reveal = smoothstep(frontier + 0.035, frontier - 0.01, u);
+        write(output, x, y, [sourceColor[0], sourceColor[1], sourceColor[2], sourceColor[3] * reveal]);
+      }
+    }
+    return output;
+  }
   if (raster.kind !== "shape" && raster.kind !== "svg") {
     throw new TypeError(`${blueprint.effectId} requires vector path provenance.`);
   }

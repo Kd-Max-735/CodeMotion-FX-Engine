@@ -398,10 +398,25 @@ function target(width: number, height: number, colorSpace: ColorSpace) {
   });
 }
 
+// Generated from the formal Noto Sans SC font at 14 px for browser card fixtures.
+const CARD_FIXTURE_GLYPHS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "笔": ["00000000000000", "00110001100000", "00110001100000", "01111111111111", "11111011011000", "11001111111100", "01111111111000", "00000011111100", "01111111111100", "01111110000000", "00000111111111", "11111111111111", "01111110000110", "00000011000110", "00000011111110", "00000000000000", "00000000000000", "00000000000000"],
+  "唯": ["00000000000000", "00000001111000", "00000011111000", "01111011011000", "01011111111111", "01011111011000", "01011111011000", "01011111111110", "01011011011000", "01011011011000", "01111011111110", "01000011011000", "01000011011000", "00000011111111", "00000011000000", "00000000000000", "00000000000000", "00000000000000"],
+  "思": ["00000000000000", "00000000000000", "00111111111100", "00110011001100", "00110011001100", "00111111111100", "00110011001100", "00110011001100", "00111111111100", "00000110000000", "00111111101100", "01101101101110", "01101100011110", "11101100011111", "11001111111010", "00000000000000", "00000000000000", "00000000000000"]
+});
+
 function glyphCoverage(character: string, width = 8, height = 12): CoverageBuffer {
   const data = new Uint8Array(width * height);
+  const pattern = CARD_FIXTURE_GLYPHS[character];
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
+      if (pattern) {
+        const patternY = Math.min(pattern.length - 1, Math.floor(y * pattern.length / height));
+        const row = pattern[patternY]!;
+        const patternX = Math.min(row.length - 1, Math.floor(x * row.length / width));
+        data[y * width + x] = row[patternX] === "1" ? 255 : 0;
+        continue;
+      }
       let distance = 99;
       const line = (active: boolean, edgeDistance: number) => {
         if (active) distance = Math.min(distance, edgeDistance);
@@ -429,22 +444,28 @@ function glyphCoverage(character: string, width = 8, height = 12): CoverageBuffe
   return Object.freeze({ width, height, data, rowOrder: "top-to-bottom" as const });
 }
 
-function makeTextSource(width: number, height: number, alternate: boolean): TextRasterSource {
-  const text = alternate ? "动效FX" : "FX中文";
-  const glyphWidth = Math.max(8, Math.floor(width / 7));
-  const glyphHeight = Math.max(12, Math.floor(height * 0.58));
-  const startX = Math.max(1, Math.floor((width - text.length * (glyphWidth + 2)) / 2));
-  const startY = Math.max(1, Math.floor((height - glyphHeight) / 2));
-  const glyphs: RasterGlyph[] = [...text].map((character, index) => {
-    const coverage = glyphCoverage(character, 8, 12);
+function makeTextSource(width: number, height: number, alternate: boolean, fixtureText?: string): TextRasterSource {
+  const text = fixtureText ?? (alternate ? "动效FX" : "FX中文");
+  const characters = [...text];
+  const legacyGlyphWidth = Math.max(8, Math.floor(width / 7));
+  const legacyGlyphHeight = Math.max(12, Math.floor(height * 0.58));
+  const fixtureGlyphWidth = fixtureText === undefined ? 8 : 14;
+  const fixtureGlyphHeight = fixtureText === undefined ? 12 : 18;
+  const glyphAdvance = fixtureText === undefined
+    ? legacyGlyphWidth + 2
+    : Math.max(fixtureGlyphWidth, Math.min(18, Math.floor((width - 4) / Math.max(1, characters.length))));
+  const startX = Math.max(1, Math.floor((width - characters.length * glyphAdvance) / 2));
+  const startY = Math.max(1, Math.floor((height - (fixtureText === undefined ? legacyGlyphHeight : fixtureGlyphHeight)) / 2));
+  const glyphs: RasterGlyph[] = characters.map((character, index) => {
+    const coverage = glyphCoverage(character, fixtureGlyphWidth, fixtureGlyphHeight);
     return Object.freeze({
       glyphId: character.codePointAt(0)!,
       cluster: index,
-      advance: glyphWidth + 2,
+      advance: glyphAdvance,
       offsetX: 0,
       offsetY: 0,
       bounds: Object.freeze({
-        x: startX + index * (glyphWidth + 2),
+        x: startX + index * glyphAdvance,
         y: startY,
         width: coverage.width,
         height: coverage.height
@@ -538,7 +559,8 @@ export function makeRealInputFixture(
   height: number,
   alternate: boolean,
   colorSpace: ColorSpace,
-  effectTime: EffectTimeSample
+  effectTime: EffectTimeSample,
+  fixtureText?: string
 ): { readonly input: LayerRasterizationInput; readonly surface: PixelSurface } {
   if (effectTime.effectId !== effectId) {
     throw new TypeError("Raster fixture effectId must match EffectTimeSample.effectId.");
@@ -546,7 +568,7 @@ export function makeRealInputFixture(
   if (!Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1) {
     throw new RangeError("Real input fixture dimensions must be positive integers.");
   }
-  const source = kind === "text" ? makeTextSource(width, height, alternate)
+  const source = kind === "text" ? makeTextSource(width, height, alternate, fixtureText)
     : kind === "vector" ? makeVectorSource(alternate)
       : makeMediaSource(width, height, colorSpace, alternate);
   const input: LayerRasterizationInput = Object.freeze({

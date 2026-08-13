@@ -1,6 +1,7 @@
 import type {
   AiPlanningInputV1,
   ProviderErrorCode,
+  ProviderFailureReason,
   ProviderProgress
 } from "@codemotion/ai-planner";
 import { P0_BROWSER_PROJECT_AUTHORITY_V1 } from "@codemotion/effects-2d";
@@ -19,9 +20,10 @@ export interface BrowserAiPlanTaskView {
   readonly modalities: readonly ("text" | "image" | "audio" | "video")[];
   readonly result?: AiPlanCompletedResultV2;
   readonly error?: {
-    readonly code: ProviderErrorCode | "planning";
+    readonly code: ProviderErrorCode | "planning" | "media_preview_failed";
     readonly message: string;
     readonly retryable: boolean;
+    readonly problemCode?: ProviderFailureReason;
   };
 }
 
@@ -34,6 +36,7 @@ export const AI_CANVAS_RATIOS = {
 
 export interface AiPlanningFormValue {
   readonly prompt: string;
+  readonly selectedEffectId?: AiPlanningInputV1["selectedEffectId"];
   readonly assets: AiPlanningInputV1["assets"];
   readonly width: number;
   readonly height: number;
@@ -54,6 +57,7 @@ export function buildAiPlanningInput(value: AiPlanningFormValue): AiPlanningInpu
   return {
     contract: "ai-task/v1",
     prompt: value.prompt,
+    ...(value.selectedEffectId === undefined ? {} : { selectedEffectId: value.selectedEffectId }),
     assets: value.assets,
     canvas: { width: value.width, height: value.height, fps: value.fps },
     durationSeconds: value.durationSeconds,
@@ -128,9 +132,14 @@ const TASK_KEYS = new Set(["id", "status", "phase", "progress", "events", "creat
 const STATUSES = new Set<AiPlanStatus>(["running", "cancelling", "completed", "failed", "cancelled"]);
 const PHASES = new Set<BrowserAiPlanTaskView["phase"]>(["accepted", "validate", "upload", "process", "infer", "cleanup", "plan"]);
 const MODALITIES = new Set<BrowserAiPlanTaskView["modalities"][number]>(["text", "image", "audio", "video"]);
-const ERROR_CODES = new Set<ProviderErrorCode | "planning">([
+const ERROR_CODES = new Set<ProviderErrorCode | "planning" | "media_preview_failed">([
   "cancelled", "timeout", "rate_limited", "invalid_input", "authentication", "unsupported",
-  "provider_unavailable", "provider_response", "security", "planning"
+  "provider_unavailable", "provider_response", "security", "planning", "media_preview_failed"
+]);
+const PROBLEM_CODES = new Set<ProviderFailureReason>([
+  "NO_OUTPUT", "INVALID_JSON", "SCHEMA_INVALID", "PLANNING_CONSTRAINT", "SHOT_RANGE",
+  "EFFECT_ID_INVALID", "TEXT_REQUIRED", "ASSET_COUNT_INCOMPATIBLE", "MEDIA_PREVIEW_FAILED",
+  "ARK_UNAVAILABLE", "ASSET_BINDING", "RESPONSE_ENVELOPE", "MODEL_MISMATCH"
 ]);
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -153,10 +162,11 @@ function progress(value: unknown): value is ProviderProgress {
 }
 
 function safeError(value: unknown): value is NonNullable<BrowserAiPlanTaskView["error"]> {
-  return record(value) && exactKeys(value, new Set(["code", "message", "retryable"]))
-    && ERROR_CODES.has(value.code as ProviderErrorCode | "planning")
+  return record(value) && exactKeys(value, new Set(["code", "message", "retryable", "problemCode"]))
+    && ERROR_CODES.has(value.code as ProviderErrorCode | "planning" | "media_preview_failed")
     && typeof value.message === "string" && value.message.length > 0 && value.message.length <= 512
-    && typeof value.retryable === "boolean";
+    && typeof value.retryable === "boolean"
+    && (value.problemCode === undefined || PROBLEM_CODES.has(value.problemCode as ProviderFailureReason));
 }
 
 function invalidTask(): never {

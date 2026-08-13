@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import {
+  MediaPreviewDecodeError,
   OwnedTaskStore,
   type OwnerContext,
   type VerifiedStoredMedia
@@ -9,6 +10,7 @@ import {
 import {
   ProviderError,
   VolcengineArkProvider,
+  parseExplicitDuration,
   parseAiPlanningInputV1,
   planAnimation,
   serializeAiPlanCompletedResultV2,
@@ -19,10 +21,12 @@ import {
   type ModelProvider,
   type PlannedAnimation,
   type ProviderErrorCode,
+  type ProviderFailureReason,
   type ProviderProgress,
   type UnderstandingResult
 } from "@codemotion/ai-planner";
 import type { AiPlanCompletedResultV2 } from "@codemotion/schema";
+import { effectCardForEffectId, explicitEffectCardRequests, explicitP0EffectRequest } from "@codemotion/effects-2d";
 import { AuthHttpError } from "./auth-session-service.js";
 
 export interface AiSessionPrincipal {
@@ -38,9 +42,10 @@ export interface AiAssetResolver {
 type AiPlanStatus = "running" | "cancelling" | "completed" | "failed" | "cancelled";
 
 interface AiPlanSafeError {
-  readonly code: ProviderErrorCode | "planning";
+  readonly code: ProviderErrorCode | "planning" | "media_preview_failed";
   readonly message: string;
   readonly retryable: boolean;
+  readonly problemCode?: ProviderFailureReason;
 }
 
 interface InternalAiPlanTaskView {
@@ -75,11 +80,22 @@ interface InternalTask {
   input: AiPlanningInputV1;
   principal: AiTaskPrincipal;
   resources: readonly LocalResourceInput[];
+  durationSeconds: number;
 }
+
+export interface AiPlanDiagnosticRecord {
+  readonly taskId: string;
+  readonly stage: InternalAiPlanTaskView["phase"];
+  readonly code: AiPlanSafeError["code"];
+  readonly reason?: ProviderFailureReason;
+  readonly retryable: boolean;
+}
+
+export type AiPlanDiagnosticSink = (record: AiPlanDiagnosticRecord) => void;
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
-const safeErrors: Record<ProviderErrorCode | "planning", string> = {
+const safeErrors: Record<ProviderErrorCode | "planning" | "media_preview_failed", string> = {
   cancelled: "分析已取消。",
   timeout: "分析超过设定时限。",
   rate_limited: "服务请求频率已达上限，请稍后重试。",
@@ -89,11 +105,19 @@ const safeErrors: Record<ProviderErrorCode | "planning", string> = {
   provider_unavailable: "理解服务暂时不可用。",
   provider_response: "模型返回未通过结构化校验。",
   security: "模型响应未通过安全校验。",
-  planning: "Storyboard 或 DSL 未通过静态安全校验。"
+  planning: "生成结构未通过安全校验，请重试。",
+  media_preview_failed: "上传素材无法生成预览，请重新上传受支持的图片或视频。"
 };
 
 class AiAuthorizationError extends Error {
   constructor(readonly status: 401 | 403, message: string) {
+    super(message);
+  }
+}
+
+class AiDurationRequestError extends Error {
+  readonly status = 422;
+  constructor(readonly code: "AI_DURATION_INVALID" | "AI_DURATION_OUT_OF_RANGE" | "AI_DURATION_AMBIGUOUS" | "AI_DURATION_EXCEEDS_VIDEO", message: string) {
     super(message);
   }
 }
@@ -128,9 +152,42 @@ function expectedAssetTypes(reference: AiAssetReference): readonly string[] {
   return ["audio"];
 }
 
+function authoritativeDuration(
+  input: AiPlanningInputV1,
+  resources: readonly LocalResourceInput[]
+): number {
+  const explicit = parseExplicitDuration(input.prompt);
+  if (explicit.kind === "invalid") {
+    const code = explicit.code === "DURATION_OUT_OF_RANGE"
+      ? "AI_DURATION_OUT_OF_RANGE"
+      : explicit.code === "DURATION_AMBIGUOUS" ? "AI_DURATION_AMBIGUOUS" : "AI_DURATION_INVALID";
+    throw new AiDurationRequestError(code, `Description duration is invalid: ${explicit.code}.`);
+  }
+  const duration = explicit.kind === "valid" ? explicit.seconds : input.durationSeconds;
+  if (!Number.isFinite(duration) || duration < 0.5 || duration > 60) {
+    throw new AiDurationRequestError("AI_DURATION_OUT_OF_RANGE", "Requested duration is outside the supported range.");
+  }
+  const videoDurations = resources.filter((resource) => resource.modality === "video")
+    .map((resource) => Number(resource.asset.metadata.duration))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (videoDurations.length > 0 && duration > Math.min(...videoDurations)) {
+    throw new AiDurationRequestError("AI_DURATION_EXCEEDS_VIDEO", "Requested duration exceeds the verified source video duration.");
+  }
+  return duration;
+}
+
 function errorView(error: unknown): AiPlanSafeError {
+  if (error instanceof MediaPreviewDecodeError) {
+    return {
+      code: "media_preview_failed",
+      message: safeErrors.media_preview_failed,
+      retryable: false,
+      problemCode: "MEDIA_PREVIEW_FAILED"
+    };
+  }
   if (error instanceof ProviderError) {
-    return { code: error.code, message: safeErrors[error.code], retryable: error.retryable };
+    return { code: error.code, message: safeErrors[error.code], retryable: error.retryable,
+      ...(error.reason ? { problemCode: error.reason } : {}) };
   }
   const issueCodes = error instanceof Error
     ? /^AI planning static validation failed: ([a-z, ]+)$/.exec(error.message)?.[1]
@@ -152,10 +209,17 @@ export class AiPlanService {
   constructor(
     private readonly provider: ModelProvider | undefined,
     private readonly assets: AiAssetResolver,
-    private readonly planner: typeof planAnimation = planAnimation
+    private readonly planner: typeof planAnimation = planAnimation,
+    private readonly diagnostics?: AiPlanDiagnosticSink
   ) {}
 
   get configured(): boolean { return this.provider !== undefined; }
+
+  usesAsset(owner: OwnerContext, assetId: string): boolean {
+    return this.tasks.list(owner).some(({ value }) =>
+      (value.view.status === "running" || value.view.status === "cancelling")
+      && value.input.assets.some((asset) => asset.assetId === assetId));
+  }
 
   private browserView(task: InternalTask): AiPlanBrowserTaskView {
     const view = task.view;
@@ -191,6 +255,17 @@ export class AiPlanService {
     const session = authorizedPrincipal(rawPrincipal);
     if (!this.provider) throw new Error("服务端 Provider 未配置。");
     const input = parseAiPlanningInputV1(rawInput);
+    const explicitCards = explicitEffectCardRequests(input.prompt);
+    if (explicitCards.length > 1) {
+      throw new ProviderError("invalid_input", "当前版本一次只能使用一个特效。", { retryable: false });
+    }
+    const explicitP0 = explicitP0EffectRequest(input.prompt);
+    if (explicitP0 && explicitCards.length === 0) {
+      throw new ProviderError("unsupported", "该特效暂未开放生成入口。", { retryable: false });
+    }
+    if (input.selectedEffectId && explicitCards.some((card) => card.effectId !== input.selectedEffectId)) {
+      throw new ProviderError("invalid_input", "所选特效与自然语言要求冲突。", { retryable: false });
+    }
     const id = randomUUID();
     const principal: AiTaskPrincipal = {
       tenantId: session.tenantId,
@@ -204,6 +279,7 @@ export class AiPlanService {
     this.pendingCreations.set(controller, settled);
     try {
       const resources = await this.resolveResources(ownerOf(session), input.assets, controller.signal);
+      const durationSeconds = authoritativeDuration(input, resources);
       this.assertAccepting(controller.signal);
       const now = new Date().toISOString();
       const modalities = [
@@ -214,6 +290,7 @@ export class AiPlanService {
         input,
         principal,
         resources,
+        durationSeconds,
         controller,
         view: {
           id,
@@ -340,8 +417,11 @@ export class AiPlanService {
             width: task.input.canvas.width,
             height: task.input.canvas.height,
             fps: task.input.canvas.fps,
-            durationSeconds: task.input.durationSeconds,
+            durationSeconds: task.durationSeconds,
             style: task.input.style,
+            ...(task.input.selectedEffectId === undefined
+              ? {}
+              : { selectedEffectId: task.input.selectedEffectId }),
             brand: task.input.brand
           },
           timeoutMs: 120_000,
@@ -352,6 +432,33 @@ export class AiPlanService {
         providerProgressOpen = false;
       }
       task.controller.signal.throwIfAborted();
+      const visualCount = task.resources.filter((resource) =>
+        resource.modality === "image" || resource.modality === "video").length;
+      const selectedByModel = new Set(result.storyboard.shots.flatMap((shot) =>
+        shot.effects.map((effect) => effect.effectId)));
+      if (selectedByModel.size !== 1) {
+        throw new ProviderError("provider_response", "模型必须且只能选择一个特效。", {
+          retryable: true,
+          reason: "SCHEMA_INVALID"
+        });
+      }
+      const modelEffectId = [...selectedByModel][0]!;
+      const effectiveEffectId = task.input.selectedEffectId ?? modelEffectId;
+      const card = effectCardForEffectId(effectiveEffectId);
+      if (!card) {
+        throw new ProviderError("provider_response", "模型选择了未开放的特效。", {
+          retryable: true,
+          reason: "EFFECT_ID_INVALID"
+        });
+      }
+      if (visualCount > 0 && visualCount !== (card.fixture.secondaryInput ? 2 : 1)) {
+        throw new ProviderError("invalid_input", card.fixture.secondaryInput
+          ? "该特效需要且只能使用两个视觉素材。"
+          : "该特效需要且只能使用一个视觉素材。", {
+          retryable: false,
+          reason: "ASSET_COUNT_INCOMPATIBLE"
+        });
+      }
       const { progress: _progress, ...viewWithoutProgress } = task.view;
       task.view = { ...viewWithoutProgress, phase: "plan", updatedAt: new Date().toISOString() };
       const planned = await this.planner(result, {
@@ -359,9 +466,11 @@ export class AiPlanService {
         width: task.input.canvas.width,
         height: task.input.canvas.height,
         fps: task.input.canvas.fps,
-        duration: task.input.durationSeconds,
+        duration: task.durationSeconds,
         style: task.input.style,
         brand: task.input.brand,
+        prompt: task.input.prompt,
+        ...(task.input.selectedEffectId === undefined ? {} : { effectIds: [task.input.selectedEffectId] }),
         signal: task.controller.signal
       });
       task.controller.signal.throwIfAborted();
@@ -374,6 +483,13 @@ export class AiPlanService {
       };
     } catch (error) {
       const failure = errorView(error);
+      this.diagnostics?.({
+        taskId: task.principal.taskId,
+        stage: task.view.phase,
+        code: failure.code,
+        ...(failure.problemCode === undefined ? {} : { reason: failure.problemCode }),
+        retryable: failure.retryable
+      });
       task.view = {
         ...task.view,
         status: failure.code === "cancelled" ? "cancelled" : "failed",
@@ -385,12 +501,23 @@ export class AiPlanService {
 }
 
 export function createProductionAiPlanService(
-  assets: AiAssetResolver
+  assets: AiAssetResolver,
+  allowVerifiedSampleCards = false,
+  env: NodeJS.ProcessEnv = process.env
 ): AiPlanService {
-  const apiKey = process.env.ARK_API_KEY;
+  const apiKey = env.ARK_API_KEY;
+  const writeDiagnostic = (record: Readonly<Record<string, unknown>>): void => {
+    process.stderr.write(`[ai-planner] ${JSON.stringify(record)}\n`);
+  };
   return new AiPlanService(
-    apiKey && apiKey.trim().length >= 10 ? new VolcengineArkProvider({ apiKey }) : undefined,
-    assets
+    apiKey && apiKey.trim().length >= 10 ? new VolcengineArkProvider({
+      apiKey,
+      allowVerifiedSampleCards,
+      audit: (record) => writeDiagnostic({ kind: "provider", ...record })
+    }) : undefined,
+    assets,
+    planAnimation,
+    (record) => writeDiagnostic({ kind: "task", ...record })
   );
 }
 
@@ -454,6 +581,13 @@ export function createAiPlanApi(
       }
       if (request.method === "POST" && url.pathname === "/api/ai-plans") {
         const body = await jsonBody(request);
+        const parsed = parseAiPlanningInputV1(body);
+        const visualCount = parsed.assets.filter((asset) => asset.purpose !== "reference-audio").length;
+        if (parsed.prompt.trim().length === 0 || visualCount < 1 || visualCount > 2) {
+          throw new ProviderError("invalid_input", visualCount > 2
+            ? "首轮最多使用两个视觉素材。"
+            : "自然语言说明和视觉素材必须同时存在。", { retryable: false });
+        }
         sendJson(response, 202, { task: await service.create(principal, body) });
         return;
       }
@@ -469,16 +603,22 @@ export function createAiPlanApi(
     } catch (error) {
       const status = error instanceof AiAuthorizationError
         ? error.status
+        : error instanceof AiDurationRequestError ? error.status
         : error instanceof AuthHttpError ? error.status
         : error instanceof Error && /not found|access denied/i.test(error.message) ? 404 : 400;
       const code = error instanceof AiAuthorizationError
         ? error.status === 401 ? "UNAUTHENTICATED" : "FORBIDDEN"
+        : error instanceof AiDurationRequestError ? error.code
         : error instanceof AuthHttpError ? error.code : "AI_PLAN_REQUEST_REJECTED";
       const messages: Readonly<Record<string, string>> = Object.freeze({
         UNAUTHENTICATED: "Authentication is required.",
         FORBIDDEN: "The required permission is missing.",
         REQUEST_ORIGIN_REJECTED: "The request origin was rejected.",
         NOT_FOUND: "The requested object was not found.",
+        AI_DURATION_INVALID: "The duration in the description is invalid.",
+        AI_DURATION_OUT_OF_RANGE: "The requested duration is outside the supported range.",
+        AI_DURATION_AMBIGUOUS: "The description contains conflicting durations.",
+        AI_DURATION_EXCEEDS_VIDEO: "The requested duration exceeds the verified source video duration.",
         AI_PLAN_REQUEST_REJECTED: "The AI planning request was rejected."
       });
       sendJson(response, status, {

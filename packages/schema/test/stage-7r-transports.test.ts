@@ -270,7 +270,7 @@ describe("browser-project/v1 frozen safety overlay", () => {
     }))).toEqual([
       { assetId: "asset.image", role: "image-layer-source", allowedMediaTypes: ["image", "svg"] },
       { assetId: "asset.video", role: "video-layer-source", allowedMediaTypes: ["video"] },
-      { assetId: "asset.audio", role: "audio-track", allowedMediaTypes: ["audio"] },
+      { assetId: "asset.audio", role: "audio-track", allowedMediaTypes: ["audio", "video"] },
       { assetId: "asset.image", role: "brand-logo", allowedMediaTypes: ["image", "svg"] }
     ]);
     expect(result.value.every((entry) => Object.isFrozen(entry)

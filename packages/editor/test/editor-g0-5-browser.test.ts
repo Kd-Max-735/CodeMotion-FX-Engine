@@ -141,38 +141,47 @@ describe("Stage 7R G0-5 browser contracts", () => {
     await expect(aiPlanApi.list()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
-  it("sends an exact authenticated preview request and aborts the superseded render", async () => {
+  it("sends exact authenticated preview requests and coalesces superseded targets behind one in-flight render", async () => {
     const envelope = new EditorStore(undefined, createStarterProject("Preview", 64, 36, 24)).getSnapshot().editableProject;
     vi.stubGlobal("document", { cookie: "cmfx_dev_csrf=csrf" });
     vi.stubGlobal("ImageData", class { constructor(readonly data: Uint8ClampedArray, readonly width: number, readonly height: number) {} });
     const calls: RequestInit[] = [];
-    const fetchMock = vi.fn((_path: RequestInfo | URL, init?: RequestInit) => {
-      calls.push(init ?? {});
-      if (calls.length === 1) return new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
-      });
+    let finishFirst: ((response: Response) => void) | undefined;
+    const previewResponse = (time: number) => {
       const body = new Uint8Array(64 * 36 * 4);
-      return Promise.resolve(new Response(body, { headers: {
+      return new Response(body, { headers: {
         "content-type": "application/octet-stream", "content-length": String(body.length),
         "cache-control": "no-store", "x-content-type-options": "nosniff",
-        "x-cmfx-width": "64", "x-cmfx-height": "36", "x-cmfx-time": "0",
+        "x-cmfx-width": "64", "x-cmfx-height": "36", "x-cmfx-time": String(time),
         "x-cmfx-quality": "preview", "x-cmfx-time-contract": "1.1.0", "x-cmfx-renderer": "server"
-      } }));
+      } });
+    };
+    const fetchMock = vi.fn((_path: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(init ?? {});
+      if (calls.length === 1) return new Promise<Response>((resolve) => { finishFirst = resolve; });
+      const requestedTime = JSON.parse(String(init?.body)).frame.time as number;
+      return Promise.resolve(previewResponse(requestedTime));
     });
     vi.stubGlobal("fetch", fetchMock);
     const canvas = { width: 0, height: 0, getContext: () => ({ putImageData: vi.fn() }) } as unknown as HTMLCanvasElement;
     const renderer = new ProjectPreviewRenderer();
     const first = renderer.render(envelope, 0, canvas);
     await Promise.resolve();
-    const second = renderer.render(envelope, 0, canvas);
-    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    const second = renderer.render(envelope, 0.25, canvas);
+    const latest = renderer.render(envelope, 0.5, canvas);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    finishFirst?.(previewResponse(0));
+    await expect(first).resolves.toMatchObject({ backend: "G5 Shared", width: 64, height: 36 });
     await expect(second).resolves.toMatchObject({ backend: "G5 Shared", width: 64, height: 36 });
+    await expect(latest).resolves.toMatchObject({ backend: "G5 Shared", width: 64, height: 36 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(calls[0]?.credentials).toBe("same-origin");
     expect((calls[0]?.headers as Record<string, string>)["X-CMFX-CSRF"]).toBe("csrf");
     expect(JSON.parse(String(calls[0]?.body))).toEqual({
       contract: "preview-request/v1", editableProject: envelope,
       frame: { time: 0, width: 64, height: 36, quality: "preview" }
     });
+    expect(JSON.parse(String(calls[1]?.body)).frame.time).toBe(0.5);
     renderer.dispose();
   });
 

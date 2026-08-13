@@ -143,6 +143,36 @@ describe("S7R-F browser contracts", () => {
     expect(fetchMock.mock.calls.every(([, init]) => init?.credentials === "same-origin")).toBe(true);
   });
 
+  it("creates a local development session after an initial 401 without client-supplied identity", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://127.0.0.1:4174" }, dispatchEvent: vi.fn() });
+    const session = { authenticated: true, principal: {
+      tenantId: "local-tenant", userId: "local-user",
+      scopes: ["ai:plan", "assets:read", "assets:write", "project:preview", "export:create", "export:read"],
+      expiresAt: 200
+    } };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ error: { code: "UNAUTHENTICATED", retryable: false } }, 401))
+      .mockResolvedValueOnce(json({ authenticated: true }, 201))
+      .mockResolvedValueOnce(json(session));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sessionApi.readWithDevelopmentFallback()).resolves.toEqual(session);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      "/api/session", "/auth/dev/auto-session", "/api/session"
+    ]);
+    const autoInit = fetchMock.mock.calls[1]![1];
+    expect(autoInit).toMatchObject({ method: "POST", credentials: "same-origin", body: "{}" });
+    expect(JSON.parse(String(autoInit?.body))).toEqual({});
+  });
+
+  it("does not attempt development auto-session outside the fixed development origin", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://app.example.test" }, dispatchEvent: vi.fn() });
+    const fetchMock = vi.fn().mockResolvedValue(json({ error: { code: "UNAUTHENTICATED", retryable: false } }, 401));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sessionApi.readWithDevelopmentFallback()).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("maps every ratio to bounded integer dimensions", () => {
     for (const [width, height] of Object.values(AI_CANVAS_RATIOS)) {
       expect(Number.isInteger(width) && Number.isInteger(height)).toBe(true);

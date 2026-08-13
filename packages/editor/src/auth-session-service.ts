@@ -51,12 +51,6 @@ interface SessionRecord {
   readonly csrfDigest: Buffer;
 }
 
-interface DevCodeRecord {
-  readonly codeDigest: Buffer;
-  readonly expiresAt: number;
-  bindingDigest?: Buffer;
-}
-
 export interface AuthSessionServiceOptions {
   readonly mode: "production" | "development";
   readonly publicOrigin: string;
@@ -64,11 +58,10 @@ export interface AuthSessionServiceOptions {
   readonly oidc?: OidcConfiguration;
   readonly dev?: {
     readonly configureServer: true;
-    readonly listenHost: "127.0.0.1" | "::1";
+    readonly listenHost: "127.0.0.1";
     readonly tenantId: string;
     readonly userId: string;
     readonly scopes: readonly ApplicationScope[];
-    readonly writeLoginCode: (code: string) => void;
   };
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
@@ -94,6 +87,11 @@ const SCOPES: ReadonlySet<ApplicationScope> = new Set(APPLICATION_SCOPES);
 const DEV_ENVIRONMENT_NAMES = [
   "CODEMOTION_DEV_AUTH", "CODEMOTION_DEV_TENANT_ID", "CODEMOTION_DEV_USER_ID", "CODEMOTION_DEV_SCOPES"
 ] as const;
+const DEFAULT_DEV_TENANT_ID = "local-tenant";
+const DEFAULT_DEV_USER_ID = "local-user";
+const DEFAULT_DEV_SCOPES = Object.freeze([
+  "ai:plan", "assets:read", "assets:write", "project:preview", "export:create", "export:read"
+] satisfies readonly ApplicationScope[]);
 const LOGIN_TTL_SECONDS = 5 * 60;
 const PRODUCTION_SESSION_TTL_SECONDS = 8 * 60 * 60;
 const DEV_SESSION_TTL_SECONDS = 60 * 60;
@@ -183,6 +181,27 @@ async function readSmallJson(request: IncomingMessage): Promise<unknown> {
   catch { throw new AuthHttpError(400, "MALFORMED_REQUEST"); }
 }
 
+async function readDevAutoSessionBody(request: IncomingMessage): Promise<void> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.from(chunk);
+    length += bytes.byteLength;
+    if (length > 256) throw new AuthHttpError(400, "MALFORMED_REQUEST");
+    chunks.push(bytes);
+  }
+  if (length === 0) return;
+  if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/iu.test(request.headers["content-type"] ?? "")) {
+    throw new AuthHttpError(400, "MALFORMED_REQUEST");
+  }
+  let value: unknown;
+  try { value = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { throw new AuthHttpError(400, "MALFORMED_REQUEST"); }
+  if (typeof value !== "object" || value === null || Array.isArray(value) || Object.keys(value).length !== 0) {
+    throw new AuthHttpError(400, "MALFORMED_REQUEST");
+  }
+}
+
 export function productionAuthOptionsFromEnvironment(
   env: ProductionAuthEnvironment,
   overrides: Omit<AuthSessionServiceOptions, "mode" | "publicOrigin" | "sessionSecret" | "oidc"> = {}
@@ -214,23 +233,28 @@ export function developmentAuthOptionsFromEnvironment(
     readonly configureServer: boolean;
     readonly listenHost: string;
     readonly publicOrigin: string;
-    readonly writeLoginCode: (code: string) => void;
   },
   overrides: Omit<AuthSessionServiceOptions, "mode" | "publicOrigin" | "sessionSecret" | "dev"> = {}
 ): AuthSessionServiceOptions {
-  if (!input.configureServer || env.NODE_ENV !== "development" || env.CODEMOTION_DEV_AUTH !== "1") {
+  if (!input.configureServer) {
     throw new Error("Development authentication is not enabled for configureServer.");
   }
-  if (input.listenHost !== "127.0.0.1" && input.listenHost !== "::1") throw new Error("Dev auth requires literal loopback.");
+  if (env.CODEMOTION_DEV_AUTH !== undefined && env.CODEMOTION_DEV_AUTH !== "1") {
+    throw new Error("CODEMOTION_DEV_AUTH override must be 1 when present.");
+  }
+  if (input.listenHost !== "127.0.0.1") throw new Error("Dev auth requires literal 127.0.0.1 loopback.");
   const origin = exactOrigin(input.publicOrigin, undefined);
-  if (origin.protocol !== "http:" && origin.protocol !== "https:") throw new Error("Dev auth origin protocol is invalid.");
-  if (origin.hostname !== input.listenHost && !(input.listenHost === "::1" && origin.hostname === "[::1]")) {
+  if (origin.protocol !== "http:" || origin.hostname !== input.listenHost) {
     throw new Error("Dev auth origin must use the configured literal loopback host.");
   }
-  const tenantId = nonEmpty(env.CODEMOTION_DEV_TENANT_ID, "CODEMOTION_DEV_TENANT_ID");
-  const userId = nonEmpty(env.CODEMOTION_DEV_USER_ID, "CODEMOTION_DEV_USER_ID");
+  const tenantId = env.CODEMOTION_DEV_TENANT_ID === undefined
+    ? DEFAULT_DEV_TENANT_ID : nonEmpty(env.CODEMOTION_DEV_TENANT_ID, "CODEMOTION_DEV_TENANT_ID");
+  const userId = env.CODEMOTION_DEV_USER_ID === undefined
+    ? DEFAULT_DEV_USER_ID : nonEmpty(env.CODEMOTION_DEV_USER_ID, "CODEMOTION_DEV_USER_ID");
   if (!validIdentifier(tenantId) || !validIdentifier(userId)) throw new Error("Dev identity is invalid.");
-  const configuredScopes = nonEmpty(env.CODEMOTION_DEV_SCOPES, "CODEMOTION_DEV_SCOPES").split(/\s+/);
+  const configuredScopes = env.CODEMOTION_DEV_SCOPES === undefined
+    ? [...DEFAULT_DEV_SCOPES]
+    : nonEmpty(env.CODEMOTION_DEV_SCOPES, "CODEMOTION_DEV_SCOPES").split(/\s+/);
   if (configuredScopes.some((scope) => !SCOPES.has(scope as ApplicationScope))) throw new Error("Dev scopes are invalid.");
   const scopes = [...new Set(configuredScopes)] as ApplicationScope[];
   if (scopes.length === 0) throw new Error("Dev scopes are required.");
@@ -244,8 +268,7 @@ export function developmentAuthOptionsFromEnvironment(
       listenHost: input.listenHost,
       tenantId,
       userId,
-      scopes,
-      writeLoginCode: input.writeLoginCode
+      scopes
     }
   };
 }
@@ -262,7 +285,6 @@ export class AuthSessionService {
   private readonly initialized: Promise<void>;
   private discovery?: DiscoveryDocument;
   private jwks?: ReturnType<typeof createLocalJWKSet>;
-  private devCode: DevCodeRecord | undefined;
 
   constructor(private readonly options: AuthSessionServiceOptions) {
     if (options.sessionSecret.byteLength < 32) throw new Error("Session secret must contain at least 32 bytes.");
@@ -273,11 +295,6 @@ export class AuthSessionService {
     this.instanceId = base64url(this.random(16));
     if (options.mode === "production" && options.oidc === undefined) throw new Error("OIDC configuration is required.");
     if (options.mode === "development" && options.dev === undefined) throw new Error("Development configuration is required.");
-    if (options.mode === "development") {
-      const code = base64url(this.random(32));
-      this.devCode = { codeDigest: digest("codemotion-dev-login-code-v1", code), expiresAt: this.now() + LOGIN_TTL_SECONDS };
-      options.dev!.writeLoginCode(code);
-    }
     this.initialized = options.mode === "production" ? this.loadOidc() : Promise.resolve();
   }
 
@@ -292,7 +309,8 @@ export class AuthSessionService {
       if (response) this.clearSessionCookies(response);
       throw cause;
     }
-    if (!raw || !/^[A-Za-z0-9_-]{40,64}$/.test(raw)) {
+    if (!raw) throw new AuthHttpError(401, "UNAUTHENTICATED");
+    if (!/^[A-Za-z0-9_-]{40,64}$/.test(raw)) {
       if (response) this.clearSessionCookies(response);
       throw new AuthHttpError(401, "UNAUTHENTICATED");
     }
@@ -356,15 +374,15 @@ export class AuthSessionService {
       const route = `${request.method ?? "GET"} ${url.pathname}`;
       const known = new Set(["GET /auth/login", "GET /auth/callback", "POST /auth/logout", "GET /api/session"]);
       if (this.options.mode === "development") {
-        known.add("GET /auth/dev/login");
-        known.add("POST /auth/dev/session");
+        known.add("POST /auth/dev/auto-session");
       }
       if (!known.has(route)) return next();
       try {
         if (route === "GET /auth/login" && this.options.mode === "production") return await this.productionLogin(request, response);
         if (route === "GET /auth/callback" && this.options.mode === "production") return await this.productionCallback(request, response, url);
-        if (route === "GET /auth/dev/login" && this.options.mode === "development") return this.devLogin(request, response);
-        if (route === "POST /auth/dev/session" && this.options.mode === "development") return await this.devSession(request, response);
+        if (route === "POST /auth/dev/auto-session" && this.options.mode === "development") {
+          return await this.devAutoSession(request, response);
+        }
         if (route === "POST /auth/logout") return await this.logout(request, response);
         if (route === "GET /api/session") return await this.sessionView(request, response);
         throw new AuthHttpError(404 as never, "NOT_FOUND");
@@ -572,48 +590,16 @@ export class AuthSessionService {
     }
   }
 
-  private assertDevNetwork(request: IncomingMessage): void {
-    const peer = request.socket.remoteAddress;
-    if ((peer !== "127.0.0.1" && peer !== "::1") || request.headers.host !== this.origin.host) {
-      throw new AuthHttpError(403, "LOGIN_ORIGIN_REJECTED");
-    }
-  }
-
-  private devLogin(request: IncomingMessage, response: ServerResponse): void {
-    this.assertDevNetwork(request);
-    this.validateLoginNavigation(request);
-    if (this.devCode === undefined || this.devCode.expiresAt <= this.now() || this.devCode.bindingDigest !== undefined) {
-      this.devCode = undefined;
-      throw new AuthHttpError(400, "DEV_LOGIN_REJECTED");
-    }
-    const binding = base64url(this.random(32));
-    this.devCode.bindingDigest = digest("codemotion-dev-login-binding-v1", binding);
-    setCookies(response, [`cmfx_dev_login=${binding}; HttpOnly${this.devSecure()}; SameSite=Strict; Path=/; Max-Age=${LOGIN_TTL_SECONDS}`]);
-    response.statusCode = 204;
-    response.setHeader("cache-control", "no-store");
-    response.end();
-  }
-
-  private async devSession(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    this.assertDevNetwork(request);
-    if (request.headers.origin !== this.origin.origin || request.headers["sec-fetch-site"] !== undefined
-      && request.headers["sec-fetch-site"] !== "same-origin") {
+  private async devAutoSession(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const dev = this.options.dev;
+    if (this.options.mode !== "development" || dev?.configureServer !== true || dev.listenHost !== "127.0.0.1"
+      || request.socket.remoteAddress !== "127.0.0.1"
+      || request.headers.host !== this.origin.host
+      || request.headers.origin !== this.origin.origin
+      || request.headers["sec-fetch-site"] !== "same-origin") {
       throw new AuthHttpError(403, "REQUEST_ORIGIN_REJECTED");
     }
-    const binding = parseCookies(request).get("cmfx_dev_login");
-    const record = this.devCode;
-    this.devCode = undefined;
-    setCookies(response, [`cmfx_dev_login=; HttpOnly${this.devSecure()}; SameSite=Strict; Path=/; Max-Age=0`]);
-    if (record === undefined || record.expiresAt <= this.now() || record.bindingDigest === undefined || !binding
-      || !sameDigest(record.bindingDigest, digest("codemotion-dev-login-binding-v1", binding))) {
-      throw new AuthHttpError(400, "DEV_LOGIN_REJECTED");
-    }
-    const body = await readSmallJson(request) as { code?: unknown };
-    if (typeof body !== "object" || body === null || Object.keys(body).length !== 1 || typeof body.code !== "string"
-      || !sameDigest(record.codeDigest, digest("codemotion-dev-login-code-v1", body.code))) {
-      throw new AuthHttpError(400, "DEV_LOGIN_REJECTED");
-    }
-    const dev = this.options.dev!;
+    await readDevAutoSessionBody(request);
     const issuedAt = this.now();
     this.createSession(response, {
       tenantId: dev.tenantId,
@@ -646,8 +632,7 @@ export class AuthSessionService {
     } else {
       setCookies(response, [
         `cmfx_dev_session=${sessionId}; HttpOnly${this.devSecure()}; SameSite=Strict; Path=/; Max-Age=${maxAge}`,
-        `cmfx_dev_csrf=${csrf}${this.devSecure()}; SameSite=Strict; Path=/; Max-Age=${maxAge}`,
-        `cmfx_dev_login=; HttpOnly${this.devSecure()}; SameSite=Strict; Path=/; Max-Age=0`
+        `cmfx_dev_csrf=${csrf}${this.devSecure()}; SameSite=Strict; Path=/; Max-Age=${maxAge}`
       ]);
     }
   }

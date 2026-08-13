@@ -12,19 +12,23 @@
     }
   },
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "qa:visual": "node test/visual-smoke.mjs",
     "qa:s5r": "node test/run-edge-s5r-qa.mjs",
     "qa:render": "node test/render-center-smoke.mjs",
     "qa:ai-live": "node test/ai-planner-live-smoke.mjs",
-    "qa:s7r-f": "node test/s7r-f-visual.mjs"
+    "qa:s7r-f": "node test/s7r-f-visual.mjs",
+    "qa:dev-auth": "node test/dev-auto-session-visual.mjs",
+    "qa:v22-cards": "node test/v22-card-visual.mjs",
+    "qa:v22-workflows": "node test/v22-workflow-visual.mjs",
+    "qa:jpeg-planning": "node test/jpeg-planning-browser-smoke.mjs"
   },
   "dependencies": {
-    "@codemotion/ai-planner": "0.4.0",
+    "@codemotion/ai-planner": "0.5.0",
     "@codemotion/core": "0.3.0",
-    "@codemotion/effects-2d": "1.2.0",
+    "@codemotion/effects-2d": "1.3.0",
     "@codemotion/effects-3d": "1.0.0",
     "@codemotion/exporter": "0.1.0",
     "@codemotion/renderer-api": "0.3.0",

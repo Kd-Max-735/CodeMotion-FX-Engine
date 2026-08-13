@@ -56,11 +56,11 @@
         },
         "cpu-golden": {
           "status": "PASS",
-          "evidence": "0/25/50/75/100: 02b7edc5,b8cb00a0,34ef73fa,de28fc49,7f8fb449"
+          "evidence": "0/25/50/75/100: 02b7edc5,bfd8a011,915a0255,23379ac1,5afe046f"
         },
         "webgl-golden": {
           "status": "PASS",
-          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 02b7edc5,1aac204f,bf94725c,8462699b,05ee8853"
+          "evidence": "Edge WebGL2 readPixels 0/25/50/75/100: 02b7edc5,bd92f0cf,6b71703d,e1f00d65,186f8a85"
         },
         "straight-alpha": {
           "status": "PASS",
@@ -96,7 +96,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.668/4ms; Edge median 2.5/4ms; GPU 0.018ms; 1% Low 85.47fps"
+          "evidence": "CPU 1.668/4ms; Edge median 1.2/4ms; GPU 0.02ms; 1% Low 416.67fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -183,7 +183,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.385/5ms; Edge median 2.2/5ms; GPU 0.016ms; 1% Low 76.34fps"
+          "evidence": "CPU 1.385/5ms; Edge median 1.2/5ms; GPU 0.018ms; 1% Low 555.56fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -270,7 +270,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.839/5ms; Edge median 2.1/5ms; GPU 0.014ms; 1% Low 89.29fps"
+          "evidence": "CPU 1.839/5ms; Edge median 1.2/5ms; GPU 0.018ms; 1% Low 588.24fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -357,7 +357,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.532/7ms; Edge median 1.9/7ms; GPU 0.015ms; 1% Low 89.29fps"
+          "evidence": "CPU 1.532/7ms; Edge median 1.2/7ms; GPU 0.019ms; 1% Low 588.24fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -444,7 +444,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.037/5ms; Edge median 2.1/5ms; GPU 0.014ms; 1% Low 96.15fps"
+          "evidence": "CPU 1.037/5ms; Edge median 1.2/5ms; GPU 0.019ms; 1% Low 625fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -531,7 +531,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.542/5ms; Edge median 3.1/5ms; GPU 0.013ms; 1% Low 78.74fps"
+          "evidence": "CPU 1.542/5ms; Edge median 1.1/5ms; GPU 0.017ms; 1% Low 588.24fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -618,7 +618,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.089/5ms; Edge median 3.2/5ms; GPU 0.013ms; 1% Low 91.74fps"
+          "evidence": "CPU 1.089/5ms; Edge median 1.1/5ms; GPU 0.018ms; 1% Low 625fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -705,7 +705,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.769/5ms; Edge median 3/5ms; GPU 0.014ms; 1% Low 84.75fps"
+          "evidence": "CPU 0.769/5ms; Edge median 1.1/5ms; GPU 0.017ms; 1% Low 588.24fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -792,7 +792,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.994/5ms; Edge median 3.1/5ms; GPU 0.017ms; 1% Low 78.12fps"
+          "evidence": "CPU 0.994/5ms; Edge median 1.1/5ms; GPU 0.017ms; 1% Low 588.24fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -879,7 +879,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 2.44/5ms; Edge median 2.9/5ms; GPU 0.014ms; 1% Low 87.72fps"
+          "evidence": "CPU 2.44/5ms; Edge median 1.1/5ms; GPU 0.017ms; 1% Low 625fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -966,7 +966,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.421/7ms; Edge median 3.2/7ms; GPU 0.013ms; 1% Low 89.29fps"
+          "evidence": "CPU 1.421/7ms; Edge median 1.2/7ms; GPU 0.018ms; 1% Low 526.32fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1053,7 +1053,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 5.318/7ms; Edge median 3.1/7ms; GPU 0.014ms; 1% Low 76.34fps"
+          "evidence": "CPU 5.318/7ms; Edge median 1.2/7ms; GPU 0.018ms; 1% Low 526.32fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1140,7 +1140,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.594/10ms; Edge median 2.7/10ms; GPU 0.016ms; 1% Low 78.12fps"
+          "evidence": "CPU 1.594/10ms; Edge median 1.1/10ms; GPU 0.017ms; 1% Low 625fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1227,7 +1227,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 4.763/7ms; Edge median 3.1/7ms; GPU 0.015ms; 1% Low 85.47fps"
+          "evidence": "CPU 4.763/7ms; Edge median 1.1/7ms; GPU 0.017ms; 1% Low 500fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1314,7 +1314,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 4.203/7ms; Edge median 3/7ms; GPU 0.015ms; 1% Low 92.59fps"
+          "evidence": "CPU 4.203/7ms; Edge median 1.1/7ms; GPU 0.017ms; 1% Low 526.32fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1401,7 +1401,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 3.138/5ms; Edge median 3.7/5ms; GPU 0.014ms; 1% Low 80fps"
+          "evidence": "CPU 3.138/5ms; Edge median 1.5/5ms; GPU 0.02ms; 1% Low 500fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1488,7 +1488,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 5.374/7ms; Edge median 3.3/7ms; GPU 0.015ms; 1% Low 85.47fps"
+          "evidence": "CPU 5.374/7ms; Edge median 1.5/7ms; GPU 0.019ms; 1% Low 526.32fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1575,7 +1575,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 5.721/8ms; Edge median 3.1/8ms; GPU 0.016ms; 1% Low 83.33fps"
+          "evidence": "CPU 5.721/8ms; Edge median 1.5/8ms; GPU 0.02ms; 1% Low 357.14fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1662,7 +1662,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 3.461/8ms; Edge median 3.2/8ms; GPU 0.016ms; 1% Low 80fps"
+          "evidence": "CPU 3.461/8ms; Edge median 1.4/8ms; GPU 0.02ms; 1% Low 526.32fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1749,7 +1749,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 5.976/7ms; Edge median 2.7/7ms; GPU 0.013ms; 1% Low 67.57fps"
+          "evidence": "CPU 5.976/7ms; Edge median 1.5/7ms; GPU 0.018ms; 1% Low 555.56fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1836,7 +1836,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 7.035/8ms; Edge median 2.9/8ms; GPU 0.014ms; 1% Low 80fps"
+          "evidence": "CPU 7.035/8ms; Edge median 1.5/8ms; GPU 0.02ms; 1% Low 434.78fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -1923,7 +1923,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 4.747/11ms; Edge median 3.1/11ms; GPU 0.013ms; 1% Low 86.21fps"
+          "evidence": "CPU 4.747/11ms; Edge median 1.4/11ms; GPU 0.019ms; 1% Low 500fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2010,7 +2010,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 5.538/8ms; Edge median 3.3/8ms; GPU 0.014ms; 1% Low 93.46fps"
+          "evidence": "CPU 5.538/8ms; Edge median 1.5/8ms; GPU 0.019ms; 1% Low 526.32fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2097,7 +2097,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.873/12ms; Edge median 2.5/12ms; GPU 0.014ms; 1% Low 94.34fps"
+          "evidence": "CPU 1.873/12ms; Edge median 1.2/12ms; GPU 0.019ms; 1% Low 588.24fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2184,7 +2184,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.845/8ms; Edge median 3.1/8ms; GPU 0.014ms; 1% Low 95.24fps"
+          "evidence": "CPU 0.845/8ms; Edge median 1/8ms; GPU 0.017ms; 1% Low 526.32fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2271,7 +2271,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.403/13ms; Edge median 2.5/13ms; GPU 0.014ms; 1% Low 96.15fps"
+          "evidence": "CPU 1.403/13ms; Edge median 1/13ms; GPU 0.017ms; 1% Low 476.19fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2358,7 +2358,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.918/9ms; Edge median 2.8/9ms; GPU 0.013ms; 1% Low 91.74fps"
+          "evidence": "CPU 0.918/9ms; Edge median 1/9ms; GPU 0.016ms; 1% Low 434.78fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2445,7 +2445,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 2.067/14ms; Edge median 2.6/14ms; GPU 0.016ms; 1% Low 98.04fps"
+          "evidence": "CPU 2.067/14ms; Edge median 1.1/14ms; GPU 0.022ms; 1% Low 500fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2532,7 +2532,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 2.074/14ms; Edge median 3.1/14ms; GPU 0.017ms; 1% Low 86.96fps"
+          "evidence": "CPU 2.074/14ms; Edge median 1.1/14ms; GPU 0.02ms; 1% Low 555.56fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2619,7 +2619,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 2.166/15ms; Edge median 2.4/15ms; GPU 0.02ms; 1% Low 93.46fps"
+          "evidence": "CPU 2.166/15ms; Edge median 1.1/15ms; GPU 0.029ms; 1% Low 588.24fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2706,7 +2706,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 1.978/15ms; Edge median 2.7/15ms; GPU 0.018ms; 1% Low 90.91fps"
+          "evidence": "CPU 1.978/15ms; Edge median 1.1/15ms; GPU 0.027ms; 1% Low 625fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2793,7 +2793,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.806/6ms; Edge median 3.9/6ms; GPU 0.025ms; 1% Low 81.3fps"
+          "evidence": "CPU 0.806/6ms; Edge median 1.5/6ms; GPU 0.03ms; 1% Low 526.32fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2880,7 +2880,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.733/8ms; Edge median 4.2/8ms; GPU 0.024ms; 1% Low 73.53fps"
+          "evidence": "CPU 0.733/8ms; Edge median 1.5/8ms; GPU 0.031ms; 1% Low 555.56fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -2967,7 +2967,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 2.481/12ms; Edge median 4.1/12ms; GPU 0.032ms; 1% Low 74.07fps"
+          "evidence": "CPU 2.481/12ms; Edge median 1.6/12ms; GPU 0.033ms; 1% Low 476.19fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -3054,7 +3054,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 2.135/9ms; Edge median 4/9ms; GPU 0.024ms; 1% Low 78.74fps"
+          "evidence": "CPU 2.135/9ms; Edge median 1.6/9ms; GPU 0.034ms; 1% Low 526.32fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -3141,7 +3141,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.784/8ms; Edge median 4.3/8ms; GPU 0.023ms; 1% Low 73.53fps"
+          "evidence": "CPU 0.784/8ms; Edge median 1.6/8ms; GPU 0.031ms; 1% Low 500fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -3228,7 +3228,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.649/8ms; Edge median 3.7/8ms; GPU 0.022ms; 1% Low 79.37fps"
+          "evidence": "CPU 0.649/8ms; Edge median 1.6/8ms; GPU 0.032ms; 1% Low 476.19fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -3315,7 +3315,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.866/8ms; Edge median 3.9/8ms; GPU 0.023ms; 1% Low 84.03fps"
+          "evidence": "CPU 0.866/8ms; Edge median 1.6/8ms; GPU 0.034ms; 1% Low 454.55fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -3402,7 +3402,7 @@
         },
         "performance": {
           "status": "PASS",
-          "evidence": "CPU 0.962/9ms; Edge median 4.7/9ms; GPU 0.024ms; 1% Low 71.43fps"
+          "evidence": "CPU 0.962/9ms; Edge median 1.6/9ms; GPU 0.034ms; 1% Low 500fps"
         },
         "resources-dispose": {
           "status": "PASS",
@@ -3433,7 +3433,7 @@
     "parameterPerturbations": 156,
     "edgePreviews": 40,
     "edgeWebgl": {
-      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+      "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
       "renderer": "ANGLE (Intel, Intel(R) UHD Graphics (0x0000A788) Direct3D11 vs_5_0 ps_5_0, D3D11)",
       "alphaChecks": 39,
       "maskChecks": 39,

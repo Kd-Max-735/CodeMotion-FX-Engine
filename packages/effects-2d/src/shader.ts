@@ -144,7 +144,7 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   float index = cell.x;
   if (u_p2 > 0.5) index = floor(index / 5.0) * 5.0;
   float revealedGlyphs = u_time * (0.1 + u_p0 * 119.9);
-  float visible = step(index, revealedGlyphs);
+  float visible = step(index + 1.0, revealedGlyphs);
   float cursor = u_p1 * step(1.0 - u_p3, fract(uv.x * columns))
     * (1.0 - step(1.0, abs(index - revealedGlyphs)));
   c = mix(vec4(0.0), c, visible);

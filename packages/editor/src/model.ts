@@ -140,16 +140,47 @@ export interface CanvasLayerRect {
   readonly height: number;
 }
 
+export function canvasLayerBaseSize(project: MotionProject, layer: LayerDefinition): { readonly width: number; readonly height: number } {
+  if (layer.type !== "text") return { width: project.width * 0.36, height: project.height * 0.36 };
+  const glyphs = [...layer.properties.text];
+  const fontSize = layer.properties.fontSize;
+  const textWidth = glyphs.reduce((sum, glyph) => sum + fontSize * (/^[\u0000-\u00ff]$/.test(glyph) ? 0.62 : 1), 0);
+  return {
+    width: Math.max(fontSize * 0.8, Math.min(project.width, textWidth + fontSize * 0.35)),
+    height: Math.max(fontSize * 1.35, 24)
+  };
+}
+
 export function canvasLayerRect(project: MotionProject, layer: LayerDefinition, time: number): CanvasLayerRect {
   const position = evaluateAnimatable(layer.transform.position, time);
+  const anchor = evaluateAnimatable(layer.transform.anchorPoint, time);
   const scale = evaluateAnimatable(layer.transform.scale, time);
-  const width = Math.max(project.width * 0.02, project.width * 0.36 * Math.abs(scale.x) / 100);
-  const height = Math.max(project.height * 0.02, project.height * 0.36 * Math.abs(scale.y) / 100);
+  const base = canvasLayerBaseSize(project, layer);
+  const width = Math.max(project.width * 0.02, base.width * Math.abs(scale.x) / 100);
+  const height = Math.max(project.height * 0.02, base.height * Math.abs(scale.y) / 100);
+  const centerX = (project.width / 2 - anchor.x) * scale.x / 100 + position.x;
+  const centerY = (project.height / 2 - anchor.y) * scale.y / 100 + position.y;
   return {
-    left: project.width / 2 + position.x - width / 2,
-    top: project.height / 2 + position.y - height / 2,
+    left: centerX - width / 2,
+    top: centerY - height / 2,
     width,
     height
+  };
+}
+
+export function canvasLayerPositionForCenter(
+  project: MotionProject,
+  layer: LayerDefinition,
+  time: number,
+  center: { readonly x: number; readonly y: number },
+  scale: { readonly x: number; readonly y: number }
+): Vector3 {
+  const anchor = evaluateAnimatable(layer.transform.anchorPoint, time);
+  const current = evaluateAnimatable(layer.transform.position, time);
+  return {
+    x: center.x - (project.width / 2 - anchor.x) * scale.x / 100,
+    y: center.y - (project.height / 2 - anchor.y) * scale.y / 100,
+    z: current.z
   };
 }
 
@@ -247,7 +278,15 @@ export interface PropertySection { readonly title: string; readonly fields: read
 
 function words(path: string): string {
   const last = path.split(".").at(-1) ?? path;
-  return last.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (value) => value.toUpperCase());
+  const labels: Readonly<Record<string, string>> = {
+    name: "名称", visible: "显示", locked: "锁定", solo: "独奏", startTime: "开始时间",
+    endTime: "结束时间", inPoint: "入点", outPoint: "出点", zIndex: "层级",
+    opacity: "不透明度", blendMode: "混合模式", anchorPoint: "锚点", position: "位置",
+    scale: "缩放", rotation: "旋转", skew: "倾斜", text: "文字", fontFamily: "字体",
+    fontSize: "字号", color: "颜色", fit: "适配方式", loop: "循环", muted: "静音",
+    svg: "矢量路径", fill: "填充", stroke: "描边", strokeWidth: "描边宽度"
+  };
+  return labels[last] ?? last.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (value) => value.toUpperCase());
 }
 
 function referencedName(node: ContractNode): string | undefined {
@@ -319,8 +358,8 @@ export function layerPropertySections(
   const branchProperties = branch?.allOf?.flatMap((part) => Object.entries(part.properties?.properties?.properties ?? {})) ?? [];
   const layerFields = branchProperties.flatMap(([key, node]) => schemaFields(defs, `properties.${key}`, node));
   return [
-    { title: "Layer", fields: baseFields },
-    { title: "Transform", fields: transformFields },
-    ...(layerFields.length ? [{ title: `${words(layer.type)} properties`, fields: layerFields }] : [])
+    { title: "图层", fields: baseFields },
+    { title: "变换", fields: transformFields },
+    ...(layerFields.length ? [{ title: "图层内容", fields: layerFields }] : [])
   ];
 }

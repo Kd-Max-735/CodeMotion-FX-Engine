@@ -15,3 +15,17 @@
 - Until `origin` is successfully reverified, do not pull, merge, push, force-push, or rewrite remote history. A network reset does not invalidate the recorded empty-remote evidence or block `1-S1`; a successful check showing unexpected history is BLOCKED before any remote integration.
 
 The authoritative governance order is Chapter 27 in `27_GOVERNANCE.md`.
+
+## Current V2.2 sample-card refactor
+
+- The user's 2026-08-05 refactor prompt authorized the initial controlled eight-effect sample-card refactor. The user's 2026-08-13 direction extends the original card workflow to all 40 registered P0 effects and defers ReAct/Agent development until 120 real effect functions are complete.
+- Historical group PASS records remain evidence, but Group 7/Group 8 handoffs do not apply to this refactor. No separate stage-opening prompt is required.
+- Preserve all 40 registered P0 effects and the existing authentication, tenant isolation, media safety, preview, and export chains.
+- The user's 2026-08-13 Git instruction supersedes the earlier no-commit rule: create a local commit after each tested logical iteration so every change has a rollback point. A commit does not mean human visual acceptance or publication. Inspect status and the complete staged diff before every commit, report the commit hash afterward, and do not push without explicit authorization.
+
+## Current local development authentication
+
+- The user's 2026-08-05 authorization replaces the former one-time-code development login only for Vite `configureServer` on literal `127.0.0.1:4174`.
+- `npm run dev` must require no authentication environment setup and must use `strictPort: true`.
+- The browser may request only an empty local auto-session; tenant, user, scopes, Cookie attributes, and redirects remain server-owned.
+- Production OIDC, server sessions, exact Origin checks, CSRF, tenant isolation, and all API authorization checks remain unchanged.

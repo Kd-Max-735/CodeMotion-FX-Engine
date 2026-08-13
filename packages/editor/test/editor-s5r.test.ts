@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { validateContract } from "@codemotion/schema";
+import type { AssetDefinition, LayerDefinition } from "@codemotion/core";
+import { P0_EFFECT_CARD_BY_ID, P0_EFFECT_CARDS } from "@codemotion/effects-2d";
 import { makeTextExtrudeRasterFixture } from "@codemotion/effects-3d";
 import { createProjectFrameProducer } from "@codemotion/exporter";
 import { resolveLayerTimeSample, resolveProjectTimeSample } from "@codemotion/timeline";
@@ -89,13 +91,80 @@ describe("Stage 5R editor integration", () => {
     expect(validateContract("MotionProject", store.getSnapshot().document.project).valid).toBe(true);
   });
 
-  it("keeps all 40 created instances valid without effect-specific editor branches", () => {
-    const project = createStarterProject();
-    const layer = mainLayers(project)[1]!;
-    layer.effects = P0_EDITOR_EFFECTS.map((effect, index) =>
-      createP0EffectInstance(effect.effectId, index % 3, `effect.s5r.${index}`)
-    );
-    expect(validateContract("MotionProject", project).valid).toBe(true);
+  it("keeps every one-effect project valid without effect-specific editor branches", () => {
+    for (const [index, effect] of P0_EDITOR_EFFECTS.entries()) {
+      const project = createStarterProject();
+      mainLayers(project)[1]!.effects = [
+        createP0EffectInstance(effect.effectId, index % 3, `effect.s5r.${index}`)
+      ];
+      expect(validateContract("MotionProject", project).valid, effect.effectId).toBe(true);
+    }
+  });
+
+  it("adds, edits, saves and restores each of the 40 cards as a one-effect project", () => {
+    for (const card of P0_EFFECT_CARDS) {
+      const project = createStarterProject("P0 card", 640, 360, 30);
+      const asset: AssetDefinition = {
+        id: "asset_sample_card_image",
+        type: "image",
+        uri: `media://${"a".repeat(64)}.png`,
+        hash: `sha256:${"a".repeat(64)}`,
+        metadata: { mime: "image/png", codec: "png", bytes: 4, width: 1, height: 1, decodeVerified: true }
+      };
+      const template = mainLayers(project)[0]!;
+      const image: LayerDefinition = {
+        ...structuredClone(template),
+        id: "layer.sample.image",
+        name: "Sample image",
+        type: "image",
+        source: { assetId: asset.id },
+        properties: { fit: "contain" },
+        effects: [],
+        masks: [],
+        zIndex: 3
+      };
+      project.assets.push(asset);
+      mainLayers(project).push(image);
+      const store = new EditorStore(undefined, project);
+      const layerId = card.fixture.inputKind === "text"
+        ? "layer.title"
+        : card.supportedTargets.includes("image") && !card.supportedTargets.includes("composition")
+          ? image.id
+          : "layer.accent";
+      store.addEffect(layerId, card.effectId);
+      const added = mainLayers(store.getSnapshot().document.project)
+        .flatMap((layer) => layer.effects).find((effect) => effect.effectId === card.effectId)!;
+      if (card.effectId === "fx.motion.slide") {
+        const definition = P0_EDITOR_EFFECTS.find((effect) => effect.effectId === card.effectId)!;
+        const direction = effectParameterFields(definition).find((field) => field.name === "direction")!;
+        store.updateEffectParameter(layerId, added.id, direction, "right");
+      }
+      const serialized = store.exportJson();
+      const restored = new EditorStore();
+      restored.importProject(serialized);
+      const restoredEffects = mainLayers(restored.getSnapshot().document.project)
+        .flatMap((layer) => layer.effects);
+      expect(restoredEffects.map((effect) => effect.effectId)).toEqual([card.effectId]);
+      if (card.effectId === "fx.motion.slide") {
+        expect(restoredEffects[0]?.params.direction).toMatchObject({ mode: "constant", value: "right" });
+      }
+      expect(validateContract("MotionProject", restored.getSnapshot().document.project).valid, card.effectId).toBe(true);
+    }
+  });
+
+  it("edits a keyframeable parameter received as a raw server preset", () => {
+    const store = new EditorStore();
+    store.addEffect("layer.title", "fx.text.typewriter");
+    const editable = structuredClone(store.getSnapshot().editableProject);
+    const effect = editable.project.compositions.flatMap((composition) => composition.layers)
+      .flatMap((layer) => layer.effects).find((item) => item.effectId === "fx.text.typewriter")!;
+    effect.params = structuredClone(P0_EFFECT_CARD_BY_ID.get("fx.text.typewriter")!.defaultParams);
+    const generated = new EditorStore();
+    generated.adoptEditableProject(editable);
+    const field = effectParameterFields(P0_EDITOR_EFFECTS.find((item) => item.effectId === effect.effectId)!)
+      .find((item) => item.name === "speed")!;
+    generated.updateEffectParameter("layer.title", effect.id, field, 12.1);
+    expect(generated.effectParameterValue("layer.title", effect.id, field)).toBe(12.1);
   });
 
   it("renders a real shape effect through the shared G5 producer at preview and final quality", async () => {

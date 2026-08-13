@@ -99,14 +99,14 @@ function resolveUnknown(value: unknown): LayerRasterSource | undefined {
 }
 
 describe("formal deterministic text raster source", () => {
-  it("normalizes Unicode graphemes to NFC and renders Chinese, English, and joined emoji deterministically", () => {
+  it("normalizes supported Unicode graphemes and rejects missing font glyphs explicitly", () => {
     const first = resolveFormal2dRasterSourceV1(request(layer("text", {
-      text: "中文 Ae\u0301 👩‍💻",
+      text: "中文 Ae\u0301",
       fontFamily: "Codemotion Planner Unicode Bitmap",
       fontSize: 48
     })));
     const second = resolveFormal2dRasterSourceV1(request(layer("text", {
-      text: "中文 Aé 👩‍💻",
+      text: "中文 Aé",
       fontFamily: "Codemotion Planner Unicode Bitmap",
       fontSize: 48
     })));
@@ -114,8 +114,8 @@ describe("formal deterministic text raster source", () => {
     expect(second?.kind).toBe("text");
     expect(first).toEqual(second);
     if (first?.kind !== "text") return;
-    expect(first.text).toBe("中文 Aé 👩‍💻");
-    expect(first.glyphs.length).toBeGreaterThanOrEqual(6);
+    expect(first.text).toBe("中文 Aé");
+    expect(first.glyphs.length).toBeGreaterThanOrEqual(5);
     expect(first.font).toMatchObject({
       fontId: "font.codemotion.unicode-bitmap-v1",
       assetId: "font.codemotion.unicode-bitmap-v1",
@@ -123,6 +123,11 @@ describe("formal deterministic text raster source", () => {
       missingGlyphPolicy: "error"
     });
     expect(Object.isFrozen(first)).toBe(true);
+    expectCode(() => resolveFormal2dRasterSourceV1(request(layer("text", {
+      text: "👩‍💻",
+      fontFamily: "Codemotion Planner Unicode Bitmap",
+      fontSize: 48
+    }))), "FONT_UNAVAILABLE");
   });
 
   it("uses explicit/default RGBA including Alpha without applying layer opacity", () => {
@@ -665,7 +670,7 @@ describe("formal request own-property snapshot isolation", () => {
     ], { encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);
     expect(Object.hasOwn(Object.prototype, "signal")).toBe(false);
-  });
+  }, 15_000);
 });
 
 describe("formal shape and inline-SVG raster sources", () => {

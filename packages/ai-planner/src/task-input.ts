@@ -1,6 +1,14 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { JsonObject } from "@codemotion/core";
+import { P0_EFFECTS, effectCardForEffectId } from "@codemotion/effects-2d";
 import type { BrandConstraint } from "./provider.js";
+
+export const P0_GENERATION_EFFECT_IDS: readonly string[] = Object.freeze(P0_EFFECTS.map((effect) => effect.effectId));
+export type P0GenerationEffectId = string;
+/** @deprecated Use P0_GENERATION_EFFECT_IDS. */
+export const V22_GENERATION_EFFECT_IDS = P0_GENERATION_EFFECT_IDS;
+/** @deprecated Use P0GenerationEffectId. */
+export type V22GenerationEffectId = P0GenerationEffectId;
 
 export type AiAssetPurpose = "reference-image" | "reference-video" | "reference-audio" | "logo";
 
@@ -18,6 +26,7 @@ export interface AiCanvasConstraint {
 export interface AiPlanningInputV1 {
   readonly contract: "ai-task/v1";
   readonly prompt: string;
+  readonly selectedEffectId?: P0GenerationEffectId;
   readonly assets: readonly AiAssetReference[];
   readonly canvas: AiCanvasConstraint;
   readonly durationSeconds: number;
@@ -32,6 +41,7 @@ const AI_PLANNING_INPUT_SCHEMA: JsonObject = {
   properties: {
     contract: { const: "ai-task/v1" },
     prompt: { type: "string", maxLength: 20_000 },
+    selectedEffectId: { enum: [...P0_GENERATION_EFFECT_IDS] },
     assets: {
       type: "array",
       maxItems: 8,
@@ -89,8 +99,14 @@ export function parseAiPlanningInputV1(value: unknown): AiPlanningInputV1 {
   if (new Set(assetIds).size !== assetIds.length) {
     throw new TypeError("ai-task/v1 asset IDs must be unique.");
   }
-  if (input.prompt.trim().length === 0 && input.assets.length === 0) {
-    throw new TypeError("ai-task/v1 requires a prompt or at least one asset.");
+  if (input.prompt.trim().length === 0) {
+    throw new TypeError("ai-task/v1 requires a non-empty natural-language prompt.");
+  }
+  const visualAssets = input.assets.filter((asset) => asset.purpose !== "reference-audio");
+  const dualInput = input.selectedEffectId !== undefined
+    && effectCardForEffectId(input.selectedEffectId)?.fixture.secondaryInput === true;
+  if (input.selectedEffectId && visualAssets.length !== (dualInput ? 2 : 1)) {
+    throw new TypeError(`Selected effect ${input.selectedEffectId} has an invalid visual asset count.`);
   }
   if (input.canvas.width * input.canvas.height > 33_554_432) {
     throw new TypeError("ai-task/v1 canvas exceeds the pixel limit.");

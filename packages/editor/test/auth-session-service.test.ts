@@ -1,4 +1,4 @@
-import { createServer, request as httpRequest } from "node:http";
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { exportJWK, generateKeyPair, SignJWT, type CryptoKey } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -171,35 +171,49 @@ async function productionHarness(mutation: TokenMutation = {}) {
 
 async function devHarness() {
   const port = await freePort();
-  let code = "";
   let currentTime = NOW;
   const options = developmentAuthOptionsFromEnvironment({
-    NODE_ENV: "development", CODEMOTION_DEV_AUTH: "1", CODEMOTION_DEV_TENANT_ID: "tenant-dev",
-    CODEMOTION_DEV_USER_ID: "user-dev", CODEMOTION_DEV_SCOPES: "assets:read assets:write ai:plan"
+    CODEMOTION_DEV_TENANT_ID: "tenant-dev",
+    CODEMOTION_DEV_USER_ID: "user-dev",
+    CODEMOTION_DEV_SCOPES: "ai:plan assets:read assets:write project:preview export:create export:read"
   }, {
-    configureServer: true, listenHost: "127.0.0.1", publicOrigin: `http://127.0.0.1:${port}`,
-    writeLoginCode: (value) => { code = value; }
+    configureServer: true, listenHost: "127.0.0.1", publicOrigin: `http://127.0.0.1:${port}`
   }, { now: () => currentTime });
   const service = new AuthSessionService(options);
   const handler = service.handle();
   const httpServer = createServer((request, response) => {
+    if (request.headers["x-test-peer"] === "non-loopback") {
+      Object.defineProperty(request.socket, "remoteAddress", { value: "10.0.0.8" });
+    }
     void handler(request, response, () => { response.statusCode = 404; response.end(); });
   });
   await new Promise<void>((resolve) => httpServer.listen(port, "127.0.0.1", resolve));
   return {
+    service,
     base: `http://127.0.0.1:${port}`,
     origin: `http://127.0.0.1:${port}`,
-    navigation: {
-      referer: `http://127.0.0.1:${port}/`, "sec-fetch-site": "same-origin",
-      "sec-fetch-mode": "navigate", "sec-fetch-dest": "document"
+    autoHeaders: {
+      origin: `http://127.0.0.1:${port}`, "sec-fetch-site": "same-origin",
+      "content-type": "application/json"
     },
-    get code() { return code; },
+    options,
     advance(seconds: number) { currentTime += seconds; },
     close: () => new Promise<void>((resolve, reject) => httpServer.close((error) => error ? reject(error) : resolve()))
   };
 }
 
 describe("production OIDC session boundary", () => {
+  it("does not register the development auto-session endpoint", async () => {
+    const harness = await productionHarness();
+    try {
+      expect((await rawRequest(`${harness.server.base}/auth/dev/auto-session`, {
+        method: "POST",
+        headers: { origin: harness.origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}"
+      })).status).toBe(404);
+    } finally { await harness.server.close(); }
+  });
+
   it("creates a PKCE-bound session with frozen cookies and safe session view", async () => {
     const harness = await productionHarness();
     try {
@@ -363,93 +377,106 @@ describe("authentication startup and local development", () => {
     }
   });
 
-  it("registers dev auth only for configureServer loopback and consumes a browser-bound code once", async () => {
-    let code = "";
-    const port = await freePort();
-    const options = developmentAuthOptionsFromEnvironment({
-      NODE_ENV: "development",
-      CODEMOTION_DEV_AUTH: "1",
-      CODEMOTION_DEV_TENANT_ID: "tenant-dev",
-      CODEMOTION_DEV_USER_ID: "user-dev",
-      CODEMOTION_DEV_SCOPES: "assets:read assets:write ai:plan"
-    }, {
+  it("uses fixed safe defaults without environment setup and accepts validated overrides", () => {
+    const defaults = developmentAuthOptionsFromEnvironment({}, {
+      configureServer: true, listenHost: "127.0.0.1", publicOrigin: "http://127.0.0.1:4174"
+    });
+    expect(defaults.dev).toEqual({
       configureServer: true,
       listenHost: "127.0.0.1",
-      publicOrigin: `http://127.0.0.1:${port}`,
-      writeLoginCode: (value) => { code = value; }
+      tenantId: "local-tenant",
+      userId: "local-user",
+      scopes: ["ai:plan", "assets:read", "assets:write", "project:preview", "export:create", "export:read"]
     });
-    const service = new AuthSessionService(options);
-    const handler = service.handle();
-    const httpServer = createServer((request, response) => {
-      void handler(request, response, () => { response.statusCode = 404; response.end(); });
-    });
-    await new Promise<void>((resolve) => httpServer.listen(port, "127.0.0.1", resolve));
-    const server = {
-      base: `http://127.0.0.1:${port}`,
-      close: () => new Promise<void>((resolve, reject) => httpServer.close((error) => error ? reject(error) : resolve()))
-    };
-    try {
-      const headers = {
-        referer: `http://127.0.0.1:${port}/`,
-        "sec-fetch-site": "same-origin",
-        "sec-fetch-mode": "navigate",
-        "sec-fetch-dest": "document"
-      };
-      const login = await rawRequest(`${server.base}/auth/dev/login`, { headers });
-      expect(login.status).toBe(204);
-      expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
-      const binding = cookieValue(setCookies(login), "cmfx_dev_login");
-      const otherBrowser = await fetch(`${server.base}/auth/dev/session`, {
-        method: "POST",
-        headers: { origin: `http://127.0.0.1:${port}`, "content-type": "application/json" },
-        body: JSON.stringify({ code })
-      });
-      expect(otherBrowser.status).toBe(400);
-      const replay = await fetch(`${server.base}/auth/dev/session`, {
-        method: "POST",
-        headers: { origin: `http://127.0.0.1:${port}`, cookie: `cmfx_dev_login=${binding}`, "content-type": "application/json" },
-        body: JSON.stringify({ code })
-      });
-      expect(replay.status).toBe(400);
-    } finally { await server.close(); }
+    const overrides = developmentAuthOptionsFromEnvironment({
+      CODEMOTION_DEV_AUTH: "1", CODEMOTION_DEV_TENANT_ID: "tenant-dev",
+      CODEMOTION_DEV_USER_ID: "user-dev", CODEMOTION_DEV_SCOPES: "assets:read ai:plan"
+    }, { configureServer: true, listenHost: "127.0.0.1", publicOrigin: "http://127.0.0.1:4174" });
+    expect(overrides.dev).toMatchObject({ tenantId: "tenant-dev", userId: "user-dev", scopes: ["assets:read", "ai:plan"] });
   });
 
   it("rejects preview-style, production, and non-loopback development registration", () => {
-    const env = {
-      NODE_ENV: "development", CODEMOTION_DEV_AUTH: "1", CODEMOTION_DEV_TENANT_ID: "t",
-      CODEMOTION_DEV_USER_ID: "u", CODEMOTION_DEV_SCOPES: "ai:plan"
-    };
-    expect(() => developmentAuthOptionsFromEnvironment(env, {
-      configureServer: false, listenHost: "127.0.0.1", publicOrigin: "http://127.0.0.1:1", writeLoginCode: () => undefined
+    expect(() => developmentAuthOptionsFromEnvironment({}, {
+      configureServer: false, listenHost: "127.0.0.1", publicOrigin: "http://127.0.0.1:1"
     })).toThrow("configureServer");
-    expect(() => developmentAuthOptionsFromEnvironment(env, {
-      configureServer: true, listenHost: "0.0.0.0", publicOrigin: "http://127.0.0.1:1", writeLoginCode: () => undefined
+    expect(() => developmentAuthOptionsFromEnvironment({}, {
+      configureServer: true, listenHost: "0.0.0.0", publicOrigin: "http://127.0.0.1:1"
     })).toThrow("loopback");
+    expect(() => developmentAuthOptionsFromEnvironment({ CODEMOTION_DEV_AUTH: "0" }, {
+      configureServer: true, listenHost: "127.0.0.1", publicOrigin: "http://127.0.0.1:1"
+    })).toThrow("must be 1");
   });
 
-  it("creates one dev session for the bound browser and rejects replay and expiry", async () => {
+  it("creates an opaque local session, preserves it across refresh, and restores it after restart", async () => {
     const valid = await devHarness();
+    let oldCookie = "";
     try {
-      const login = await rawRequest(`${valid.base}/auth/dev/login`, { headers: valid.navigation });
-      const binding = cookieValue(setCookies(login), "cmfx_dev_login");
-      const created = await fetch(`${valid.base}/auth/dev/session`, {
-        method: "POST",
-        headers: { origin: valid.origin, cookie: `cmfx_dev_login=${binding}`, "content-type": "application/json" },
-        body: JSON.stringify({ code: valid.code })
+      const anonymous = await fetch(`${valid.base}/api/session`);
+      expect(anonymous.status).toBe(401);
+      expect(setCookies(anonymous)).toEqual([]);
+      const created = await fetch(`${valid.base}/auth/dev/auto-session`, {
+        method: "POST", headers: valid.autoHeaders, body: "{}"
       });
       expect(created.status).toBe(201);
-      expect(cookieValue(setCookies(created), "cmfx_dev_session")).toMatch(/^[A-Za-z0-9_-]{43}$/);
-      expect((await fetch(`${valid.base}/auth/dev/session`, {
-        method: "POST",
-        headers: { origin: valid.origin, cookie: `cmfx_dev_login=${binding}`, "content-type": "application/json" },
-        body: JSON.stringify({ code: valid.code })
-      })).status).toBe(400);
+      const cookies = setCookies(created);
+      expect(cookies).toHaveLength(2);
+      expect(cookies.find((value) => value.startsWith("cmfx_dev_session="))).toContain("HttpOnly; SameSite=Strict; Path=/");
+      expect(cookies.join(";")).not.toMatch(/Domain=|cmfx_dev_login/);
+      const session = cookieValue(cookies, "cmfx_dev_session");
+      const csrf = cookieValue(cookies, "cmfx_dev_csrf");
+      oldCookie = `cmfx_dev_session=${session}; cmfx_dev_csrf=${csrf}`;
+      const authorizedRequest = { headers: {
+        cookie: oldCookie,
+        origin: valid.origin,
+        "sec-fetch-site": "same-origin",
+        "x-cmfx-csrf": csrf
+      } } as unknown as IncomingMessage;
+      for (const scope of ["ai:plan", "assets:read", "assets:write", "project:preview", "export:create", "export:read"] as const) {
+        await expect(valid.service.authorize(authorizedRequest, {} as ServerResponse, scope, true))
+          .resolves.toMatchObject({ tenantId: "tenant-dev", userId: "user-dev" });
+      }
+      const first = await fetch(`${valid.base}/api/session`, { headers: { cookie: oldCookie } });
+      const refreshed = await fetch(`${valid.base}/api/session`, { headers: { cookie: oldCookie } });
+      expect(first.status).toBe(200);
+      expect(await refreshed.json()).toEqual({ authenticated: true, principal: {
+        tenantId: "tenant-dev", userId: "user-dev",
+        scopes: ["ai:plan", "assets:read", "assets:write", "project:preview", "export:create", "export:read"],
+        expiresAt: NOW + 3_600
+      } });
     } finally { await valid.close(); }
 
-    const expired = await devHarness();
+    const restarted = await devHarness();
     try {
-      expired.advance(301);
-      expect((await rawRequest(`${expired.base}/auth/dev/login`, { headers: expired.navigation })).status).toBe(400);
-    } finally { await expired.close(); }
+      expect((await fetch(`${restarted.base}/api/session`, { headers: { cookie: oldCookie } })).status).toBe(401);
+      expect((await fetch(`${restarted.base}/auth/dev/auto-session`, {
+        method: "POST", headers: restarted.autoHeaders, body: "{}"
+      })).status).toBe(201);
+    } finally { await restarted.close(); }
+  });
+
+  it("rejects forged auto-session requests and removes the former code routes", async () => {
+    const valid = await devHarness();
+    try {
+      const rejectedHeaders = [
+        { ...valid.autoHeaders, origin: "http://evil.example" },
+        { ...valid.autoHeaders, host: "evil.example" },
+        { ...valid.autoHeaders, "sec-fetch-site": "cross-site" }
+      ];
+      for (const headers of rejectedHeaders) {
+        const response = await rawRequest(`${valid.base}/auth/dev/auto-session`, { method: "POST", headers, body: "{}" });
+        expect(response.status).toBe(403);
+        expect(setCookies(response)).toEqual([]);
+      }
+      const injected = await rawRequest(`${valid.base}/auth/dev/auto-session`, {
+        method: "POST", headers: valid.autoHeaders, body: JSON.stringify({ tenantId: "attacker" })
+      });
+      expect(injected.status).toBe(400);
+      expect((await rawRequest(`${valid.base}/auth/dev/login`)).status).toBe(404);
+      expect((await rawRequest(`${valid.base}/auth/dev/session`, { method: "POST" })).status).toBe(404);
+      const nonLoopback = await rawRequest(`${valid.base}/auth/dev/auto-session`, {
+        method: "POST", headers: { ...valid.autoHeaders, "x-test-peer": "non-loopback" }, body: "{}"
+      });
+      expect(nonLoopback.status).toBe(403);
+    } finally { await valid.close(); }
   });
 });

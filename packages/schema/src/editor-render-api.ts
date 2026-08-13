@@ -156,9 +156,9 @@ export function validateExportCreateRequestV1Internal(
   }
   const settings = record.settings;
   if (settings.audio) {
-    const covering = project.value.project.audioTracks.filter((track) =>
-      track.startTime <= 0 && track.endTime >= settings.duration);
-    if (covering.length !== 1) return transportValidationFailureV1("MALFORMED_REQUEST");
+    const audible = project.value.project.audioTracks.filter((track) =>
+      track.startTime < settings.duration && track.endTime > 0);
+    if (audible.length === 0) return transportValidationFailureV1("MALFORMED_REQUEST");
   }
   return { valid: true, value: value as ExportCreateRequestV1 };
 }

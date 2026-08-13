@@ -3,7 +3,7 @@
   "inputFixtureVersion": "real-raster-1.0.0",
   "baselineReason": "EffectTimeSample 1.1 explicit effect-instance random isolation and real raster inputs",
   "runtime": {
-    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
     "webglVersion": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
     "renderer": "ANGLE (Intel, Intel(R) UHD Graphics (0x0000A788) Direct3D11 vs_5_0 ps_5_0, D3D11)",
     "width": 64,
@@ -12,10 +12,10 @@
   "frames": {
     "fx.motion.fade": {
       "0": "02b7edc5",
-      "1": "1aac204f",
-      "0.25": "bf94725c",
-      "0.5": "8462699b",
-      "0.75": "05ee8853"
+      "1": "bd92f0cf",
+      "0.25": "6b71703d",
+      "0.5": "e1f00d65",
+      "0.75": "186f8a85"
     },
     "fx.motion.slide": {
       "0": "3cb880fe",

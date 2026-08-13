@@ -51,8 +51,22 @@ let svg: ImportedMedia | undefined;
 let envelope: BrowserProjectEnvelopeV1;
 let authoritativeProject: MotionProject;
 
+function shortExportProject(project: MotionProject, duration = 0.1): MotionProject {
+  project.duration = duration;
+  for (const composition of project.compositions) {
+    composition.duration = duration;
+    for (const layer of composition.layers) {
+      layer.endTime = Math.min(layer.endTime, duration);
+      layer.outPoint = Math.min(layer.outPoint, duration);
+      for (const effect of layer.effects) effect.endTime = Math.min(effect.endTime ?? duration, duration);
+    }
+  }
+  for (const track of project.audioTracks) track.endTime = Math.min(track.endTime, duration);
+  return project;
+}
+
 function withMedia(base: MotionProject, visual: ImportedMedia, soundtrack: ImportedMedia): MotionProject {
-  const project = addAssetToProject(addAssetToProject(base, visual), soundtrack);
+  const project = shortExportProject(addAssetToProject(addAssetToProject(base, visual), soundtrack));
   const template = project.compositions[0]!.layers[0]!;
   const layer = {
     ...template,
@@ -77,7 +91,7 @@ function withMedia(base: MotionProject, visual: ImportedMedia, soundtrack: Impor
 }
 
 function visualEnvelope(visual: ImportedMedia): BrowserProjectEnvelopeV1 {
-  const project = addAssetToProject(createStarterProject(`Preview ${visual.asset.type}`, 32, 24, 24), visual);
+  const project = shortExportProject(addAssetToProject(createStarterProject(`Preview ${visual.asset.type}`, 32, 24, 24), visual));
   const template = project.compositions[0]!.layers[0]!;
   project.compositions[0]!.layers = [{
     ...template,
@@ -100,7 +114,7 @@ function visualEnvelope(visual: ImportedMedia): BrowserProjectEnvelopeV1 {
 }
 
 function audioEnvelope(soundtrack: ImportedMedia): BrowserProjectEnvelopeV1 {
-  const project = addAssetToProject(createStarterProject("Owner audio", 32, 24, 24), soundtrack);
+  const project = shortExportProject(addAssetToProject(createStarterProject("Owner audio", 32, 24, 24), soundtrack));
   const template = project.compositions[0]!.layers[0]!;
   project.compositions[0]!.layers = [{
     ...template,
@@ -124,13 +138,56 @@ function audioEnvelope(soundtrack: ImportedMedia): BrowserProjectEnvelopeV1 {
   return safe.value;
 }
 
+function mixedAudioEnvelope(sourceVideo: ImportedMedia, soundtrack: ImportedMedia): BrowserProjectEnvelopeV1 {
+  const project = withMedia(createStarterProject("Mixed source and background audio", 32, 24, 24), sourceVideo, soundtrack);
+  project.audioTracks = [
+    {
+      id: "audio_source_1",
+      assetId: sourceVideo.asset.id,
+      startTime: 0,
+      endTime: Math.min(project.duration, Number(sourceVideo.asset.metadata.duration)),
+      volume: { mode: "constant", value: 1 }
+    },
+    {
+      id: "audio_bgm_1",
+      assetId: soundtrack.asset.id,
+      startTime: 0,
+      endTime: Math.min(project.duration, Number(soundtrack.asset.metadata.duration)),
+      volume: { mode: "constant", value: 0.35 }
+    }
+  ];
+  const safe = P0_BROWSER_PROJECT_AUTHORITY_V1.sanitizeBrowserProject(project, {
+    style: [], brand: { colors: [], tone: [], requiredText: [], forbiddenContent: [], logoAssetIds: [] }
+  });
+  if (!safe.valid) throw new Error(safe.error.code);
+  return safe.value;
+}
+
+function tonePower(pcm: Buffer, frequency: number, sampleRate = 48_000): number {
+  const samples = Math.floor(pcm.length / 2);
+  let real = 0;
+  let imaginary = 0;
+  for (let index = 0; index < samples; index += 1) {
+    const value = pcm.readInt16LE(index * 2) / 32_768;
+    const phase = 2 * Math.PI * frequency * index / sampleRate;
+    real += value * Math.cos(phase);
+    imaginary -= value * Math.sin(phase);
+  }
+  return (real * real + imaginary * imaginary) / Math.max(1, samples * samples);
+}
+
 beforeAll(async () => {
   // Let short isolated-process contract tests clear before starting real media subprocesses.
   await new Promise((resolveDelay) => setTimeout(resolveDelay, 6_000));
   await mkdir(input, { recursive: true });
   await runProcess("ffmpeg", ["-hide_banner", "-y", "-threads", "1", "-f", "lavfi", "-i", "color=c=0x20c997:s=32x24:d=0.4", "-frames:v", "1", imagePath]);
   await runProcess("ffmpeg", ["-hide_banner", "-y", "-threads", "1", "-f", "lavfi", "-i", "sine=frequency=330:duration=0.4", "-c:a", "pcm_s16le", audioPath]);
-  await runProcess("ffmpeg", ["-hide_banner", "-y", "-threads", "1", "-f", "lavfi", "-i", "testsrc2=s=32x24:r=24:d=0.4", "-c:v", "libx264", "-pix_fmt", "yuv420p", videoPath]);
+  await runProcess("ffmpeg", [
+    "-hide_banner", "-y", "-threads", "1",
+    "-f", "lavfi", "-i", "testsrc2=s=32x24:r=24:d=0.4",
+    "-f", "lavfi", "-i", "sine=frequency=660:duration=0.4",
+    "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", videoPath
+  ]);
   await writeFile(svgPath, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"24\" viewBox=\"0 0 32 24\"><rect width=\"32\" height=\"24\" fill=\"#20c997\"/></svg>");
   store = await new TenantMediaStore({ storageRoot: mediaRoot, allowedRoots: [input] }).initialize();
   image = await store.import(owner, { sourcePath: imagePath, claimedMime: "image/png", displayName: "editor.png" });
@@ -229,7 +286,7 @@ describe("Stage 7R owner-aware export service", () => {
       frame, time: frame / 24, deltaTime: frame === 0 ? 0 : 1 / 24, fps: 24, width: 32, height: 24
     });
     const start = await frameAt(0);
-    const middle = await frameAt(12);
+    const middle = await frameAt(1);
     expect(createHash("sha256").update(start).digest("hex"))
       .not.toBe(createHash("sha256").update(middle).digest("hex"));
   });
@@ -239,6 +296,8 @@ describe("Stage 7R owner-aware export service", () => {
     expect(validateExportSettings(envelope, { ...settings("gif"), audio: true })).toHaveLength(1);
     expect(validateExportSettings(envelope, { ...settings("mp4"), width: 8192, height: 8192 })).toHaveLength(1);
     expect(validateExportSettings(authoritativeProject, settings("mp4"))).toEqual(["Browser project envelope required."]);
+    expect(validateExportSettings(envelope, { ...settings("mp4"), duration: envelope.project.duration / 2 }))
+      .toEqual(["导出时长必须跟随当前工程时长。"]);
   });
 
   it.each([
@@ -273,6 +332,35 @@ describe("Stage 7R owner-aware export service", () => {
       frame: { time: 0, width: 32, height: 24, quality: "final" }
     })).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
     await preview.close();
+  }, 30_000);
+
+  it.each(["mp4", "webm"] as const)("mixes independent video source audio and background music into real %s output", async (format) => {
+    expect(video.asset.metadata.audioStreams).toBeGreaterThanOrEqual(1);
+    const mixed = mixedAudioEnvelope(video, audio);
+    expect(mixed.project.audioTracks.map((track) => [track.id, track.assetId, track.volume]))
+      .toEqual([
+        ["audio_source_1", video.asset.id, { mode: "constant", value: 1 }],
+        ["audio_bgm_1", audio.asset.id, { mode: "constant", value: 0.35 }]
+      ]);
+    const service = await new ExportTaskService({
+      resolver: store,
+      outputRoot: resolve(outputRoot, `mixed-${format}`)
+    }).initialize();
+    const created = await service.create(principal, {
+      contract: "export-request/v1",
+      editableProject: mixed,
+      settings: settings(format)
+    });
+    const completed = await waitFor(service, created.id);
+    expect(completed.status).toBe("completed");
+    const lease = await service.acquireDownload(principal, completed.id);
+    const pcm = (await runProcess("ffmpeg", [
+      "-v", "error", "-i", lease.path, "-map", "0:a:0", "-f", "s16le", "-ac", "1", "-ar", "48000", "pipe:1"
+    ])).stdout;
+    expect(tonePower(pcm, 330)).toBeGreaterThan(tonePower(pcm, 1_100) * 8);
+    expect(tonePower(pcm, 660)).toBeGreaterThan(tonePower(pcm, 1_100) * 8);
+    await lease.release();
+    await service.close();
   }, 30_000);
 
   it("keeps Preview and Export pixels identical at the same dimensions and project time", async () => {

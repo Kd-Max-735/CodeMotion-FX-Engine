@@ -440,7 +440,7 @@ function validProperties(type: string, value: unknown): boolean {
   }
 }
 
-const effectAjv = new Ajv2020({ allErrors: false, strict: false });
+const effectAjv = new Ajv2020({ allErrors: false, strict: false, multipleOfPrecision: 12 });
 const effectValidators = new WeakMap<object, ValidateFunction>();
 
 function effectValidator(definition: BrowserProjectEffectDefinitionV1): ValidateFunction | undefined {
@@ -757,7 +757,7 @@ export function classifyBrowserProjectAssetReferencesV1Internal(
   for (const track of project.audioTracks) add({
     assetId: track.assetId,
     role: "audio-track",
-    allowedMediaTypes: Object.freeze(["audio"]),
+    allowedMediaTypes: Object.freeze(["audio", "video"]),
     location: { kind: "audio-track", trackId: track.id }
   });
   constraints.brand.logoAssetIds.forEach((assetId, index) => add({
@@ -828,7 +828,7 @@ function validProjectStructure(
         && !project.compositions.some((candidate) => candidate.id === layer.properties.compositionId)) return false;
     }
   }
-  for (const track of project.audioTracks) if (byId.get(track.assetId) !== "audio") return false;
+  for (const track of project.audioTracks) if (byId.get(track.assetId) !== "audio" && byId.get(track.assetId) !== "video") return false;
   for (const id of constraints.brand.logoAssetIds) {
     const type = byId.get(id);
     if (type !== "image" && type !== "svg") return false;

@@ -13,16 +13,14 @@ import {
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { Worker } from "node:worker_threads";
 import type { MotionProject } from "@codemotion/core";
+import { evaluateAnimatable } from "@codemotion/timeline";
 import {
-  makeBrushCoverage,
-  P0_BROWSER_PROJECT_AUTHORITY_V1,
-  resolveFormal2dRasterSourceV1
+  P0_BROWSER_PROJECT_AUTHORITY_V1
 } from "@codemotion/effects-2d";
 import {
   ExportFrameError,
-  createProjectFrameProducer,
-  exportFixedFrames,
   projectMediaReferences,
   runProcess,
   validateExportPreset,
@@ -36,7 +34,6 @@ import type {
   ExportTaskFailureV1,
   ExportTaskViewV1
 } from "@codemotion/schema";
-import type { CoverageBuffer, LayerRasterSource } from "@codemotion/renderer-api";
 import { estimateExportBytes } from "./export-center.js";
 import type { AuthSessionService, AuthenticatedSessionPrincipal } from "./auth-session-service.js";
 import {
@@ -81,6 +78,44 @@ interface RuntimeTask {
   controller?: AbortController;
   execution: Promise<void> | undefined;
 }
+
+interface QueuedRender { readonly task: RuntimeTask; readonly materialized: TrustedProjectMaterializationV1; }
+
+const EXPORT_WORKER_SOURCE = String.raw`
+const { parentPort, workerData } = require("node:worker_threads");
+const controller = new AbortController();
+parentPort.on("message", (message) => { if (message && message.type === "cancel") controller.abort(); });
+(async () => {
+  const exporter = await import("@codemotion/exporter");
+  const effects = await import("@codemotion/effects-2d");
+  const media = new Map(workerData.media);
+  const coverageAssets = new Map([["builtin://brush/round", effects.makeBrushCoverage()]]);
+  const project = workerData.project;
+  const producer = exporter.createProjectFrameProducer(project, media, {
+    timeContractVersion: "1.1.0", coverageAssets,
+    resolveRasterSource: (context) => effects.resolveFormal2dRasterSourceV1({
+      layer: context.layer, compositionWidth: context.composition.width,
+      compositionHeight: context.composition.height, renderWidth: context.request.width,
+      renderHeight: context.request.height, projectSeed: context.project.seed,
+      projectTime: context.projectTime.projectTime, layerTime: context.layerTime.localTime,
+      signal: controller.signal
+    })
+  });
+  const report = await exporter.exportFixedFrames({
+    preset: workerData.preset, duration: workerData.settings.duration,
+    outputPath: workerData.outputPath,
+    renderFrame: async (request, frameSignal) => {
+      controller.signal.throwIfAborted();
+      const frame = await producer(request, frameSignal || controller.signal);
+      parentPort.postMessage({ type: "progress", completedFrames: request.frame + 1 });
+      return frame;
+    },
+    ...(workerData.mixedAudio ? { audioPath: workerData.mixedAudio } : {}),
+    signal: controller.signal
+  });
+  parentPort.postMessage({ type: "completed", report });
+})().catch((error) => parentPort.postMessage({ type: "failed", name: error?.name, message: String(error?.message || error) }));
+`;
 
 interface DownloadLease {
   readonly taskId: string;
@@ -263,6 +298,8 @@ export class ExportTaskService {
   private readonly requestControllers = new Set<AbortController>();
   private readonly leaseReleases = new Map<string, { promise: Promise<void>; resolve: () => void }>();
   private readonly cleanupRuns = new Set<Promise<void>>();
+  private readonly renderQueue: QueuedRender[] = [];
+  private activeRender: RuntimeTask | undefined;
   private readonly outputRoot: string;
   private readonly now: () => Date;
   private mutation: Promise<void> = Promise.resolve();
@@ -357,6 +394,31 @@ export class ExportTaskService {
     return this.safeView(task);
   }
 
+  usesAsset(owner: { tenantId: string; userId: string }, assetId: string): boolean {
+    return [...this.tasks.values()].some((task) => task.record.deletionPhase === "live"
+      && task.record.owner.tenantId === owner.tenantId
+      && task.record.owner.userId === owner.userId
+      && ["queued", "running", "cancelling"].includes(task.record.view.status)
+      && task.record.envelope.project.assets.some((asset) => asset.id === assetId));
+  }
+
+  async clear(principal: AuthenticatedSessionPrincipal, id: string): Promise<void> {
+    await this.initialize();
+    const task = this.lookup(ownerOf(principal), id);
+    if (["queued", "running", "cancelling"].includes(task.record.view.status)) {
+      throw new ExportServiceError(409, "EXPORT_TASK_ACTIVE");
+    }
+    if (task.record.leases.length > 0) throw new ExportServiceError(409, "EXPORT_TASK_LEASED");
+    await this.exclusive(async () => {
+      if (task.record.deletionPhase !== "live") throw new ExportServiceError(404, "NOT_FOUND");
+      if (["queued", "running", "cancelling"].includes(task.record.view.status)) {
+        throw new ExportServiceError(409, "EXPORT_TASK_ACTIVE");
+      }
+      if (task.record.leases.length > 0) throw new ExportServiceError(409, "EXPORT_TASK_LEASED");
+      await this.tombstoneLocked(task);
+    });
+  }
+
   async create(
     principal: AuthenticatedSessionPrincipal,
     rawRequest: unknown,
@@ -375,6 +437,9 @@ export class ExportTaskService {
             : code === "BROWSER_PROJECT_UNSAFE" ? "BROWSER_PROJECT_UNSAFE"
               : isExportRequestShape(rawRequest) ? "PROJECT_VALIDATION_FAILED" : "MALFORMED_REQUEST");
       }
+      if (validated.value.settings.duration !== validated.value.editableProject.project.duration) {
+        throw new ExportServiceError(422, "EXPORT_DURATION_MISMATCH");
+      }
       const materialized = await materializeBrowserProjectV1(principal, validated.value.editableProject, this.options.resolver, controller.signal);
       controller.signal.throwIfAborted();
       this.validateAuthoritativeAudio(materialized, validated.value.settings);
@@ -386,13 +451,49 @@ export class ExportTaskService {
 
   private validateAuthoritativeAudio(materialized: TrustedProjectMaterializationV1, settings: ExportSettingsV1): void {
     if (!settings.audio) return;
-    const audioId = materialized.project.audioTracks[0]?.assetId;
-    const audio = audioId === undefined ? undefined : materialized.media.get(audioId);
-    const duration = audio?.asset.metadata.duration;
-    if (audio?.asset.type !== "audio" || typeof duration !== "number" || !Number.isFinite(duration)
-      || duration + 1 / settings.fps < settings.duration) {
-      throw new ProjectServiceError("PROJECT_VALIDATION_FAILED");
+    if (materialized.project.audioTracks.length === 0) throw new ProjectServiceError("PROJECT_VALIDATION_FAILED");
+    for (const track of materialized.project.audioTracks) {
+      const audio = materialized.media.get(track.assetId);
+      const duration = audio?.asset.metadata.duration;
+      const requiredDuration = Math.max(0, Math.min(track.endTime, settings.duration) - track.startTime);
+      if ((audio?.asset.type !== "audio" && audio?.asset.type !== "video")
+        || audio.asset.type === "video" && Number(audio.asset.metadata.audioStreams ?? 0) < 1
+        || typeof duration !== "number" || !Number.isFinite(duration)
+        || duration + 1 / settings.fps < requiredDuration) {
+        throw new ProjectServiceError("PROJECT_VALIDATION_FAILED");
+      }
     }
+  }
+
+  private async mixProjectAudio(
+    project: MotionProject,
+    materialized: TrustedProjectMaterializationV1,
+    settings: ExportSettingsV1,
+    target: string,
+    signal: AbortSignal
+  ): Promise<string | undefined> {
+    if (!settings.audio) return undefined;
+    const tracks = project.audioTracks.flatMap((track) => {
+      const volume = evaluateAnimatable(track.volume, track.startTime);
+      const media = materialized.media.get(track.assetId);
+      return volume > 0 && media ? [{ track, volume, path: media.storedPath }] : [];
+    });
+    if (tracks.length === 0) return undefined;
+    const inputs = tracks.flatMap((item) => ["-i", item.path]);
+    const labels = tracks.map((item, index) => {
+      const duration = Math.min(settings.duration - item.track.startTime, item.track.endTime - item.track.startTime);
+      const delayMs = Math.max(0, Math.round(item.track.startTime * 1000));
+      return `[${index}:a:0]atrim=0:${duration.toFixed(6)},asetpts=PTS-STARTPTS,volume=${item.volume.toFixed(6)},adelay=${delayMs}:all=1,apad=whole_dur=${settings.duration.toFixed(6)}[a${index}]`;
+    });
+    const mix = tracks.length === 1
+      ? "[a0]anull[mix]"
+      : `${tracks.map((_, index) => `[a${index}]`).join("")}amix=inputs=${tracks.length}:duration=longest:normalize=0[mix]`;
+    await runProcess(process.env.FFMPEG_PATH ?? "ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-y", ...inputs,
+      "-filter_complex", [...labels, mix].join(";"), "-map", "[mix]",
+      "-t", settings.duration.toFixed(6), "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", target
+    ], { signal });
+    return target;
   }
 
   private async createValidated(
@@ -412,12 +513,13 @@ export class ExportTaskService {
     const frameCount = Math.ceil(settings.duration * settings.fps);
     const now = this.now().toISOString();
     const downloadName = `${sanitizeName(materialized.project.name)}${extension(settings.format)}`;
+    const mixedAudioPath = join(directory, "mixed-audio.wav");
     const pendingFiles = settings.format === "png-sequence"
       ? [
         ...Array.from({ length: frameCount }, (_, frame) => join(outputPath, `frame-${String(frame).padStart(8, "0")}.png`)),
         join(directory, "output.zip")
       ]
-      : [outputPath];
+      : [outputPath, ...(settings.audio ? [mixedAudioPath] : [])];
     const record: PersistedExportTask = {
       version: 1,
       owner: ownerOf(principal),
@@ -514,9 +616,71 @@ export class ExportTaskService {
   }
 
   private start(task: RuntimeTask, materialized: TrustedProjectMaterializationV1): void {
-    const execution = this.run(task, materialized);
-    task.execution = execution;
-    void execution.finally(() => { task.execution = undefined; }).catch(() => undefined);
+    this.renderQueue.push({ task, materialized });
+    this.drainRenderQueue();
+  }
+
+  private drainRenderQueue(): void {
+    if (this.closing || this.activeRender) return;
+    const next = this.renderQueue.shift();
+    if (!next) return;
+    this.activeRender = next.task;
+    const execution = this.run(next.task, next.materialized);
+    next.task.execution = execution;
+    void execution.finally(() => {
+      next.task.execution = undefined;
+      if (this.activeRender === next.task) this.activeRender = undefined;
+      this.drainRenderQueue();
+    }).catch(() => undefined);
+  }
+
+  private renderInWorker(
+    task: RuntimeTask,
+    materialized: TrustedProjectMaterializationV1,
+    mixedAudio: string | undefined,
+    signal: AbortSignal
+  ): Promise<{ readonly outputPath: string }> {
+    return new Promise((resolveWorker, rejectWorker) => {
+      const worker = new Worker(EXPORT_WORKER_SOURCE, {
+        eval: true,
+        workerData: {
+          project: structuredClone(materialized.project), media: [...materialized.media.entries()],
+          settings: structuredClone(task.record.view.settings), outputPath: task.record.outputPath,
+          preset: preset(task.record.view.settings), mixedAudio
+        }
+      });
+      let settled = false;
+      let latestPersistedFrame = task.record.view.completedFrames;
+      const finish = (error?: Error, report?: { readonly outputPath: string }): void => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", cancel);
+        void worker.terminate();
+        if (error) rejectWorker(error); else resolveWorker(report!);
+      };
+      const cancel = (): void => {
+        worker.postMessage({ type: "cancel" });
+        const forced = setTimeout(() => finish(new DOMException("Export cancelled.", "AbortError")), 2_000);
+        forced.unref();
+      };
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) cancel();
+      worker.on("message", (message: unknown) => {
+        if (typeof message !== "object" || message === null) return;
+        const event = message as { type?: string; completedFrames?: number; report?: { outputPath?: string }; message?: string };
+        if (event.type === "progress" && Number.isInteger(event.completedFrames)) {
+          const completedFrames = event.completedFrames!;
+          if (completedFrames === task.record.view.frameCount || completedFrames - latestPersistedFrame >= Math.max(1, Math.floor(task.record.view.settings.fps / 2))) {
+            latestPersistedFrame = completedFrames;
+            void this.update(task, (record) => ({ ...record, view: { ...record.view, completedFrames,
+              progress: Math.min(1, completedFrames / record.view.frameCount), updatedAt: this.now().toISOString() } })).catch(() => undefined);
+          }
+        } else if (event.type === "completed" && typeof event.report?.outputPath === "string") finish(undefined, { outputPath: event.report.outputPath });
+        else if (event.type === "failed") finish(new Error(`EXPORT_WORKER_FAILED: ${event.message ?? "unknown"}`));
+      });
+      worker.once("error", (error) => finish(new Error(`EXPORT_WORKER_CRASHED: ${error.message}`)));
+      worker.once("exit", (code) => { if (!settled && code !== 0) finish(new Error(`EXPORT_WORKER_CRASHED: exit ${code}`)); });
+    });
   }
 
   private async update(task: RuntimeTask, update: (record: PersistedExportTask) => PersistedExportTask): Promise<void> {
@@ -536,45 +700,9 @@ export class ExportTaskService {
       }));
       signal.throwIfAborted();
       const project: MotionProject = materialized.project;
-      const coverageAssets = new Map<string, CoverageBuffer>([["builtin://brush/round", makeBrushCoverage()]]);
-      const producer = createProjectFrameProducer(project, materialized.media, {
-        timeContractVersion: "1.1.0",
-        coverageAssets,
-        resolveRasterSource: (context) => resolveFormal2dRasterSourceV1({
-          layer: context.layer,
-          compositionWidth: context.composition.width,
-          compositionHeight: context.composition.height,
-          renderWidth: context.request.width,
-          renderHeight: context.request.height,
-          projectSeed: context.project.seed,
-          projectTime: context.projectTime.projectTime,
-          layerTime: context.layerTime.localTime,
-          signal
-        }) as LayerRasterSource
-      });
-      const audioId = settings.audio ? projectMediaReferences(project).audioAssetIds[0] : undefined;
-      const audio = audioId === undefined ? undefined : materialized.media.get(audioId);
-      const report = await exportFixedFrames({
-        preset: preset(settings),
-        duration: settings.duration,
-        outputPath: task.record.outputPath,
-        renderFrame: async (request, frameSignal) => {
-          signal.throwIfAborted();
-          const frame = await producer(request, frameSignal ?? signal);
-          await this.update(task, (record) => ({
-            ...record,
-            view: {
-              ...record.view,
-              completedFrames: request.frame + 1,
-              progress: Math.min(1, (request.frame + 1) / record.view.frameCount),
-              updatedAt: this.now().toISOString()
-            }
-          }));
-          return frame;
-        },
-        ...(audio === undefined ? {} : { audioPath: audio.storedPath }),
-        signal
-      });
+      const mixedAudio = await this.mixProjectAudio(project, materialized, settings,
+        join(this.taskDirectory(task.record.view.id), "mixed-audio.wav"), signal);
+      const report = await this.renderInWorker(task, materialized, mixedAudio, signal);
       let downloadPath = report.outputPath;
       if (settings.format === "png-sequence") {
         downloadPath = join(this.taskDirectory(task.record.view.id), "output.zip");
@@ -892,6 +1020,9 @@ function sendError(response: ServerResponse, error: unknown): void {
     UNAUTHENTICATED: "Authentication is required.", FORBIDDEN: "The required permission is missing.",
     REQUEST_ORIGIN_REJECTED: "The request origin was rejected.", NOT_FOUND: "The requested object was not found.",
     TASK_STATE_CONFLICT: "The task state does not permit this operation.", MALFORMED_REQUEST: "The request is malformed.",
+    EXPORT_TASK_ACTIVE: "An active export task cannot be cleared.",
+    EXPORT_TASK_LEASED: "An export task with an active download cannot be cleared.",
+    EXPORT_DURATION_MISMATCH: "Export duration must match the authoritative project duration.",
     UNSUPPORTED_CONTRACT: "Unsupported contract.", PROJECT_TOO_LARGE: "The project exceeds the allowed size.",
     BROWSER_PROJECT_UNSAFE: "The browser project is unsafe.", PROJECT_VALIDATION_FAILED: "Project validation failed.",
     ASSET_REFERENCE_INVALID: "A project asset reference is invalid.",
@@ -923,12 +1054,13 @@ export function createExportApi(
     const retry = /^\/api\/editor-exports\/([^/]+)\/retry$/.exec(url.pathname);
     const download = /^\/api\/editor-exports\/([^/]+)\/download$/.exec(url.pathname);
     const matched = request.method === "GET" && (collection || item !== null || download !== null)
-      || request.method === "POST" && (collection || cancel !== null || retry !== null);
+      || request.method === "POST" && (collection || cancel !== null || retry !== null)
+      || request.method === "DELETE" && item !== null;
     if (!matched) return next();
     let removeDisconnectListeners = (): void => undefined;
     try {
       if (auth === undefined) throw new ExportServiceError(401, "UNAUTHENTICATED");
-      const stateChanging = request.method === "POST";
+      const stateChanging = request.method === "POST" || request.method === "DELETE";
       const principal = await auth.authorize(request, response, stateChanging ? "export:create" : "export:read", stateChanging);
       if (request.method === "GET" && collection) return sendJson(response, 200, { tasks: await service.list(principal) });
       if (request.method === "POST" && collection) {
@@ -946,6 +1078,17 @@ export function createExportApi(
         });
       }
       if (request.method === "GET" && item) return sendJson(response, 200, { task: await service.get(principal, decodeId(item[1]!)) });
+      if (request.method === "DELETE" && item) {
+        if (request.headers["transfer-encoding"] !== undefined
+          || (request.headers["content-length"] !== undefined && request.headers["content-length"] !== "0")) {
+          throw new ExportServiceError(400, "MALFORMED_REQUEST");
+        }
+        await service.clear(principal, decodeId(item[1]!));
+        response.statusCode = 204;
+        response.setHeader("cache-control", "no-store");
+        response.end();
+        return;
+      }
       if (request.method === "POST" && cancel) return sendJson(response, 200, { task: await service.cancel(principal, decodeId(cancel[1]!)) });
       if (request.method === "POST" && retry) {
         if (request.headers["transfer-encoding"] !== undefined

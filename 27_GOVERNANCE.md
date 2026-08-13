@@ -150,3 +150,23 @@ Stage 7 formal project-chain freeze (`1-S7R-G0`, corrected by `1-S7R-G0-CORRECTI
 ## 27.8 S0 exit gate
 
 `G8-S0` passed only after: the repository and recorded empty-remote evidence were verified; the authoritative requirement copy had the expected SHA-256; the package was whole, ignored, untracked, and unused at that gate; there were no tracked deletions; serial/message-authorization rules, toolchain decisions, and Groups 1-8 were recorded; the false P01-P40 table was absent; T08/P05 and the Chapter 27/34 decision were recorded; only S0-safe files were committed locally; and post-commit status was clean. The user's later pre-Stage-6 removal of the untracked package does not invalidate that historical evidence. The package must now remain absent and must not be restored, rebuilt, or referenced. A later remote connection reset does not overturn the recorded evidence. Stage 1 began when the user sent `1-S1`, with no additional Group 8 opening action.
+
+## 27.9 V2.2 controlled sample-card refactor
+
+The user's 2026-08-05 prompt supersedes the group handoff protocol only for the current controlled refactor. One Codex conversation owns planning, boundary decisions, implementation, automated testing, and visual verification. Historical PASS and stage records remain unchanged.
+
+The refactor keeps the 40-effect P0 registry and existing `effectId` compatibility intact, and uses eight named effects as the V2.2 card-model sample. It must not weaken authentication, tenant isolation, media authorization, preview, export, remote-history, Provider, or deleted-package restrictions. Public persisted Project Schema and Renderer contracts remain unchanged unless a separately documented versioned migration becomes necessary.
+
+The original refactor prompt required the work to remain uncommitted until visual acceptance. The user's 2026-08-13 Git instruction supersedes only that storage rule: each tested logical iteration now receives a local commit and reported hash so it has a rollback point. Local commit status is not evidence of human visual acceptance or publication, and no push is authorized. The acceptance gate remains a running local editor, automated type/test/build evidence, browser evidence, per-effect representative-frame evidence, and an explicit status inventory.
+
+## 27.10 Local development automatic session authorization
+
+The user's 2026-08-05 local-auth prompt supersedes the one-time-code development login for the current uncommitted refactor. This does not rewrite the historical Stage 7R PASS evidence: that gate used the then-current browser-bound code design.
+
+The active development contract is zero-configuration `npm run dev` on literal `127.0.0.1:4174` with `strictPort: true`. A same-origin browser may request a server-created local session through `POST /auth/dev/auto-session`; the request cannot choose identity, scopes, Cookie attributes, or redirects. Defaults are `local-tenant`, `local-user`, and the six recorded application scopes, with environment values retained only as validated server-side overrides.
+
+The endpoint exists only in the Vite development `configureServer` runtime and must reject non-loopback peers, mismatched Host or Origin, cross-site Fetch Metadata, and non-empty-schema identity input. Production continues to use OIDC Authorization Code plus PKCE BFF, and preview/production do not register the development endpoint. Existing tenant, CSRF, upload, AI, preview, and export authorization boundaries remain mandatory.
+
+## 27.11 Forty-effect function-first phase
+
+The user's 2026-08-13 direction removes the uncommitted ReAct/Agent console and restores the pre-ReAct card-based creation workflow. All 40 registered P0 effects are exposed through the shared real-runtime card adapter. ReAct, Tool Call orchestration, and multi-effect Agent composition are deferred until 120 real effect functions have been implemented. The server-side single-pass Ark planner remains the sole AI planning path during this phase. Automated verification and local commits do not change `pending-human` or publication state.

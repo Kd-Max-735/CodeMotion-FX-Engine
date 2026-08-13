@@ -73,14 +73,7 @@ describe("server runtime lifecycle", () => {
       publicOrigin: "http://127.0.0.1:5173",
       mediaRoot: resolve(root, "media"),
       uploadTempRoot: resolve(root, "uploads"),
-      env: {
-        NODE_ENV: "development",
-        CODEMOTION_DEV_AUTH: "1",
-        CODEMOTION_DEV_TENANT_ID: owner.tenantId,
-        CODEMOTION_DEV_USER_ID: owner.userId,
-        CODEMOTION_DEV_SCOPES: "assets:read assets:write ai:plan project:preview export:create export:read"
-      },
-      writeDevLoginCode: () => undefined,
+      env: {},
       createAiPlans: (assets) => new AiPlanService(new RuntimeBlockingProvider(), assets)
     });
     await runtime.close();
@@ -122,7 +115,6 @@ describe("server runtime lifecycle", () => {
         CODEMOTION_DEV_USER_ID: owner.userId,
         CODEMOTION_DEV_SCOPES: "assets:read assets:write ai:plan"
       },
-      writeDevLoginCode: () => undefined,
       createAiPlans: (assets) => new AiPlanService(provider, assets)
     });
 
@@ -184,7 +176,6 @@ describe("server runtime lifecycle", () => {
         CODEMOTION_DEV_USER_ID: owner.userId,
         CODEMOTION_DEV_SCOPES: "assets:read assets:write ai:plan"
       },
-      writeDevLoginCode: () => undefined,
       createAiPlans: (assets) => new AiPlanService(provider, assets)
     });
     vi.spyOn(runtime.auth, "authorize").mockResolvedValue(uploadPrincipal);

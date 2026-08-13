@@ -18,6 +18,22 @@ export interface EffectParameterField {
 
 export const P0_EDITOR_EFFECTS = P0_EFFECTS;
 
+const PARAMETER_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  from: "起始值", to: "结束值", duration: "持续时间", easing: "缓动",
+  direction: "方向", distance: "距离", overshoot: "回弹幅度", vector: "位移向量",
+  speed: "速度", cursor: "光标", wordMode: "按词显示", cursorWidth: "光标宽度",
+  path: "路径", pressure: "笔压", speedVariation: "速度变化", progress: "进度",
+  color: "颜色", radius: "半径", intensity: "强度", flicker: "闪烁",
+  passes: "处理次数", edgeMode: "边缘模式", alphaAware: "感知透明度",
+  softness: "柔和度", angle: "角度", mask: "遮罩", feather: "羽化", invert: "反转"
+});
+
+const UNIT_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  ratio: "比例", seconds: "秒", enum: "选项", canvas: "画布", normalized: "归一化",
+  "glyphs/s": "字形/秒", boolean: "开关", glyph: "字形", text: "文本",
+  pixels: "像素", count: "次", degrees: "度"
+});
+
 export function effectDefinition(effectId: string): P0CatalogEffectDefinition {
   const definition = P0_EFFECTS_BY_ID.get(effectId);
   if (definition === undefined) throw new RangeError(`Unknown P0 effect ${effectId}.`);
@@ -73,7 +89,7 @@ export function effectParameterFields(definition: EffectDefinition): readonly Ef
         : "string";
     return {
       name,
-      label: typeof ui.label === "string" ? ui.label : name,
+      label: PARAMETER_LABELS[name] ?? (typeof ui.label === "string" ? ui.label : name),
       control: controlFor(name, schema, ui),
       type,
       ...(typeof schema.minimum === "number" ? { minimum: schema.minimum } : {}),
@@ -83,7 +99,7 @@ export function effectParameterFields(definition: EffectDefinition): readonly Ef
       ...(typeof schema.maxLength === "number" ? { maxLength: schema.maxLength } : {}),
       ...(Array.isArray(schema.enum) ? { options: schema.enum as JsonValue[] } : {}),
       keyframeable: definition.supportsKeyframes && ui.keyframeable === true,
-      ...(typeof ui.unit === "string" ? { unit: ui.unit } : {})
+      ...(typeof ui.unit === "string" ? { unit: UNIT_LABELS[ui.unit] ?? ui.unit } : {})
     };
   });
 }

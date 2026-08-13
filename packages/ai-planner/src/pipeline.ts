@@ -16,6 +16,9 @@ import {
 import {
   P0_EFFECTS,
   P0_EFFECTS_BY_ID,
+  effectCardForEffectId,
+  effectCardSearchTerms,
+  explicitEffectCardRequest,
   resolveFormal2dRasterSourceV1,
   type P0CatalogEffectDefinition
 } from "@codemotion/effects-2d";
@@ -121,9 +124,9 @@ export interface PlanningOptions {
   readonly brand?: BrandConstraint;
   readonly maxHeavyEffects?: number;
   readonly text?: string;
+  readonly prompt?: string;
   readonly transform?: TransformDefinition;
   readonly effectIds?: readonly string[];
-  readonly effectParams?: Readonly<Record<string, JsonObject>>;
   readonly previewFrameLimit?: number;
   readonly ffmpegPath?: string;
   readonly signal?: AbortSignal;
@@ -146,6 +149,25 @@ function defaultTransform(duration: number, width: number): TransformDefinition 
   };
 }
 
+function centeredTextTransform(width: number, height: number): TransformDefinition {
+  return {
+    anchorPoint: constant({ x: width / 2, y: height / 2, z: 0 }),
+    position: constant({ x: width / 2, y: height / 2, z: 0 }),
+    scale: constant({ x: 100, y: 100, z: 100 }),
+    rotation: constant({ x: 0, y: 0, z: 0 })
+  };
+}
+
+function visibleLayerName(layer: StoryboardLayer, index: number): string {
+  if (layer.type === "text") {
+    const text = layer.text.trim();
+    return text.length > 0 ? `文字：${[...text].slice(0, 10).join("")}${[...text].length > 10 ? "…" : ""}` : "文字层";
+  }
+  if (layer.type === "image") return `图片素材 ${index + 1}`;
+  if (layer.type === "video") return `视频素材 ${index + 1}`;
+  return `图形层 ${index + 1}`;
+}
+
 function semanticTerms(value: NormalizedUnderstanding): string[] {
   const ignored = new Set(["with", "from", "this", "that", "the", "and", "for", "create", "make"]);
   return [
@@ -159,21 +181,42 @@ function semanticTerms(value: NormalizedUnderstanding): string[] {
     .filter((term) => term.length > 1 && !ignored.has(term));
 }
 
+function semanticText(value: NormalizedUnderstanding): string {
+  return [
+    ...value.text.requirements,
+    ...value.text.constraints,
+    ...value.images.flatMap((image) => [...image.subjects, ...image.style, ...image.colors]),
+    ...value.audio.flatMap((audio) => [...audio.emotion, audio.bgm, audio.rhythm]),
+    ...value.video.flatMap((video) => video.shots.flatMap((shot) => [shot.action, shot.event]))
+  ].join(" ").toLocaleLowerCase();
+}
+
 export function retrieveP0Effects(
   understanding: NormalizedUnderstanding,
   limit = 3
 ): readonly P0CatalogEffectDefinition[] {
   const terms = new Set(semanticTerms(understanding));
+  const fullText = semanticText(understanding);
+  const explicit = explicitEffectCardRequest(fullText);
   return [...P0_EFFECTS].map((effect, index) => {
+    const card = effectCardForEffectId(effect.effectId);
     const searchable = [
       effect.effectId,
       effect.displayName,
       effect.description,
       effect.category,
-      ...effect.tags
+      ...effect.tags,
+      ...(card ? effectCardSearchTerms(card) : [])
     ].join(" ").toLowerCase();
     let score = 0;
     for (const term of terms) if (searchable.includes(term)) score += 1;
+    if (card) {
+      for (const phrase of effectCardSearchTerms(card)) {
+        const normalized = phrase.toLocaleLowerCase();
+        if (normalized.length >= 2 && fullText.includes(normalized)) score += 3;
+      }
+    }
+    if (explicit?.effectId === effect.effectId) score += 100;
     if (effect.performanceClass === "light") score += 0.25;
     return { effect, score, index };
   }).sort((a, b) => b.score - a.score || a.index - b.index)
@@ -186,9 +229,9 @@ function effectCanRender(
   resources: readonly LocalResourceInput[]
 ): boolean {
   const visualResources = resources.filter((item) => item.modality === "image" || item.modality === "video");
-  if (effect.category === "light" || effect.category === "post") return visualResources.length > 0;
+  if (effect.category === "light" || effect.category === "post") return visualResources.length === 1;
   if (effect.category === "transition" || effect.category === "composite") {
-    return visualResources.length > 0;
+    return visualResources.length === 2;
   }
   return true;
 }
@@ -197,7 +240,7 @@ function targetLayer(
   effect: P0CatalogEffectDefinition,
   layers: readonly StoryboardLayer[]
 ): StoryboardLayer {
-  const matching = effect.category === "text"
+  const matching = effect.category === "text" || effect.effectId === "fx.draw.handwriting"
     ? layers.find((layer) => layer.type === "text")
     : effect.category === "vector" || effect.category === "draw"
       ? layers.find((layer) => layer.type === "svg")
@@ -213,7 +256,23 @@ function targetLayer(
   return matching;
 }
 
-const MAX_SCHEMA_REPAIRS = 3;
+function fallbackVectorLayer(
+  effect: P0CatalogEffectDefinition,
+  layers: StoryboardLayer[],
+  shotLayerIds: Set<string>
+): StoryboardLayer | undefined {
+  if (effect.effectId === "fx.draw.handwriting"
+    || (effect.category !== "vector" && effect.category !== "draw")) return undefined;
+  const existing = layers.find((layer) => layer.id === "layer_vector" && layer.type === "svg");
+  const layer: StoryboardLayer = existing ?? {
+    id: "layer_vector",
+    type: "svg",
+    description: "Server-authored vector layer for a registered legacy effect"
+  };
+  if (existing === undefined) layers.push(layer);
+  shotLayerIds.add(layer.id);
+  return layer;
+}
 
 function exactIds(label: string, expected: readonly string[], actual: readonly string[]): void {
   if (actual.length !== expected.length || new Set(actual).size !== actual.length) {
@@ -239,7 +298,7 @@ function effectMatchesLayer(
   definition: P0CatalogEffectDefinition,
   layer: StoryboardLayer
 ): boolean {
-  if (definition.category === "text") return layer.type === "text";
+  if (definition.category === "text" || definition.effectId === "fx.draw.handwriting") return layer.type === "text";
   if (definition.category === "vector" || definition.category === "draw") return layer.type === "svg";
   if (definition.category === "light" || definition.category === "post"
     || definition.category === "transition" || definition.category === "composite") {
@@ -248,37 +307,15 @@ function effectMatchesLayer(
   return true;
 }
 
-function mergeValidatedParams(
-  definition: P0CatalogEffectDefinition,
-  ...overrides: readonly (JsonObject | undefined)[]
-): JsonObject {
-  const validate = new Ajv2020({ allErrors: true, strict: false }).compile(definition.parameterSchema);
-  let params = structuredClone(definition.defaultPreset);
-  if (!parameterSnapshots(params).every((snapshot) => validate(snapshot))) {
-    throw new Error(`Authoritative defaults failed parameter Schema for ${definition.effectId}.`);
-  }
-  let repairs = 0;
-  for (const override of overrides) {
-    for (const [name, value] of Object.entries(override ?? {})) {
-      const candidate = { ...params, [name]: value };
-      if (parameterSnapshots(candidate).every((snapshot) => validate(snapshot))) {
-        params = candidate;
-      } else {
-        repairs += 1;
-        if (repairs > MAX_SCHEMA_REPAIRS) {
-          throw new Error(`AI parameter schema repair limit exceeded for ${definition.effectId}.`);
-        }
-      }
-    }
-  }
-  return params;
+function authoritativeDefaultParams(definition: P0CatalogEffectDefinition): JsonObject {
+  return structuredClone(effectCardForEffectId(definition.effectId)?.defaultParams ?? definition.defaultPreset);
 }
 
 function effectSelection(
   selection: ModelEffectSelection,
   layers: readonly StoryboardLayer[],
   shotLayerIds: ReadonlySet<string>,
-  optionParams: PlanningOptions["effectParams"]
+  resources: readonly LocalResourceInput[]
 ): StoryboardEffect {
   const definition = P0_EFFECTS_BY_ID.get(selection.effectId);
   if (definition === undefined
@@ -293,12 +330,15 @@ function effectSelection(
   if (!effectMatchesLayer(definition, layer)) {
     throw new Error(`Model effect ${selection.effectId} is incompatible with layer ${layer.id}.`);
   }
+  if (!effectCanRender(definition, resources)) {
+    throw new Error(`Model effect ${selection.effectId} does not match the supplied visual asset count.`);
+  }
   return {
     sourceId: definition.sourceId,
     effectId: definition.effectId,
     effectVersion: definition.version,
     targetLayerId: layer.id,
-    params: mergeValidatedParams(definition, selection.params, optionParams?.[definition.effectId])
+    params: authoritativeDefaultParams(definition)
   };
 }
 
@@ -394,7 +434,8 @@ function validatedStoryboard(
   const scale = duration / model.duration;
   const shotIds = model.shots.map((shot) => shot.id);
   if (new Set(shotIds).size !== shotIds.length) throw new Error("AI Storyboard contains duplicate shot IDs.");
-  const requestedDefinitions = options.effectIds?.map((effectId) => {
+  const requestedEffectIds = options.effectIds;
+  const requestedDefinitions = requestedEffectIds?.map((effectId) => {
     const definition = P0_EFFECTS_BY_ID.get(effectId);
     if (definition === undefined) throw new RangeError(`Unknown planning effect ${effectId}.`);
     if (!effectCanRender(definition, resources)) {
@@ -417,15 +458,22 @@ function validatedStoryboard(
       throw new Error(`AI Storyboard shot ${shot.id} references duplicate or unknown layers.`);
     }
     const effects = requestedDefinitions === undefined
-      ? shot.effects.map((selection) => effectSelection(selection, layers, shotLayerIds, options.effectParams))
+      ? shot.effects.map((selection) => effectSelection(selection, layers, shotLayerIds, resources))
       : requestedDefinitions.map((definition): StoryboardEffect => {
-        const layer = targetLayer(definition, layers.filter((item) => shotLayerIds.has(item.id)));
+        const modelTargetId = shot.effects[0]?.targetLayerId;
+        const modelTarget = layers.find((item) => item.id === modelTargetId && shotLayerIds.has(item.id));
+        let layer = modelTarget && effectMatchesLayer(definition, modelTarget)
+          ? modelTarget
+          : layers.filter((item) => shotLayerIds.has(item.id))
+            .find((item) => effectMatchesLayer(definition, item));
+        layer ??= fallbackVectorLayer(definition, layers, shotLayerIds);
+        layer ??= targetLayer(definition, layers.filter((item) => shotLayerIds.has(item.id)));
         return {
           sourceId: definition.sourceId,
           effectId: definition.effectId,
           effectVersion: definition.version,
           targetLayerId: layer.id,
-          params: mergeValidatedParams(definition, options.effectParams?.[definition.effectId])
+          params: authoritativeDefaultParams(definition)
         };
       });
     if (effects.length === 0) throw new Error(`AI Storyboard shot ${shot.id} has no model-planned effect.`);
@@ -470,6 +518,13 @@ function effectInstance(effect: StoryboardEffect, range: TimeRange, identity: st
     renderQuality: "draft",
     cachePolicy: "range"
   };
+}
+
+function fixedEffectRange(effectId: string, range: TimeRange): TimeRange {
+  const duration = effectId === "fx.motion.fade" || effectId === "fx.motion.slide" ? 1.2
+    : effectId === "fx.transition.wipe" || effectId === "fx.composite.maskReveal" ? 1
+      : range.end - range.start;
+  return { start: range.start, end: Math.min(range.end, range.start + duration) };
 }
 
 function baseLayer(
@@ -529,16 +584,18 @@ function toLayer(
     .filter((item) => item.targetLayerId === layer.id && shot.range.start < layerDuration)
     .map((item, effectIndex) => effectInstance(
       item,
-      { start: shot.range.start, end: Math.min(shot.range.end, layerDuration) },
+      fixedEffectRange(item.effectId, { start: shot.range.start, end: Math.min(shot.range.end, layerDuration) }),
       `${shotIndex + 1}_${effectIndex + 1}_${layer.id}`
     )));
   const base = baseLayer(
     layer.id,
-    layer.description.slice(0, 120),
+    visibleLayerName(layer, zIndex),
     layerDuration,
     effects,
     zIndex,
-    options.transform ?? defaultTransform(storyboard.duration, storyboard.width)
+    options.transform ?? (layer.type === "text"
+      ? centeredTextTransform(storyboard.width, storyboard.height)
+      : defaultTransform(storyboard.duration, storyboard.width))
   );
   if (layer.type === "image") {
     if (asset === undefined) throw new Error(`Storyboard image layer ${layer.id} has no verified asset.`);
@@ -563,7 +620,8 @@ function toLayer(
     properties: {
       text: layer.text,
       fontFamily: "Codemotion Planner Unicode Bitmap",
-      fontSize: 32
+      fontSize: Math.max(48, Math.min(96, Math.floor(storyboard.width / Math.max(4, [...layer.text].length + 1)))),
+      color: "#ffffff"
     }
   };
   throw new Error(`Storyboard layer ${layer.id} has an unsupported type.`);
@@ -589,18 +647,27 @@ function toDsl(
       index
     )
   );
-  const audioTracks = resources.filter((resource) => resource.modality === "audio").map((resource, index) => ({
-    id: `audio_${index + 1}`,
+  const sourceAudioTracks = resources.filter((resource) => resource.modality === "video"
+    && Number(resource.asset.metadata.audioStreams ?? 0) > 0).map((resource, index) => ({
+    id: `audio_source_${index + 1}`,
     assetId: resource.localAssetId,
     startTime: 0,
     endTime: Math.min(storyboard.duration, Number(resource.asset.metadata.duration ?? storyboard.duration)),
-    volume: constant(1)
+    volume: constant(/(?:去掉|移除|关闭|静音).{0,6}原声|原声.{0,6}(?:去掉|移除|关闭|静音)/u.test(options.prompt ?? "") ? 0 : 1)
   }));
+  const backgroundAudioTracks = resources.filter((resource) => resource.modality === "audio").map((resource, index) => ({
+    id: `audio_bgm_${index + 1}`,
+    assetId: resource.localAssetId,
+    startTime: 0,
+    endTime: Math.min(storyboard.duration, Number(resource.asset.metadata.duration ?? storyboard.duration)),
+    volume: constant(0.35)
+  }));
+  const audioTracks = [...sourceAudioTracks, ...backgroundAudioTracks];
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     engineVersion: ENGINE_VERSION,
     id: `project_${result.trace.inputHash.slice(-24)}`,
-    name: "AI planned animation",
+    name: "AI 生成动画",
     width: storyboard.width,
     height: storyboard.height,
     fps: storyboard.fps,

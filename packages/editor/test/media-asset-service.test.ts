@@ -115,6 +115,7 @@ async function harness(options: {
   createUploadWriteStream?: (path: string) => Writable;
   wrapRequestRead?: (request: IncomingMessage) => void;
   wrapHandler?: (handler: TestMediaHandler) => TestMediaHandler;
+  isAssetInUse?: (owner: { tenantId: string; userId: string }, assetId: string) => boolean;
 } = {}) {
   const auth = options.auth ?? new TestAuth();
   const store = options.store ?? await new TenantMediaStore({
@@ -124,6 +125,7 @@ async function harness(options: {
   }).initialize();
   const service = new MediaAssetService({
     store, auth, uploadTempRoot: options.tempRoot ?? temp, cursorSecret: Buffer.alloc(32, 7),
+    ...(options.isAssetInUse === undefined ? {} : { isAssetInUse: options.isAssetInUse }),
     ...(options.bodyBytes === undefined ? {} : { bodyBytes: options.bodyBytes }),
     ...(options.observeMultipartBufferBytes === undefined ? {} : {
       observeMultipartBufferBytes: options.observeMultipartBufferBytes
@@ -295,6 +297,55 @@ class BlockingFileWritable extends Writable {
 }
 
 describe("browser media upload and persistent tenant store", () => {
+  it("deletes one authoritative asset, preserves isolation, and rejects referenced or body-directed deletion", async () => {
+    const localMedia = resolve(root, `delete-${randomUUID()}`);
+    const store = await new TenantMediaStore({ storageRoot: localMedia, allowedRoots: [temp, input] }).initialize();
+    const auth = new TestAuth();
+    let protectedId: string | undefined;
+    const app = await harness({ auth, store, isAssetInUse: (_owner, assetId) => assetId === protectedId });
+    try {
+      const first = await upload(app.base, multipart(png, { filename: "first.png" }));
+      const second = await upload(app.base, multipart(await readFile(secondPngPath), { filename: "second.png" }));
+      const firstId = String(((await first.json()) as { asset: { assetId: string } }).asset.assetId);
+      const secondId = String(((await second.json()) as { asset: { assetId: string } }).asset.assetId);
+      protectedId = secondId;
+
+      auth.current = principal("tenant-b", "user-a");
+      expect((await fetch(`${app.base}/api/media-assets/${firstId}`, { method: "DELETE" })).status).toBe(404);
+      auth.current = principal();
+
+      const malicious = await fetch(`${app.base}/api/media-assets/${firstId}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tenantId: "tenant-b", storagePath: "../../outside" })
+      });
+      expect(malicious.status).toBe(400);
+      await expect(store.resolve({ tenantId: "tenant-a", userId: "user-a" }, firstId)).resolves.toBeDefined();
+
+      const inUse = await fetch(`${app.base}/api/media-assets/${secondId}`, { method: "DELETE" });
+      expect(inUse.status).toBe(409);
+      await expect(inUse.json()).resolves.toMatchObject({ error: { code: "ASSET_IN_USE" } });
+
+      const removed = await fetch(`${app.base}/api/media-assets/${firstId}`, { method: "DELETE" });
+      expect(removed.status).toBe(204);
+      expect(store.listRecords({ tenantId: "tenant-a", userId: "user-a" }).map((record) => record.imported.asset.id)).toEqual([secondId]);
+      await expect(store.resolve({ tenantId: "tenant-a", userId: "user-a" }, firstId)).rejects.toThrow();
+      expect(auth.calls).toContain("assets:write:true");
+    } finally { await app.close(); }
+  }, 30_000);
+
+  it.each([
+    new AuthHttpError(403, "REQUEST_ORIGIN_REJECTED"),
+    new AuthHttpError(403, "CSRF_REJECTED"),
+    new AuthHttpError(401, "UNAUTHENTICATED")
+  ])("preserves delete authorization failure %s", async (failure) => {
+    const app = await harness({ auth: new TestAuth(principal(), failure) });
+    try {
+      const response = await fetch(`${app.base}/api/media-assets/asset_aaaaaaaaaaaaaaaaaaaaaaaa`, { method: "DELETE" });
+      expect(response.status).toBe(failure.status);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: failure.code } });
+    } finally { await app.close(); }
+  });
   it.each(["fulfilled", "rejected"] as const)(
     "keeps a %s tracked handler ordered before close across the active-map cleanup boundary",
     async (outcome) => {

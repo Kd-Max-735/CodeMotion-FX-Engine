@@ -92,6 +92,17 @@ export interface PlanningContext {
   readonly durationSeconds: number;
   readonly style: readonly string[];
   readonly brand: BrandConstraint;
+  readonly selectedEffectId?: string;
+}
+
+export type ModelIntentTargetKind = "visual" | "added-text";
+
+/** Server-internal structured output accepted from Ark. */
+export interface ModelIntentDto extends JsonObject {
+  effectId: string;
+  targetKind: ModelIntentTargetKind;
+  addedText: string | null;
+  summary?: string;
 }
 
 interface ModelStoryboardLayerBase extends JsonObject {
@@ -113,7 +124,6 @@ export interface ModelEffectSelection extends JsonObject {
   effectId: string;
   effectVersion: string;
   targetLayerId: string;
-  params: JsonObject;
 }
 
 export interface ModelStoryboardShot extends JsonObject {
@@ -183,23 +193,31 @@ export type ProviderFailureReason =
   | "NO_OUTPUT"
   | "INVALID_JSON"
   | "SCHEMA_INVALID"
+  | "EFFECT_ID_INVALID"
+  | "TEXT_REQUIRED"
+  | "ASSET_COUNT_INCOMPATIBLE"
+  | "MEDIA_PREVIEW_FAILED"
+  | "ARK_UNAVAILABLE"
   | "PLANNING_CONSTRAINT"
   | "SHOT_RANGE"
   | "ASSET_BINDING"
   | "RESPONSE_ENVELOPE"
+  | "INVALID_TOOL_RESPONSE"
   | "MODEL_MISMATCH";
 
 export class ProviderError extends Error {
   readonly code: ProviderErrorCode;
   readonly retryable: boolean;
   readonly status: number | undefined;
+  readonly reason: ProviderFailureReason | undefined;
 
-  constructor(code: ProviderErrorCode, message: string, options: { retryable?: boolean; status?: number; cause?: unknown } = {}) {
+  constructor(code: ProviderErrorCode, message: string, options: { retryable?: boolean; status?: number; cause?: unknown; reason?: ProviderFailureReason } = {}) {
     super(message, { cause: options.cause });
     this.name = "ProviderError";
     this.code = code;
     this.retryable = options.retryable ?? false;
     this.status = options.status;
+    this.reason = options.reason;
   }
 }
 

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadProject, saveProject, validateContract } from "@codemotion/schema";
 import { EFFECT_DRAG_MIME, LAB_PIPELINE_EFFECT_ID, isLabPipelineEffect } from "../src/lab-effect.js";
 import { AUTOSAVE_KEY, EditorStore } from "../src/store.js";
-import { createStarterProject, layerPropertySections, locateProjectError, mainLayers, pipelineEffect } from "../src/model.js";
+import { canvasLayerBaseSize, canvasLayerPositionForCenter, canvasLayerRect, createStarterProject, layerPropertySections, locateProjectError, mainLayers, pipelineEffect } from "../src/model.js";
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -163,6 +163,26 @@ describe("stage 4 editor", () => {
     expect(timelineMs).toBeLessThan(200);
     expect(parameterMs).toBeLessThan(100);
     expect(store.propertyValue(field("opacity"))).toBe(0.42);
+  });
+});
+
+describe("text selection geometry", () => {
+  it.each([50, 100, 150, 200])("keeps %s%% glyph bounds centered, proportional, and inside the canvas", (scaleValue) => {
+    const project = createStarterProject("文字缩放", 1920, 1080, 30);
+    const layer = mainLayers(project).find((candidate) => candidate.type === "text")!;
+    layer.properties.text = "迅猛";
+    const scale = { x: scaleValue, y: scaleValue };
+    const position = canvasLayerPositionForCenter(project, layer, 0, { x: project.width / 2, y: project.height / 2 }, scale);
+    layer.transform.position = { mode: "constant", value: position };
+    layer.transform.scale = { mode: "constant", value: { ...scale, z: 100 } };
+    const base = canvasLayerBaseSize(project, layer);
+    const rect = canvasLayerRect(project, layer, 0);
+    expect(rect.width).toBeCloseTo(base.width * scaleValue / 100);
+    expect(rect.height).toBeCloseTo(base.height * scaleValue / 100);
+    expect(rect.left).toBeGreaterThanOrEqual(0);
+    expect(rect.top).toBeGreaterThanOrEqual(0);
+    expect(rect.left + rect.width).toBeLessThanOrEqual(project.width);
+    expect(rect.top + rect.height).toBeLessThanOrEqual(project.height);
   });
 });
 

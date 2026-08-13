@@ -559,9 +559,17 @@ The routes and scopes are fixed:
 | `GET /api/editor-exports` | `export:read` | `200 {tasks: ExportTaskViewV1[]}` |
 | `POST /api/editor-exports` | `export:create` | `202 {task: ExportTaskViewV1}` |
 | `GET /api/editor-exports/:taskId` | `export:read` | `200 {task: ExportTaskViewV1}` |
+| `DELETE /api/editor-exports/:taskId` | `export:create` | `204` for one terminal task history record |
 | `POST /api/editor-exports/:taskId/cancel` | `export:create` | `200 {task: ExportTaskViewV1}` |
 | `POST /api/editor-exports/:taskId/retry` | `export:create` | `202 {task: ExportTaskViewV1}` with a new task ID |
 | `GET /api/editor-exports/:taskId/download` | `export:read` | authorized attachment stream |
+
+DELETE reuses the existing owner-bound tombstone and retention machinery. Queued,
+running, or cancelling tasks return `409 EXPORT_TASK_ACTIVE`; a terminal task with an
+active download lease returns `409 EXPORT_TASK_LEASED`. It does not recursively remove
+a task directory. Export creation additionally requires `settings.duration` to equal
+the authoritative `editableProject.project.duration`; mismatch is
+`422 EXPORT_DURATION_MISMATCH`.
 
 Create accepts only:
 

@@ -19,14 +19,13 @@ if (!["text", "image-svg", "all"].includes(scenario)) throw new Error("CMFX_LIVE
 const editorRoot = resolve(import.meta.dirname, "..");
 const root = await mkdtemp(join(tmpdir(), `codemotion-g0-5-${arkEnabled ? "ark" : "offline"}-${scenario}-`));
 const host = "127.0.0.1";
-const port = 4191;
+const port = 4174;
 const origin = `http://${host}:${port}`;
 const imagePath = resolve(root, "owner.png");
 const videoPath = resolve(root, "owner.mp4");
 const svgPath = resolve(root, "owner.svg");
 const audioPath = resolve(root, "owner.wav");
 const downloadPath = resolve(root, "browser-output.mp4");
-let loginCode;
 const providerAudits = [];
 
 function assert(condition, message) {
@@ -62,7 +61,6 @@ try {
     mode: "development", configureServer: true, listenHost: host, publicOrigin: origin,
     mediaRoot: resolve(root, "media"), uploadTempRoot: resolve(root, "upload"),
     exportRoot: resolve(root, "exports"), env,
-    writeDevLoginCode(code) { loginCode = code; },
     createAiPlans: (assets) => new AiPlanService(provider, assets)
   });
   server = await createServer({
@@ -82,15 +80,11 @@ try {
     if (message.type() === "error" && !message.text().includes("401 (Unauthorized)")) browserErrors.push(message.text());
   });
 
+  const automaticSession = page.waitForResponse((response) => response.url().endsWith("/auth/dev/auto-session"));
   await page.goto(origin, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "需要服务端会话" }).waitFor();
-  await page.getByRole("button", { name: "绑定本地一次性 code" }).click();
-  await page.getByText("已绑定，请在 5 分钟内输入终端 code。").waitFor();
-  assert(await page.getByRole("button", { name: "已绑定，请输入 code" }).isDisabled(), "Development binding remained repeatable.");
-  assert(typeof loginCode === "string", "Runtime did not issue a dev login code.");
-  await page.getByLabel("终端一次性 code").fill(loginCode);
-  await page.getByRole("button", { name: "完成开发登录" }).click();
+  assert((await automaticSession).status() === 201, "Development session was not created automatically.");
   await page.locator(".ai-session").waitFor();
+  assert(await page.getByText("绑定本地一次性 code").count() === 0, "Legacy code binding UI is still present.");
 
   const fileInput = page.locator('input[type="file"]');
   const upload = async (path, purpose) => {

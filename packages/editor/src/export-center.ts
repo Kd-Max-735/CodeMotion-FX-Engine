@@ -45,6 +45,7 @@ export function estimateExportBytes(settings: Pick<ExportSettings, "format" | "w
 
 export function validateExportSettings(editableProject: BrowserProjectEnvelopeV1 | MotionProject, settings: ExportSettings): string[] {
   if (!("contract" in editableProject)) return ["Browser project envelope required."];
+  if (settings.duration !== editableProject.project.duration) return ["导出时长必须跟随当前工程时长。"];
   const request: ExportCreateRequestV1 = { contract: "export-request/v1", editableProject, settings };
   const result = P0_BROWSER_PROJECT_AUTHORITY_V1.validateExportCreateRequest(request);
   return result.valid ? [] : [result.error.message];
@@ -72,10 +73,13 @@ async function request(path: string, init: RequestInit = {}): Promise<unknown> {
   const body = await response.json().catch(() => ({})) as { error?: { code?: unknown } };
   if (!response.ok) {
     if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event("cmfx:unauthenticated"));
+    const code = typeof body.error?.code === "string" ? body.error.code : `HTTP_${response.status}`;
     throw new ExportApiError(
-      ERROR_MESSAGES[response.status] ?? "导出服务请求失败。",
+      code === "EXPORT_TASK_ACTIVE" ? "运行中的导出任务不能清除。"
+        : code === "EXPORT_TASK_LEASED" ? "任务正在下载，暂时不能清除。"
+          : ERROR_MESSAGES[response.status] ?? "导出服务请求失败。",
       response.status,
-      typeof body.error?.code === "string" ? body.error.code : `HTTP_${response.status}`
+      code
     );
   }
   return body;
@@ -113,6 +117,12 @@ export const exportApi = {
   retry: async (id: string, signal?: AbortSignal) => {
     const body = await request(`/api/editor-exports/${encodeURIComponent(id)}/retry`, authenticatedPost(undefined, undefined, signal)) as { task?: unknown };
     return { task: task(body.task) };
+  },
+  clear: async (id: string, signal?: AbortSignal): Promise<void> => {
+    await request(`/api/editor-exports/${encodeURIComponent(id)}`, {
+      ...authenticatedPost(undefined, undefined, signal),
+      method: "DELETE"
+    });
   },
   download: async (current: ExportTaskView, signal?: AbortSignal) => {
     let response: Response;

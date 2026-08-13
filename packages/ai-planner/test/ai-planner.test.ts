@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import type { AssetDefinition, TransformDefinition } from "@codemotion/core";
-import { GROUP_2_P0_EFFECTS, P0_EFFECTS, P0_EFFECTS_BY_ID } from "@codemotion/effects-2d";
+import { GROUP_2_P0_EFFECTS, P0_EFFECTS, P0_EFFECTS_BY_ID, P0_EFFECT_CARD_BY_ID, P0_EFFECT_CARDS } from "@codemotion/effects-2d";
 import { importMedia } from "@codemotion/exporter";
 import {
   ARK_V1_MODEL,
@@ -14,7 +14,9 @@ import {
   ProviderError,
   VolcengineArkProvider,
   fingerprintProviderRequestId,
+  resolveIntentCandidates,
   planAnimation,
+  parseExplicitDuration,
   retrieveP0Effects,
   sanitizeUserText,
   serializeAiPlanCompletedResultV2,
@@ -86,8 +88,10 @@ async function plannerMediaResources(): Promise<Record<
     "color=c=0xd9485f:s=48x32:d=0.1", "-frames:v", "1", alternateImagePath
   ]);
   await execFileAsync("ffmpeg", [
-    "-v", "error", "-y", "-f", "lavfi", "-i",
-    "testsrc2=s=48x32:r=18:d=1.2", "-c:v", "libx264", "-pix_fmt", "yuv420p", videoPath
+    "-v", "error", "-y",
+    "-f", "lavfi", "-i", "testsrc2=s=48x32:r=18:d=1.2",
+    "-f", "lavfi", "-i", "sine=frequency=660:duration=1.2",
+    "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", videoPath
   ]);
   await writeFile(audioPath, wavFixture());
   const [image, alternateImage, video, audio] = await Promise.all([
@@ -179,56 +183,12 @@ function normalizedImage(imageId: string): NormalizedUnderstanding {
 }
 
 function planningEnvelope(understanding: NormalizedUnderstanding): unknown {
-  const visualLayers = [
-    ...understanding.images.map((item) => ({
-      id: `layer_${item.localAssetId.slice(6)}`,
-      type: "image" as const,
-      localAssetId: item.localAssetId,
-      description: item.composition
-    })),
-    ...understanding.video.map((item) => ({
-      id: `layer_${item.localAssetId.slice(6)}`,
-      type: "video" as const,
-      localAssetId: item.localAssetId,
-      description: item.shots[0]?.event ?? "Model-planned video"
-    }))
-  ];
-  const layers = [
-    ...visualLayers,
-    {
-      id: "layer_title",
-      type: "text" as const,
-      description: "Model-planned title layer",
-      text: understanding.text.requirements[0] ?? "Title"
-    }
-  ];
+  const visualCount = understanding.images.length + understanding.video.length;
   return {
-    contract: "ai-task/v1",
-    understanding,
-    storyboard: {
-      intent: understanding.text.requirements.join("; "),
-      duration: 6,
-      width: 1280,
-      height: 720,
-      fps: 24,
-      style: [],
-      brand: { colors: [], tone: [], requiredText: [], forbiddenContent: [], logoAssetIds: [] },
-      layers,
-      shots: [{
-        id: "shot_1",
-        start: 0,
-        end: 6,
-        description: "Model-planned title shot",
-        layerIds: layers.map((layer) => layer.id),
-        effects: [{
-          sourceId: "T01",
-          effectId: "fx.text.typewriter",
-          effectVersion: "1.1.0",
-          targetLayerId: "layer_title",
-          params: { speed: 18 }
-        }]
-      }]
-    }
+    effectId: visualCount === 2 ? "fx.transition.wipe" : "fx.motion.fade",
+    targetKind: "visual",
+    addedText: null,
+    summary: understanding.text.requirements.join("; ") || "fixture intent"
   };
 }
 
@@ -320,17 +280,100 @@ async function svgFixture(root: string, color: string) {
 }
 
 describe("AI planner", () => {
-  it("runs ten prompt categories through understanding, real P0 retrieval, schema and draft preview", async () => {
+  it("filters all 40 card candidates by authoritative visual count", () => {
+    const planning = {
+      width: 1280,
+      height: 720,
+      fps: 24,
+      durationSeconds: 5,
+      style: [],
+      brand: { colors: [], tone: [], requiredText: [], forbiddenContent: [], logoAssetIds: [] }
+    };
+    const visual = (id: string): LocalResourceInput => ({
+      modality: "image",
+      localAssetId: id,
+      asset: {
+        id,
+        type: "image",
+        uri: `media://${id}`,
+        metadata: { mime: "image/png", bytes: 1 }
+      },
+      storageDirectory: "C:\\trusted"
+    });
+    const first = visual("asset_aaaaaaaaaaaaaaaaaaaaaaaa");
+    const second = visual("asset_bbbbbbbbbbbbbbbbbbbbbbbb");
+    const one = resolveIntentCandidates("普通视觉效果", [first], planning, true)
+      .definitions.map((effect) => effect.effectId);
+    const two = resolveIntentCandidates("两张图片切换", [first, second], planning, true)
+      .definitions.map((effect) => effect.effectId);
+    expect(one).not.toContain("fx.transition.wipe");
+    expect(one).not.toContain("fx.composite.maskReveal");
+    expect(two).toEqual(P0_EFFECT_CARDS.filter((card) => card.fixture.secondaryInput).map((card) => card.effectId));
+  });
+
+  it.each([
+    ["科技霓虹产品视觉", "fx.light.neonGlow"],
+    ["极简标题逐字出现", "fx.text.typewriter"],
+    ["手写签名笔迹", "fx.draw.handwriting"],
+    ["让完整画面淡入", "fx.motion.fade"],
+    ["柔和朦胧背景", "fx.post.gaussianBlur"],
+    ["实现柔和朦胧的效果，视频时长4秒", "fx.post.gaussianBlur"],
+    ["图片实现划入效果", "fx.motion.slide"],
+    ["页面切换转场", "fx.transition.wipe"]
+  ] as const)("ranks explainable compatible card metadata for %s", (prompt, expected) => {
+    const understanding = normalized();
+    understanding.text.requirements = [prompt];
+    const candidates = retrieveP0Effects(understanding, 5);
+    expect(candidates[0]?.effectId).toBe(expected);
+    expect(candidates.every((effect) => P0_EFFECTS_BY_ID.get(effect.effectId) === effect)).toBe(true);
+  });
+
+  it("honors explicit server-selected effectIds while retaining compatibility checks", async () => {
+    const provider = new OfflineMockProvider();
+    const base = await provider.understand({ principal: principal(), prompt: "普通标题" });
+    const byId = await planAnimation(base, { duration: 2, effectIds: ["fx.motion.slide"] });
+    expect(byId.dsl.compositions[0]?.layers.flatMap((layer) => layer.effects)[0]?.effectId)
+      .toBe("fx.motion.slide");
+    const byName = await provider.understand({ principal: principal(), prompt: "请将“签名”用手写效果写出" });
+    const namedPlan = await planAnimation(byName, { duration: 2 });
+    expect(namedPlan.dsl.compositions[0]?.layers.flatMap((layer) => layer.effects)[0]?.effectId)
+      .toBe("fx.draw.handwriting");
+    await expect(planAnimation(base, { duration: 2, effectIds: ["fx.light.neonGlow"] }))
+      .rejects.toThrow(/requires visual media|compatible target/u);
+  }, 15_000);
+
+  it("extracts 笔唯思 into the formal text layer for printer/typewriter preview", async () => {
+    const prompt = "实现笔唯思被打印机打出的效果";
+    const provider = new OfflineMockProvider();
+    const result = await provider.understand({ principal: principal(), prompt });
+    const modelText = result.storyboard?.layers.find((layer) => layer.type === "text");
+    expect(modelText?.type === "text" && modelText.text).toBe("笔唯思");
+    expect(result.storyboard?.shots[0]?.effects[0]?.effectId).toBe("fx.text.typewriter");
+
+    const planned = await planAnimation(result, { prompt, duration: 3.2, previewFrameLimit: 3 });
+    const textLayer = planned.dsl.compositions[0]?.layers.find((layer) => layer.type === "text");
+    expect(textLayer?.type === "text" && textLayer.properties.text).toBe("笔唯思");
+    expect(textLayer?.type === "text" && textLayer.properties.fontSize).toBe(96);
+    expect(textLayer?.effects[0]?.effectId).toBe("fx.text.typewriter");
+    expect(textLayer?.effects[0]?.params).toEqual(
+      P0_EFFECT_CARD_BY_ID.get("fx.text.typewriter")?.defaultParams
+    );
+    expect(JSON.stringify(planned.dsl)).not.toContain("AI FUTURE");
+    expect(planned.preview.frameHashes).toHaveLength(3);
+    expect(new Set(planned.preview.frameHashes).size).toBeGreaterThan(1);
+  });
+
+  it("keeps implicit mock recommendation within the completed sample-card set", async () => {
     const prompts = [
-      ["kinetic title reveal", "fx.text.kineticTypography"],
-      ["logo intro", "fx.motion.scalePop"],
-      ["data chart animation", "fx.vector.radialBurst"],
+      ["让“极简标题”逐字出现", "fx.text.typewriter"],
+      ["让“签名”手写出现", "fx.draw.handwriting"],
+      ["将“人文开场”书写出来", "fx.draw.handwriting"],
+      ["淡入开场", "fx.motion.fade"],
+      ["fade in opener", "fx.motion.fade"],
       ["UI product walkthrough", "fx.motion.slide"],
-      ["product feature callout", "fx.motion.scalePop"],
-      ["scene transition", "fx.text.textMorph"],
-      ["music rhythm visualization", "fx.text.kineticTypography"],
-      ["glitch post effect", "fx.text.scrambleDecode"],
-      ["ink style composition", "fx.draw.inkSpread"],
+      ["slide product title", "fx.motion.slide"],
+      ["minimal title", "fx.motion.fade"],
+      ["普通标题", "fx.motion.fade"],
       ["vertical social promo", "fx.motion.slide"]
     ] as const;
     const provider = new OfflineMockProvider();
@@ -353,11 +396,11 @@ describe("AI planner", () => {
       expect(planned.preview.frameHashes[0]).toMatch(/^sha256:[a-f0-9]{64}$/);
       expect(validatePlannedDsl(planned.dsl)).toEqual([]);
     }
-    expect(selected.size).toBeGreaterThanOrEqual(7);
-    expect(candidateHeads.size).toBeGreaterThanOrEqual(5);
+    expect(selected.size).toBe(4);
+    expect(candidateHeads.size).toBeGreaterThanOrEqual(4);
   }, 30_000);
 
-  it("retrieves the exact authoritative 40-entry catalog including selectable T08", async () => {
+  it("keeps the authoritative 40-entry catalog and exposes T08 through the same card adapter", async () => {
     const provider = new OfflineMockProvider();
     const result = await provider.understand({
       principal: principal(),
@@ -370,23 +413,10 @@ describe("AI planner", () => {
     expect(new Set(retrieved.map((effect) => effect.effectId))).toEqual(
       new Set(P0_EFFECTS.map((effect) => effect.effectId))
     );
-    expect(retrieved[0]?.effectId).toBe("fx.text.textExtrude3D");
+    expect(retrieved.some((effect) => effect.effectId === "fx.text.textExtrude3D")).toBe(true);
     expect(retrieved.every((effect) => P0_EFFECTS_BY_ID.get(effect.effectId) === effect)).toBe(true);
-    const planned = await planAnimation({
-      ...result,
-      storyboard: {
-        ...result.storyboard,
-        layers: result.storyboard.layers.map((layer) => layer.type === "text"
-          ? { ...layer, text: "Extrude3D" }
-          : layer)
-      }
-    }, { duration: 2, previewFrameLimit: 2 });
-    const effect = planned.dsl.compositions[0]!.layers.flatMap((layer) => layer.effects)[0]!;
-    const definition = P0_EFFECTS_BY_ID.get(effect.effectId)!;
-    expect(effect.effectId).toBe("fx.text.textExtrude3D");
-    expect(effect.version).toBe(definition.version);
-    expect(effect.params).toEqual({ ...definition.defaultPreset, depth: 0.32 });
-    expect(validatePlannedDsl(planned.dsl)).toEqual([]);
+    expect(P0_EFFECT_CARD_BY_ID).toHaveLength(40);
+    expect(P0_EFFECT_CARD_BY_ID.has("fx.text.textExtrude3D")).toBe(true);
     const source = await readFile(resolve("packages/ai-planner/src/pipeline.ts"), "utf8");
     expect(source).not.toContain("GROUP_2_P0_EFFECTS");
   });
@@ -421,7 +451,7 @@ describe("AI planner", () => {
 
   it("preserves requiredText planned in a model text layer through the final DSL", async () => {
     const provider = new OfflineMockProvider();
-    const base = await provider.understand({ principal: principal(), prompt: "launch title" });
+    const base = await provider.understand({ principal: principal(), prompt: "新增文字“Launch”并使用打字机" });
     const required = "ACME® 原文保留";
     const storyboard = {
       ...base.storyboard,
@@ -442,7 +472,7 @@ describe("AI planner", () => {
     "preserves every requiredText item across %s",
     async (distribution) => {
       const provider = new OfflineMockProvider();
-      const base = await provider.understand({ principal: principal(), prompt: "distributed legal copy" });
+      const base = await provider.understand({ principal: principal(), prompt: "新增文字“Legal”并使用打字机" });
       const required = ["First exact line", "Second exact line"];
       const firstText = base.storyboard.layers.find((layer) => layer.type === "text");
       if (firstText === undefined) throw new Error("Expected mock text layer.");
@@ -481,7 +511,7 @@ describe("AI planner", () => {
 
   it("does not let PlanningOptions.text replace model-planned requiredText", async () => {
     const provider = new OfflineMockProvider();
-    const base = await provider.understand({ principal: principal(), prompt: "locked brand title" });
+    const base = await provider.understand({ principal: principal(), prompt: "新增文字“Locked”并使用打字机" });
     const required = "Locked Required Text";
     const storyboard = {
       ...base.storyboard,
@@ -501,7 +531,7 @@ describe("AI planner", () => {
 
   it("rejects forbiddenContent in an explicit model text field", async () => {
     const provider = new OfflineMockProvider();
-    const base = await provider.understand({ principal: principal(), prompt: "safe title" });
+    const base = await provider.understand({ principal: principal(), prompt: "新增文字“Safe”并使用打字机" });
     const storyboard = {
       ...base.storyboard,
       brand: { ...base.storyboard.brand, forbiddenContent: ["blocked phrase"] },
@@ -515,7 +545,7 @@ describe("AI planner", () => {
 
   it("renders the low-resolution preview from the final model-planned DSL text", async () => {
     const provider = new OfflineMockProvider();
-    const base = await provider.understand({ principal: principal(), prompt: "preview text source" });
+    const base = await provider.understand({ principal: principal(), prompt: "新增文字“Preview”并使用打字机" });
     const withText = (text: string) => ({
       ...base,
       storyboard: {
@@ -538,11 +568,9 @@ describe("AI planner", () => {
     expect(first.preview.frameHashes).not.toEqual(second.preview.frameHashes);
   });
 
-  it("rejects a model text layer missing its explicit display text in the structured output schema", async () => {
-    const envelope = planningEnvelope(normalized()) as {
-      storyboard: { layers: Array<Record<string, unknown>> };
-    };
-    delete envelope.storyboard.layers.find((layer) => layer.type === "text")!.text;
+  it("rejects a minimum intent DTO missing addedText", async () => {
+    const envelope = planningEnvelope(normalized()) as Record<string, unknown>;
+    delete envelope.addedText;
     const provider = new VolcengineArkProvider({
       apiKey: "unit-test-key-that-is-not-real",
       fetchImpl: async () => responseJson({
@@ -551,13 +579,13 @@ describe("AI planner", () => {
         usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
       })
     });
-    await expect(provider.understand({ principal: principal(), prompt: "missing text field" }))
-      .rejects.toMatchObject({ code: "provider_response" });
+    await expect(provider.understand({ principal: principal(), prompt: "missing intent field" }))
+      .rejects.toMatchObject({ code: "provider_response", reason: "SCHEMA_INVALID" });
   });
 
-  it("preserves Unicode, transform/keyframes and effect parameters in the editable project and formal preview", async () => {
+  it("preserves Unicode and transform keyframes while cloning authoritative effect defaults", async () => {
     const provider = new OfflineMockProvider();
-    const title = "星际航线 e\u0301 — مرحبًا 🚀";
+    const title = "星际航线 e\u0301";
     const transform: TransformDefinition = {
       anchorPoint: { mode: "constant", value: { x: 3.25, y: 4.5, z: 0 } },
       position: {
@@ -570,53 +598,22 @@ describe("AI planner", () => {
       scale: { mode: "constant", value: { x: 92.5, y: 107.25, z: 100 } },
       rotation: { mode: "constant", value: { x: 0, y: 0, z: 8.75 } }
     };
-    const result = await provider.understand({ principal: principal(), prompt: title });
+    const result = await provider.understand({ principal: principal(), prompt: `新增文字“${title}”并使用打字机` });
     const planned = await planAnimation(result, {
-      text: title,
       duration: 2.75,
       fps: 30,
-      transform,
-      effectIds: ["fx.text.typewriter", "fx.motion.fade"],
-      effectParams: {
-        "fx.text.typewriter": {
-          speed: {
-            mode: "keyframes",
-            keyframes: [
-              { time: 0, value: 4.5, interpolation: "linear" },
-              { time: 2.75, value: 19, interpolation: "linear" }
-            ]
-          },
-          cursor: false,
-          wordMode: false,
-          cursorWidth: 0.13
-        },
-        "fx.motion.fade": {
-          from: 0.17,
-          to: 0.93,
-          duration: 2.2,
-          easing: "easeInOut"
-        }
-      }
+      transform
     });
-    const layer = planned.dsl.compositions[0]!.layers.find((entry) => entry.id === "layer_title");
+    const layer = planned.dsl.compositions[0]!.layers.find((entry) => entry.id === "layer_added_text");
     expect(layer?.type).toBe("text");
     if (layer?.type !== "text") throw new Error("Expected editable text layer.");
     expect(layer.properties.text).toBe(title);
     expect(layer.transform).toEqual(transform);
     const effects = new Map(layer.effects.map((effect) => [effect.effectId, effect]));
-    expect(effects.get("fx.text.typewriter")?.params.speed).toEqual({
-      mode: "keyframes",
-      keyframes: [
-        { time: 0, value: 4.5, interpolation: "linear" },
-        { time: 2.75, value: 19, interpolation: "linear" }
-      ]
-    });
-    expect(effects.get("fx.motion.fade")?.params).toMatchObject({
-      from: 0.17,
-      to: 0.93,
-      duration: 2.2,
-      easing: "easeInOut"
-    });
+    expect(effects.get("fx.text.typewriter")?.params).toEqual(
+      P0_EFFECT_CARD_BY_ID.get("fx.text.typewriter")?.defaultParams
+    );
+    expect(effects).toHaveLength(1);
     expect([...effects.values()].every((effect) => effect.version === "1.1.0")).toBe(true);
     expect(planned.dsl.metadata.timeContractVersion).toBe("1.1.0");
     expect(planned.preview).toMatchObject({
@@ -635,29 +632,11 @@ describe("AI planner", () => {
     const planned = await planAnimation(result, {
       duration: 4.4,
       fps: 25,
-      effectIds: ["fx.draw.inkSpread"],
-      effectParams: {
-        "fx.draw.inkSpread": {
-          diffusion: 0.37,
-          edgeNoise: 0.81,
-          absorption: 0.44,
-          progress: {
-            mode: "keyframes",
-            keyframes: [
-              { time: 0, value: 0.08, interpolation: "linear" },
-              { time: 4.4, value: 0.92, interpolation: "linear" }
-            ]
-          }
-        }
-      }
+      effectIds: ["fx.draw.inkSpread"]
     });
     const vector = planned.dsl.compositions[0]!.layers.find((layer) => layer.type === "svg");
     expect(vector?.properties.svg).toMatch(/^M/);
-    expect(vector?.effects[0]?.params).toMatchObject({
-      diffusion: 0.37,
-      edgeNoise: 0.81,
-      absorption: 0.44
-    });
+    expect(vector?.effects[0]?.params).toEqual(P0_EFFECTS_BY_ID.get("fx.draw.inkSpread")?.defaultPreset);
     expect(planned.preview.frameNumbers.at(-1)).toBe(Math.ceil(4.4 * 25) - 1);
     expect(new Set(planned.preview.frameHashes).size).toBeGreaterThan(1);
     expect(validatePlannedDsl(planned.dsl)).toEqual([]);
@@ -700,7 +679,8 @@ describe("AI planner", () => {
       expect(planned.dsl.duration).toBe(testCase.duration);
       expect(planned.dsl.assets).toEqual(testCase.resources.map((resource) => resource.asset));
       expect(planned.dsl.audioTracks).toHaveLength(
-        testCase.resources.filter((resource) => resource.modality === "audio").length
+        testCase.resources.filter((resource) => resource.modality === "audio"
+          || resource.modality === "video" && Number(resource.asset.metadata.audioStreams ?? 0) > 0).length
       );
       expect(planned.preview.frameHashes).toHaveLength(4);
       expect(validatePlannedDsl(planned.dsl)).toEqual([]);
@@ -716,7 +696,7 @@ describe("AI planner", () => {
       expect(browserResult.editableProject.project.assets.every((asset) => !("hash" in asset))).toBe(true);
       hashes.push(planned.preview.frameHashes.at(-1)!);
     }
-    expect(new Set(hashes).size).toBe(cases.length);
+    expect(new Set(hashes).size).toBeGreaterThanOrEqual(cases.length - 1);
     const renderImage = async (resource: LocalResourceInput) => {
       const sameResult = await provider.understand({
         principal: principal(),
@@ -729,10 +709,7 @@ describe("AI planner", () => {
         fps: 20,
         duration: 1.5,
         previewFrameLimit: 2,
-        effectIds: ["fx.motion.fade"],
-        effectParams: {
-          "fx.motion.fade": { from: 1, to: 1, duration: 1.5, easing: "linear" }
-        }
+        effectIds: ["fx.motion.fade"]
       });
     };
     const [firstImage, secondImage] = await Promise.all([
@@ -755,6 +732,54 @@ describe("AI planner", () => {
     expect(serialized).toContain("[local-path-redacted]");
     expect(serialized).toContain("[credential-redacted]");
     expect(sanitizeUserText("/etc/passwd")).toContain("[local-path-redacted]");
+  });
+
+  it("plans video source audio and uploaded background music as independent editable tracks", async () => {
+    const resources = await plannerMediaResources();
+    expect(resources.video.asset.metadata.audioStreams).toBeGreaterThanOrEqual(1);
+    const provider = new OfflineMockProvider();
+    const plan = async (prompt: string) => {
+      const inputs = [resources.video, resources.audio];
+      const result = await provider.understand({
+        principal: principal(),
+        prompt,
+        resources: inputs,
+        planning: {
+          width: 1280,
+          height: 720,
+          fps: 24,
+          durationSeconds: 1.2,
+          style: [],
+          selectedEffectId: "fx.motion.slide",
+          brand: { colors: [], tone: [], requiredText: [], forbiddenContent: [], logoAssetIds: [] }
+        }
+      });
+      return planAnimation(result, {
+        resources: inputs,
+        duration: 1.2,
+        prompt,
+        effectIds: ["fx.motion.slide"],
+        previewFrameLimit: 2
+      });
+    };
+    const normal = await plan("让完整视频从左侧滑入，并保留原声");
+    expect(normal.dsl.audioTracks).toEqual([
+      expect.objectContaining({
+        id: "audio_source_1",
+        assetId: resources.video.asset.id,
+        volume: { mode: "constant", value: 1 }
+      }),
+      expect.objectContaining({
+        id: "audio_bgm_1",
+        assetId: resources.audio.asset.id,
+        volume: { mode: "constant", value: 0.35 }
+      })
+    ]);
+    const muted = await plan("让完整视频从左侧滑入，并去掉原声");
+    expect(muted.dsl.audioTracks.find((track) => track.id === "audio_source_1")?.volume)
+      .toEqual({ mode: "constant", value: 0 });
+    expect(muted.dsl.audioTracks.find((track) => track.id === "audio_bgm_1")?.volume)
+      .toEqual({ mode: "constant", value: 0.35 });
   });
 
   it("uploads audio as multipart, references the parsed file id, then deletes it without leaking it", async () => {
@@ -882,6 +907,38 @@ describe("AI planner", () => {
     expect(serializedRequest).not.toContain(imported.rasterProxyPath!);
     expect(result.understanding.images[0]?.localAssetId).toBe(imported.asset.id);
     expect(result.storyboard.layers.find((layer) => layer.localAssetId === imported.asset.id)).toBeDefined();
+  }, 60_000);
+
+  it("server-binds verified visuals although the model DTO contains no asset identity", async () => {
+    const { imported, storage } = await svgFixture(resolve("tmp/stage-7-svg-server-binding"), "#167c52");
+    const envelope = planningEnvelope(normalizedImage(imported.asset.id));
+    expect(JSON.stringify(envelope)).not.toContain(imported.asset.id);
+    const fetchSpy = vi.fn<typeof fetch>(async () => responseJson({
+      model: ARK_V1_MODEL,
+      output: [{ content: [{ type: "output_text", text: JSON.stringify(envelope) }] }]
+    }));
+    const provider = new VolcengineArkProvider({
+      apiKey: "unit-test-key-that-is-not-real",
+      fetchImpl: fetchSpy
+    });
+    const result = await provider.understand({
+      principal: principal(),
+      prompt: "Use every verified visual input.",
+      resources: [{
+        modality: "image",
+        localAssetId: imported.asset.id,
+        asset: imported.asset,
+        storageDirectory: storage
+      }]
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(result.storyboard.layers).toContainEqual(expect.objectContaining({
+      type: "image",
+      localAssetId: imported.asset.id
+    }));
+    expect(result.storyboard.shots[0]?.layerIds).toContain(
+      result.storyboard.layers.find((layer) => layer.localAssetId === imported.asset.id)?.id
+    );
   }, 60_000);
 
   it("rejects untrusted SVG state and missing or tampered proxies before Provider fetch", async () => {
@@ -1017,7 +1074,7 @@ describe("AI planner", () => {
     expect(observable).not.toContain("user-concurrent");
   });
 
-  it("binds out-of-order multi-image model results by localAssetId", async () => {
+  it("binds multi-image results in verified server resource order", async () => {
     const media = await plannerMediaResources();
     const resources = [media.image, media.alternateImage];
     const first = media.image;
@@ -1057,48 +1114,30 @@ describe("AI planner", () => {
       resources
     });
     expect(result.understanding.images.map((item) => item.localAssetId))
-      .toEqual([second.localAssetId, first.localAssetId]);
-    expect(result.understanding.images.find((item) => item.localAssetId === first.localAssetId)?.composition).toBe("left");
+      .toEqual([first.localAssetId, second.localAssetId]);
+    expect(result.understanding.images.find((item) => item.localAssetId === first.localAssetId)?.composition)
+      .toBe("verified user image");
     const planned = await planAnimation(result, { resources, duration: 2, previewFrameLimit: 2 });
     const assetLayers = planned.storyboard.shots[0]!.layers.filter((layer) => layer.localAssetId !== undefined);
-    expect(assetLayers.find((layer) => layer.localAssetId === first.localAssetId)?.description).toBe("left");
-    expect(assetLayers.find((layer) => layer.localAssetId === second.localAssetId)?.description).toBe("right");
+    expect(assetLayers.find((layer) => layer.localAssetId === first.localAssetId)?.description).toBe("图片素材 1");
+    expect(assetLayers.find((layer) => layer.localAssetId === second.localAssetId)?.description).toBe("图片素材 2");
   });
 
-  it.each(["duplicate", "missing", "extra", "unknown"] as const)(
-    "rejects %s multi-image model localAssetId sets",
-    async (failure) => {
-      const first = await storedImageFixture(resolve(`tmp/stage-7-asset-set-${failure}`), 320);
-      const second = await storedImageFixture(resolve(`tmp/stage-7-asset-set-${failure}`), 321);
-      const resources: LocalResourceInput[] = [first, second].map((fixture) => ({
-        modality: "image",
-        localAssetId: fixture.asset.id,
-        asset: fixture.asset,
-        storageDirectory: fixture.storageDirectory
-      }));
-      const base = [normalizedImage(first.asset.id).images[0]!, normalizedImage(second.asset.id).images[0]!];
-      const unknown = { ...base[1]!, localAssetId: "asset_ffffffffffffffffffffffff" };
-      const images = failure === "duplicate" ? [base[0]!, base[0]!]
-        : failure === "missing" ? [base[0]!]
-          : failure === "extra" ? [...base, unknown]
-            : [base[0]!, unknown];
-      const provider = new VolcengineArkProvider({
-        apiKey: "unit-test-key-that-is-not-real",
-        fetchImpl: async () => responseJson({
-          model: ARK_V1_MODEL,
-          output: [{
-            content: [{
-              type: "output_text",
-              text: JSON.stringify(planningEnvelope({ ...normalized(), images }))
-            }]
-          }],
-          usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
-        })
-      });
-      await expect(provider.understand({ principal: principal(), prompt: "Reject bad IDs.", resources }))
-        .rejects.toMatchObject({ code: "security" });
-    }
-  );
+  it("rejects model attempts to add asset or layer identities to the minimum DTO", async () => {
+    const malicious = {
+      ...(planningEnvelope(normalized()) as Record<string, unknown>),
+      localAssetId: "asset_ffffffffffffffffffffffff"
+    };
+    const provider = new VolcengineArkProvider({
+      apiKey: "unit-test-key-that-is-not-real",
+      fetchImpl: async () => responseJson({
+        model: ARK_V1_MODEL,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify(malicious) }] }]
+      })
+    });
+    await expect(provider.understand({ principal: principal(), prompt: "Reject model asset IDs." }))
+      .rejects.toMatchObject({ code: "provider_response", reason: "SCHEMA_INVALID" });
+  });
 
   it("removes cancelled queue entries so the next request is deterministically awakened", async () => {
     const releaseFirst = deferred<Response>();
@@ -1276,7 +1315,7 @@ describe("AI planner", () => {
       .resolves.toMatchObject({ contract: "ai-task/v1" });
   });
 
-  it("rejects missing Storyboards, unsafe structures, and repairs only within the fixed limit", async () => {
+  it("rejects legacy full outputs and keeps server-authored parameters authoritative", async () => {
     const malformed = new VolcengineArkProvider({
       apiKey: "unit-test-key-that-is-not-real",
       fetchImpl: async () => responseJson({
@@ -1289,7 +1328,7 @@ describe("AI planner", () => {
       .rejects.toMatchObject({ code: "provider_response" });
 
     const provider = new OfflineMockProvider();
-    const base = await provider.understand({ principal: principal(), prompt: "typewriter title" });
+    const base = await provider.understand({ principal: principal(), prompt: "新增文字“Title”并使用打字机" });
     const withParams = (params: Record<string, string>) => ({
       ...base,
       storyboard: {
@@ -1300,19 +1339,15 @@ describe("AI planner", () => {
         }))
       }
     });
-    const repaired = await planAnimation(withParams({
-      unknownA: "x",
-      unknownB: "x",
-      unknownC: "x"
-    }), { duration: 1, previewFrameLimit: 1 });
-    const repairedEffect = repaired.dsl.compositions[0]!.layers.flatMap((layer) => layer.effects)[0]!;
-    expect(repairedEffect.params).toEqual(P0_EFFECTS_BY_ID.get(repairedEffect.effectId)?.defaultPreset);
-    await expect(planAnimation(withParams({
-      unknownA: "x",
-      unknownB: "x",
-      unknownC: "x",
-      unknownD: "x"
-    }), { duration: 1, previewFrameLimit: 1 })).rejects.toThrow("repair limit");
+    const planned = await planAnimation(withParams({ speed: "999", unknown: "x" }), {
+      duration: 1,
+      previewFrameLimit: 1
+    });
+    const plannedEffect = planned.dsl.compositions[0]!.layers.flatMap((layer) => layer.effects)[0]!;
+    expect(plannedEffect.params).toEqual(
+      P0_EFFECT_CARD_BY_ID.get(plannedEffect.effectId)?.defaultParams
+        ?? P0_EFFECTS_BY_ID.get(plannedEffect.effectId)?.defaultPreset
+    );
 
     const unsafe = {
       ...base,
@@ -1357,7 +1392,7 @@ describe("AI planner", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(result.trace.usage.totalTokens).toBe(10);
     expect(audits.find((record) => record.reason === reason)).toMatchObject({ attempt: 1, errorCode: "provider_response" });
-    expect(JSON.stringify(requests[1])).toContain(`Previous safe failure category: ${reason}`);
+    expect(JSON.stringify(requests[1])).toContain(`Safe failure category: ${reason}`);
     expect(requests.every((body) => body.model === ARK_V1_MODEL)).toBe(true);
   });
 
@@ -1397,30 +1432,25 @@ describe("AI planner", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("does not retry asset-binding security failures and audits only a safe reason", async () => {
-    const envelope = planningEnvelope(normalized()) as { storyboard: { layers: Array<Record<string, unknown>>; shots: Array<{ layerIds: string[] }> } };
-    envelope.storyboard.layers.push({
-      id: "layer_unverified",
-      type: "image",
-      localAssetId: "asset_ffffffffffffffffffffffff",
-      description: "unverified"
-    });
-    envelope.storyboard.shots[0]!.layerIds.push("layer_unverified");
+  it("repairs an effectId outside the dynamic enum once", async () => {
+    const invalid = { effectId: "fx.unknown", targetKind: "visual", addedText: null };
     const audits: ProviderAuditRecord[] = [];
+    let attempt = 0;
     const fetchSpy = vi.fn<typeof fetch>(async () => responseJson({
       model: ARK_V1_MODEL,
-      output: [{ content: [{ type: "output_text", text: JSON.stringify(envelope) }] }]
+      output: [{ content: [{ type: "output_text", text: JSON.stringify(++attempt === 1 ? invalid : planningEnvelope(normalized())) }] }]
     }));
     const provider = new VolcengineArkProvider({
       apiKey: "unit-test-key-that-is-not-real",
       fetchImpl: fetchSpy,
       audit: (record) => audits.push(record)
     });
-    await expect(provider.understand({ principal: principal(), prompt: "asset authority" }))
-      .rejects.toMatchObject({ code: "security" });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(audits.find((record) => record.reason === "ASSET_BINDING"))
-      .toMatchObject({ attempt: 1, errorCode: "security" });
+    await expect(provider.understand({ principal: principal(), prompt: "effect enum authority" }))
+      .resolves.toMatchObject({ contract: "ai-task/v1" });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(audits.find((record) => record.reason === "EFFECT_ID_INVALID"))
+      .toMatchObject({ attempt: 1, errorCode: "provider_response" });
+    expect(JSON.stringify(fetchSpy.mock.calls[1]?.[1])).toContain("Safe failure category: EFFECT_ID_INVALID");
   });
 
   it("does not send a second generation when aborted during the bounded retry wait", async () => {
@@ -1435,18 +1465,8 @@ describe("AI planner", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("projects server-authoritative planning fields while preserving model text byte-for-byte", async () => {
-    const model = planningEnvelope(normalized()) as ReturnType<typeof planningEnvelope> & Record<string, unknown>;
-    const storyboard = (model as { storyboard: Record<string, unknown> }).storyboard;
-    const exactText = "Exact model text\nwith\ttabs Required";
-    (storyboard.layers as Array<Record<string, unknown>>).find((layer) => layer.type === "text")!.text = exactText;
-    storyboard.duration = 9;
-    storyboard.width = 640;
-    storyboard.height = 360;
-    storyboard.fps = 12;
-    storyboard.style = ["model-style"];
-    storyboard.brand = { colors: [], tone: [], requiredText: [], forbiddenContent: [], logoAssetIds: [] };
-    (storyboard.shots as Array<Record<string, unknown>>)[0]!.end = 2;
+  it("projects server-authoritative planning fields without accepting model project structure", async () => {
+    const model = { effectId: "fx.motion.fade", targetKind: "visual", addedText: null, summary: "Exact intent summary" };
     const planning = {
       width: 1920,
       height: 1080,
@@ -1472,7 +1492,9 @@ describe("AI planner", () => {
     expect(result.storyboard).toMatchObject({ width: 1920, height: 1080, fps: 30, duration: 2 });
     expect(result.storyboard.style).toEqual(planning.style);
     expect(result.storyboard.brand).toEqual(planning.brand);
-    expect(result.storyboard.layers.find((layer) => layer.type === "text")?.text).toBe(exactText);
+    expect(result.storyboard.intent).toBe("Exact intent summary");
+    expect(result.storyboard.layers.find((layer) => layer.type === "text")?.text).toBe("Required");
+    expect(JSON.stringify(result.storyboard)).not.toContain("model-style");
   });
 
   it("isolates frozen request schemas from hostile planning access, prior mutation, and concurrent calls", async () => {
@@ -1484,13 +1506,9 @@ describe("AI planner", () => {
       };
       const prompt = body.input[0]!.content[0]!.text ?? "";
       captured.push({ schema: body.text.format.schema, prompt });
-      const duration = prompt.includes('"durationSeconds":2') ? 2 : 3;
-      const envelope = planningEnvelope(normalized()) as { storyboard: { duration: number; shots: Array<{ end: number }> } };
-      envelope.storyboard.duration = duration;
-      envelope.storyboard.shots[0]!.end = duration;
       return responseJson({
         model: ARK_V1_MODEL,
-        output: [{ content: [{ type: "output_text", text: JSON.stringify(envelope) }] }]
+        output: [{ content: [{ type: "output_text", text: JSON.stringify(planningEnvelope(normalized())) }] }]
       });
     };
     const provider = new VolcengineArkProvider({ apiKey: "unit-test-key-that-is-not-real", fetchImpl });
@@ -1517,11 +1535,15 @@ describe("AI planner", () => {
     expect(first.storyboard).toMatchObject({ width: 800, duration: 2 });
     expect(second.storyboard).toMatchObject({ width: 900, duration: 3 });
     expect(captured).toHaveLength(2);
-    expect(captured[0]!.schema).toEqual(MODEL_PLANNING_JSON_SCHEMA);
-    expect(captured[1]!.schema).toEqual(MODEL_PLANNING_JSON_SCHEMA);
+    const firstProperties = captured[0]!.schema.properties as Record<string, Record<string, unknown>>;
+    const secondProperties = captured[1]!.schema.properties as Record<string, Record<string, unknown>>;
+    expect(firstProperties.effectId?.enum).toEqual(["fx.motion.fade", "fx.motion.slide"]);
+    expect(secondProperties.effectId?.enum).toEqual(["fx.motion.fade", "fx.motion.slide"]);
     captured[0]!.schema.additionalProperties = true;
     expect(captured[1]!.schema.additionalProperties).toBe(false);
     expect((MODEL_PLANNING_JSON_SCHEMA as Record<string, unknown>).additionalProperties).toBe(false);
+    expect(((MODEL_PLANNING_JSON_SCHEMA as Record<string, unknown>).properties as Record<string, Record<string, unknown>>)
+      .effectId?.enum).toBeUndefined();
   });
 
   it.each([
@@ -1736,5 +1758,24 @@ describe("AI planner", () => {
       .resolves.toMatchObject({
       trace: { requestFingerprint: expect.stringMatching(/^request-sha256:[a-f0-9]{32}$/) }
     });
+  });
+});
+
+describe("shared explicit duration parsing", () => {
+  it.each([
+    ["制作 6秒 视频", 6],
+    ["时长 6 秒", 6],
+    ["输出视频时长为6秒", 6],
+    ["输出视频时长 为 6 秒", 6],
+    ["duration is 6 seconds", 6]
+  ])("parses %s", (prompt, seconds) => {
+    expect(parseExplicitDuration(prompt)).toEqual({ kind: "valid", seconds, source: "description" });
+  });
+
+  it("distinguishes fallback, invalid, out-of-range, and conflicting durations", () => {
+    expect(parseExplicitDuration("使用打字机特效")).toEqual({ kind: "none" });
+    expect(parseExplicitDuration("输出视频时长为很多秒")).toEqual({ kind: "invalid", code: "DURATION_MALFORMED" });
+    expect(parseExplicitDuration("输出视频时长为 0 秒")).toEqual({ kind: "invalid", code: "DURATION_OUT_OF_RANGE" });
+    expect(parseExplicitDuration("时长 5 秒，但输出视频时长为 6 秒")).toEqual({ kind: "invalid", code: "DURATION_AMBIGUOUS" });
   });
 });

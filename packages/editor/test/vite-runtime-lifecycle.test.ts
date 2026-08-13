@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer, preview, type Connect, type ViteDevServer } from "vite";
-import { createServerRuntimePlugin } from "../vite.config.js";
+import editorViteConfig, { createServerRuntimePlugin } from "../vite.config.js";
 
 function deferred<T = void>() {
   let resolvePromise!: (value: T | PromiseLike<T>) => void;
@@ -47,6 +47,13 @@ afterEach(() => {
 });
 
 describe("Vite server runtime lifecycle", () => {
+  it("pins local development to literal loopback port 4174 with strictPort", () => {
+    expect(typeof editorViteConfig).toBe("object");
+    expect((editorViteConfig as { server?: unknown }).server).toEqual({
+      host: "127.0.0.1", port: 4174, strictPort: true
+    });
+  });
+
   it("makes a real ViteDevServer.close wait for runtime.close", async () => {
     const closeStarted = deferred();
     const closeBarrier = deferred();

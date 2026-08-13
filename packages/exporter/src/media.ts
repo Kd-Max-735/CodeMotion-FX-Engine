@@ -86,6 +86,28 @@ export interface StoredMediaVerificationOptions {
   readonly signal?: AbortSignal;
 }
 
+export type MediaPreviewDecodeFailureReason = "empty_output" | "invalid_output" | "stderr" | "process";
+
+export class MediaPreviewDecodeError extends Error {
+  readonly code = "MEDIA_PREVIEW_DECODE_FAILED" as const;
+
+  constructor(
+    readonly reason: MediaPreviewDecodeFailureReason,
+    readonly expectedBytes: number,
+    readonly actualBytes: number,
+    readonly diagnostic: string,
+    readonly ffmpegArgs: readonly string[],
+    cause?: unknown
+  ) {
+    super(
+      `Media preview decode failed (${reason}): ${actualBytes}/${expectedBytes} RGBA bytes.`
+      + (diagnostic.length > 0 ? ` FFmpeg diagnostic: ${diagnostic}` : ""),
+      cause === undefined ? undefined : { cause }
+    );
+    this.name = "MediaPreviewDecodeError";
+  }
+}
+
 const formats = {
   ".png": { kind: "image", mime: "image/png", magic: [0x89, 0x50, 0x4e, 0x47], codecs: ["png"] },
   ".jpg": { kind: "image", mime: "image/jpeg", magic: [0xff, 0xd8, 0xff], codecs: ["mjpeg"] },
@@ -111,8 +133,20 @@ interface ProbeStream {
   width?: number;
   height?: number;
   duration?: string;
+  avg_frame_rate?: string;
+  r_frame_rate?: string;
   sample_rate?: string;
   channels?: number;
+}
+
+function probeFrameRate(stream: ProbeStream): number {
+  const value = stream.avg_frame_rate ?? stream.r_frame_rate ?? "0/1";
+  const match = /^(\d+)\/(\d+)$/u.exec(value);
+  if (match === null) return 0;
+  const numerator = Number(match[1]);
+  const denominator = Number(match[2]);
+  const rate = denominator > 0 ? numerator / denominator : 0;
+  return Number.isFinite(rate) && rate > 0 ? rate : 0;
 }
 
 interface ProbeResult {
@@ -406,6 +440,10 @@ async function importSvg(
     if (!proxyHeader.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) {
       throw new Error("SVG rasterizer did not produce a PNG proxy.");
     }
+    await decodeVisualFrame(proxyTemp, "image", 160, 90, 0, {
+      ...(options.ffmpegPath === undefined ? {} : { ffmpegPath: options.ffmpegPath }),
+      ...(options.signal === undefined ? {} : { signal: options.signal })
+    });
     const proxyHash = await hashFile(proxyTemp, options.signal);
     rasterProxyPath = join(storage, `${hash}.${proxyHash}.png`);
     storedCreated = await commitTempFile(svgTemp, storedPath, hash);
@@ -684,9 +722,16 @@ export async function importMedia(options: MediaImportOptions): Promise<Imported
     && (width < 1 || height < 1 || width > limits.width || height > limits.height)) {
     throw new Error("Media dimensions are invalid or exceed the configured limit.");
   }
-  await runProcess(options.ffmpegPath ?? "ffmpeg", [
-    "-v", "error", "-i", source, ...(format.kind === "audio" ? ["-t", "0.1"] : ["-frames:v", "1"]), "-f", "null", "-"
-  ], options.signal === undefined ? {} : { signal: options.signal });
+  if (format.kind === "image" || format.kind === "video") {
+    await decodeVisualFrame(source, format.kind, 160, 90, 0, {
+      ...(options.ffmpegPath === undefined ? {} : { ffmpegPath: options.ffmpegPath }),
+      ...(options.signal === undefined ? {} : { signal: options.signal })
+    });
+  } else {
+    await runProcess(options.ffmpegPath ?? "ffmpeg", [
+      "-v", "error", "-i", source, "-t", "0.1", "-f", "null", "-"
+    ], options.signal === undefined ? {} : { signal: options.signal });
+  }
   if (extension === ".aac") {
     return importAac(source, info.size, duration, primary, probe, limits, options);
   }
@@ -716,6 +761,10 @@ export async function importMedia(options: MediaImportOptions): Promise<Imported
     container: probe.format?.format_name ?? "unknown",
     sampleRate: primary.sample_rate === undefined ? 0 : Number(primary.sample_rate),
     channels: primary.channels ?? 0,
+    fps: format.kind === "video" ? probeFrameRate(primary) : 0,
+    audioStreams: probe.streams?.filter((stream) => stream.codec_type === "audio").length ?? 0,
+    audioChannels: Math.max(0, ...(probe.streams?.filter((stream) => stream.codec_type === "audio")
+      .map((stream) => stream.channels ?? 0) ?? [0])),
     decodeVerified: true
   };
   const eligibility = arkEligibility(format.kind, info.size, duration);
@@ -745,6 +794,10 @@ export async function verifyStoredMediaAsset(options: StoredMediaVerificationOpt
   const format = formats[extension];
   if (format === undefined || format.kind !== options.asset.type) {
     throw new Error("Stored media type and extension disagree.");
+  }
+  if ((format.kind === "image" || format.kind === "video" || format.kind === "svg")
+    && options.asset.metadata.decodeVerified !== true) {
+    throw new Error("Stored visual media was not verified for RGBA preview decoding.");
   }
 
   let storage: string;
@@ -857,20 +910,65 @@ export async function removeStoredMedia(options: StoredMediaVerificationOptions)
 export async function decodeMediaFrame(
   imported: ImportedMedia,
   request: FrameRequest,
-  options: { ffmpegPath?: string; signal?: AbortSignal } = {}
+  options: {
+    ffmpegPath?: string;
+    signal?: AbortSignal;
+    processRunner?: typeof runProcess;
+  } = {}
 ): Promise<Uint8Array> {
   if (imported.asset.type !== "image" && imported.asset.type !== "video" && imported.asset.type !== "svg") {
     throw new Error("Only image, SVG, and video assets produce visual frames.");
   }
-  const seek = imported.asset.type === "video" ? request.time : 0;
+  const duration = Number(imported.asset.metadata.duration ?? 0);
+  const sourceFps = Number(imported.asset.metadata.fps ?? 0);
+  const finalFrameTime = duration > 0 && sourceFps > 0 ? Math.max(0, duration - 1 / sourceFps) : request.time;
+  const seek = imported.asset.type === "video" ? Math.min(Math.max(0, request.time), finalFrameTime) : 0;
   const input = imported.asset.type === "svg" ? imported.rasterProxyPath : imported.storedPath;
   if (input === undefined) throw new Error("Verified SVG raster proxy is missing.");
-  const result = await runProcess(options.ffmpegPath ?? "ffmpeg", [
-    "-v", "error", "-ss", String(seek), "-i", input, "-frames:v", "1",
-    "-vf", `scale=${request.width}:${request.height}:flags=lanczos`, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"
-  ], options.signal === undefined ? {} : { signal: options.signal });
-  const expected = request.width * request.height * 4;
-  if (result.stdout.byteLength !== expected) throw new Error(`Decoded frame has ${result.stdout.byteLength} bytes; expected ${expected}.`);
+  return decodeVisualFrame(input, imported.asset.type === "video" ? "video" : "image", request.width, request.height, seek, options);
+}
+
+async function decodeVisualFrame(
+  input: string,
+  kind: "image" | "video",
+  width: number,
+  height: number,
+  seek: number,
+  options: {
+    ffmpegPath?: string;
+    signal?: AbortSignal;
+    processRunner?: typeof runProcess;
+  } = {}
+): Promise<Uint8Array> {
+  const expected = width * height * 4;
+  const args = [
+    "-v", "error", "-i", input,
+    ...(kind === "video" ? ["-ss", String(seek)] : []),
+    "-map", "0:v:0", "-frames:v", "1",
+    "-vf", `scale=${width}:${height}:flags=lanczos`, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"
+  ];
+  let result: { stdout: Buffer; stderr: string };
+  try {
+    result = await (options.processRunner ?? runProcess)(options.ffmpegPath ?? "ffmpeg", args,
+      options.signal === undefined ? {} : { signal: options.signal });
+  } catch (cause) {
+    options.signal?.throwIfAborted();
+    const diagnostic = cause instanceof Error ? cause.message : String(cause);
+    throw new MediaPreviewDecodeError("process", expected, 0, diagnostic, args, cause);
+  }
+  const diagnostic = result.stderr.trim();
+  if (diagnostic.length > 0) {
+    throw new MediaPreviewDecodeError("stderr", expected, result.stdout.byteLength, diagnostic, args);
+  }
+  if (result.stdout.byteLength !== expected) {
+    throw new MediaPreviewDecodeError(
+      result.stdout.byteLength === 0 ? "empty_output" : "invalid_output",
+      expected,
+      result.stdout.byteLength,
+      "FFmpeg exited successfully but did not produce the required RGBA frame.",
+      args
+    );
+  }
   return new Uint8Array(result.stdout);
 }
 
@@ -1016,6 +1114,45 @@ export class TenantMediaStore {
       throw new OwnerMediaResolverError("ASSET_CHANGED");
     }
     return verified;
+  }
+
+  async delete(owner: OwnerContext, assetId: string): Promise<"deleted" | "tombstoned"> {
+    assertOwnerContext(owner);
+    await this.hydrated;
+    if (!this.hydrationAvailable) throw new OwnerMediaResolverError("STORAGE_UNAVAILABLE");
+    let verified: VerifiedStoredMedia | undefined;
+    await this.mutate(async () => {
+      const key = ownedAssetKey(owner, assetId);
+      const record = this.records.get(key);
+      if (record === undefined) throw new OwnerMediaResolverError("OWNER_NOT_FOUND");
+      try {
+        verified = await verifyStoredMediaAsset({
+          asset: record.imported.asset,
+          storageDirectory: this.ownerStorageDirectory(owner)
+        });
+      } catch {
+        throw new OwnerMediaResolverError("INTEGRITY_FAILED");
+      }
+      if (verified.asset.id !== assetId || this.records.get(key) !== record) {
+        throw new OwnerMediaResolverError("ASSET_CHANGED");
+      }
+      this.records.delete(key);
+      try {
+        await this.persist();
+      } catch (cause) {
+        this.records.set(key, record);
+        throw cause;
+      }
+    });
+    if (verified?.rasterProxyPath !== undefined) return "tombstoned";
+    try {
+      await unlink(verified!.storedPath);
+      return "deleted";
+    } catch {
+      // The authoritative index tombstone is already durable. Retain an orphaned
+      // single file rather than making the deleted asset visible again.
+      return "tombstoned";
+    }
   }
 
   list(owner: OwnerContext): readonly AssetDefinition[] {

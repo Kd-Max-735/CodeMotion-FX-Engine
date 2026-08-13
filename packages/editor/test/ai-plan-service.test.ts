@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   OfflineMockProvider,
@@ -9,7 +11,13 @@ import {
   type UnderstandingRequest,
   type UnderstandingResult
 } from "@codemotion/ai-planner";
-import type { OwnerContext, VerifiedStoredMedia } from "@codemotion/exporter";
+import {
+  MediaPreviewDecodeError,
+  TenantMediaStore,
+  runProcess,
+  type OwnerContext,
+  type VerifiedStoredMedia
+} from "@codemotion/exporter";
 import {
   AiPlanService,
   createAiPlanApi,
@@ -20,6 +28,7 @@ import { AuthHttpError } from "../src/auth-session-service.js";
 
 const ASSET_ID = "asset_aaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER_ASSET_ID = "asset_bbbbbbbbbbbbbbbbbbbbbbbb";
+const THIRD_ASSET_ID = "asset_cccccccccccccccccccccccc";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -54,14 +63,14 @@ function input(assets: AiPlanningInputV1["assets"] = []): AiPlanningInputV1 {
   };
 }
 
-function verified(assetId: string, storedPath: string, type: "image" | "svg" = "image"): VerifiedStoredMedia {
+function verified(assetId: string, storedPath: string, type: "image" | "svg" | "video" = "image", duration?: number): VerifiedStoredMedia {
   return {
     asset: {
       id: assetId,
       type,
       uri: `media://${assetId}`,
       hash: `sha256:${"a".repeat(64)}`,
-      metadata: { mime: type === "svg" ? "image/svg+xml" : "image/png", bytes: 1 }
+      metadata: { mime: type === "svg" ? "image/svg+xml" : type === "video" ? "video/mp4" : "image/png", bytes: 1, ...(duration === undefined ? {} : { duration }) }
     },
     storedPath,
     trustedBytes: 1
@@ -76,6 +85,24 @@ class RecordingProvider implements ModelProvider {
   async understand(request: UnderstandingRequest): Promise<UnderstandingResult> {
     this.requests.push(request);
     return this.delegate.understand(request);
+  }
+}
+
+class InvalidEffectProvider implements ModelProvider {
+  readonly id = "invalid-effect-provider";
+
+  async understand(request: UnderstandingRequest): Promise<UnderstandingResult> {
+    const result = await new OfflineMockProvider().understand(request);
+    return {
+      ...result,
+      storyboard: {
+        ...result.storyboard,
+        shots: result.storyboard.shots.map((shot) => ({
+          ...shot,
+          effects: shot.effects.map((effect) => ({ ...effect, effectId: "fx.invalid.notRegistered" }))
+        }))
+      }
+    };
   }
 }
 
@@ -190,6 +217,16 @@ async function waitForTerminal(service: AiPlanService, owner: AiSessionPrincipal
   throw new Error("AI plan did not reach a terminal state within the deterministic turn budget.");
 }
 
+async function waitForTerminalProcess(service: AiPlanService, owner: AiSessionPrincipal, id: string) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const task = service.get(owner, id);
+    if (task.status !== "running" && task.status !== "cancelling") return task;
+    await new Promise<void>((resolveTurn) => setTimeout(resolveTurn, 5));
+  }
+  throw new Error("AI plan did not reach a terminal state within 30 seconds.");
+}
+
 async function apiPost(
   service: AiPlanService,
   body: string,
@@ -244,6 +281,227 @@ async function apiGet(
 }
 
 describe("AI plan server authorization and isolation", () => {
+  it("completes the vertical JPEG slide-in request with and without background audio", async () => {
+    const fixtureRoot = resolve("tmp/media-preview-ai-plan-regression");
+    const fixtureInput = resolve(fixtureRoot, "input");
+    const jpegPath = resolve(fixtureInput, "portrait-yuvj444p.jpg");
+    const audioPath = resolve(fixtureInput, "background.wav");
+    await mkdir(fixtureInput, { recursive: true });
+    await runProcess("ffmpeg", [
+      "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1242x2208:rate=1",
+      "-frames:v", "1", "-vf", "format=yuvj444p", "-q:v", "2", jpegPath
+    ]);
+    await runProcess("ffmpeg", [
+      "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+      "-c:a", "pcm_s16le", audioPath
+    ]);
+    const owner = principal("tenant-jpeg", "user-jpeg");
+    const store = await new TenantMediaStore({
+      storageRoot: resolve(fixtureRoot, "storage"),
+      allowedRoots: [fixtureInput]
+    }).initialize();
+    const image = await store.import(owner, {
+      sourcePath: jpegPath,
+      claimedMime: "image/jpeg",
+      displayName: "portrait.jpg"
+    });
+    const audio = await store.import(owner, {
+      sourcePath: audioPath,
+      claimedMime: "audio/wav",
+      displayName: "background.wav"
+    });
+    expect(image.asset.metadata).toMatchObject({
+      width: 1242,
+      height: 2208,
+      codec: "mjpeg",
+      decodeVerified: true
+    });
+
+    for (const includeAudio of [false, true]) {
+      const provider = new RecordingProvider();
+      const service = new AiPlanService(provider, store);
+      const created = await service.create(owner, {
+        ...input([
+          { assetId: image.asset.id, purpose: "reference-image" },
+          ...(includeAudio ? [{ assetId: audio.asset.id, purpose: "reference-audio" as const }] : [])
+        ]),
+        prompt: "图片实现划入效果",
+        selectedEffectId: "fx.motion.slide"
+      });
+      const completed = await waitForTerminalProcess(service, owner, created.id);
+      expect(completed.status).toBe("completed");
+      expect(completed.result?.storyboard.shots.flatMap((shot) => shot.effects)
+        .map((effect) => effect.effectId)).toEqual(["fx.motion.slide"]);
+      expect(completed.result?.preview).toMatchObject({ width: 160, height: 90, quality: "draft" });
+      expect(provider.requests).toHaveLength(1);
+      expect(provider.requests[0]?.resources?.map((resource) => resource.modality))
+        .toEqual(includeAudio ? ["image", "audio"] : ["image"]);
+      await service.close();
+    }
+  }, 60_000);
+
+  it("uses the explicit four-second prompt duration and hard-matches gaussian blur", async () => {
+    const fixtureRoot = resolve("tmp/gaussian-duration-regression");
+    const fixtureInput = resolve(fixtureRoot, "input");
+    const imagePath = resolve(fixtureInput, "image.png");
+    await mkdir(fixtureInput, { recursive: true });
+    await runProcess("ffmpeg", [
+      "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=96x54:rate=1",
+      "-frames:v", "1", imagePath
+    ]);
+    const provider = new RecordingProvider();
+    const owner = principal();
+    const store = await new TenantMediaStore({
+      storageRoot: resolve(fixtureRoot, "storage"),
+      allowedRoots: [fixtureInput]
+    }).initialize();
+    const image = await store.import(owner, {
+      sourcePath: imagePath,
+      claimedMime: "image/png",
+      displayName: "image.png"
+    });
+    const service = new AiPlanService(provider, store);
+    const created = await service.create(owner, {
+      ...input([{ assetId: image.asset.id, purpose: "reference-image" }]),
+      prompt: "实现柔和朦胧的效果，视频时长4秒",
+      durationSeconds: 5
+    });
+    const completed = await waitForTerminalProcess(service, owner, created.id);
+    expect(completed).toMatchObject({ status: "completed" });
+    expect(provider.requests[0]?.planning?.durationSeconds).toBe(4);
+    expect(completed.result?.editableProject.project.duration).toBe(4);
+    expect(completed.result?.storyboard.shots.flatMap((shot) => shot.effects)
+      .map((effect) => effect.effectId)).toEqual(["fx.post.gaussianBlur"]);
+    await service.close();
+  }, 60_000);
+
+  it("maps media preview decode failures to a safe diagnostic task code", async () => {
+    const secret = "internal ffmpeg stderr and storage path";
+    const service = new AiPlanService(
+      new RecordingProvider(),
+      new OwnedAssetResolver(),
+      async () => {
+        throw new MediaPreviewDecodeError(
+          "empty_output",
+          160 * 90 * 4,
+          0,
+          secret,
+          ["-v", "error", "-i", "C:\\private\\asset.jpg"]
+        );
+      }
+    );
+    const owner = principal();
+    const created = await service.create(owner, input());
+    const failed = await waitForTerminal(service, owner, created.id);
+    expect(failed).toMatchObject({
+      status: "failed",
+      phase: "plan",
+      error: {
+        code: "media_preview_failed",
+        retryable: false,
+        message: "上传素材无法生成预览，请重新上传受支持的图片或视频。"
+      }
+    });
+    expect(JSON.stringify(failed)).not.toContain(secret);
+    expect(JSON.stringify(failed)).not.toContain("C:\\private");
+  });
+
+  it("records an invalid Provider effect with a specific safe subreason", async () => {
+    const diagnostics: Array<{ reason?: string }> = [];
+    const service = new AiPlanService(
+      new InvalidEffectProvider(),
+      new OwnedAssetResolver(),
+      undefined,
+      (record) => diagnostics.push(record)
+    );
+    const owner = principal();
+    const created = await service.create(owner, input());
+    const failed = await waitForTerminal(service, owner, created.id);
+    expect(failed).toMatchObject({
+      status: "failed",
+      error: { code: "provider_response", problemCode: "EFFECT_ID_INVALID", retryable: true }
+    });
+    expect(diagnostics).toEqual([expect.objectContaining({ reason: "EFFECT_ID_INVALID" })]);
+  });
+
+  it("rejects product-invalid prompt-only, audio-only, and three-visual HTTP requests", async () => {
+    const provider = new RecordingProvider();
+    const service = new AiPlanService(provider, new OwnedAssetResolver());
+    const authorize = () => principal();
+    const allowStateChange = () => undefined;
+    const cases = [
+      input(),
+      input([{ assetId: ASSET_ID, purpose: "reference-audio" }]),
+      input([
+        { assetId: ASSET_ID, purpose: "reference-image" },
+        { assetId: OTHER_ASSET_ID, purpose: "reference-video" },
+        { assetId: THIRD_ASSET_ID, purpose: "reference-image" }
+      ])
+    ];
+    for (const body of cases) {
+      const response = await apiPost(service, JSON.stringify(body), authorize, allowStateChange);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "AI_PLAN_REQUEST_REJECTED", retryable: false }
+      });
+    }
+    expect(provider.requests).toEqual([]);
+  });
+
+  it("rejects selected-card count errors and a natural-language conflict before Provider use", async () => {
+    const provider = new RecordingProvider();
+    const assets = new OwnedAssetResolver();
+    const service = new AiPlanService(provider, assets);
+    const owner = principal();
+    const fadeWithTwo = {
+      ...input([
+        { assetId: ASSET_ID, purpose: "reference-image" as const },
+        { assetId: OTHER_ASSET_ID, purpose: "reference-video" as const }
+      ]),
+      selectedEffectId: "fx.motion.fade"
+    };
+    const wipeWithOne = {
+      ...input([{ assetId: ASSET_ID, purpose: "reference-image" as const }]),
+      selectedEffectId: "fx.transition.wipe"
+    };
+    await expect(service.create(owner, fadeWithTwo)).rejects.toThrow(/invalid visual asset count/u);
+    await expect(service.create(owner, wipeWithOne)).rejects.toThrow(/invalid visual asset count/u);
+    await expect(service.create(owner, {
+      ...input([{ assetId: ASSET_ID, purpose: "reference-image" }]),
+      prompt: "实现柔和朦胧的效果",
+      selectedEffectId: "fx.light.neonGlow"
+    })).rejects.toMatchObject({ code: "invalid_input" });
+    expect(provider.requests).toEqual([]);
+    expect(assets.calls).toEqual([]);
+  });
+
+  it("passes one-input fade and two-input wipe selections into the sole Provider as hard constraints", async () => {
+    const provider = new BlockingProvider();
+    const assets = new OwnedAssetResolver();
+    const owner = principal();
+    assets.add(owner, ASSET_ID, verified(ASSET_ID, "C:\\trusted-a\\first.png"));
+    assets.add(owner, OTHER_ASSET_ID, verified(OTHER_ASSET_ID, "C:\\trusted-a\\second.png"));
+    const service = new AiPlanService(provider, assets);
+    const fade = await service.create(owner, {
+      ...input([{ assetId: ASSET_ID, purpose: "reference-image" }]),
+      prompt: "让整张图片淡入",
+      selectedEffectId: "fx.motion.fade"
+    });
+    const wipe = await service.create(owner, {
+      ...input([
+        { assetId: ASSET_ID, purpose: "reference-image" },
+        { assetId: OTHER_ASSET_ID, purpose: "reference-image" }
+      ]),
+      prompt: "从第一张图片线性擦除切换到第二张图片",
+      selectedEffectId: "fx.transition.wipe"
+    });
+    expect(provider.requests.map((request) => request.planning?.selectedEffectId))
+      .toEqual(["fx.motion.fade", "fx.transition.wipe"]);
+    service.cancel(owner, fade.id);
+    service.cancel(owner, wipe.id);
+    await Promise.all([waitForTerminal(service, owner, fade.id), waitForTerminal(service, owner, wipe.id)]);
+  });
+
   it("rejects missing identity, resolver failure, and missing scope before body, assets, or provider", async () => {
     const provider = new RecordingProvider();
     const assets = new OwnedAssetResolver();
@@ -432,6 +690,46 @@ describe("AI plan server authorization and isolation", () => {
     });
     service.cancel(owner, created.id);
     await waitForTerminal(service, owner, created.id);
+  });
+});
+
+describe("AI plan authoritative duration", () => {
+  it("prefers a six-second description over the five-second field and falls back to the field", async () => {
+    const provider = new RecordingProvider();
+    const resolver: AiAssetResolver = { resolve: async (_owner, assetId) => verified(assetId, `C:/media/${assetId}.png`) };
+    const service = new AiPlanService(provider, resolver);
+    for (const [prompt, expected] of [
+      ["在图片上使用打字机特效，输出视频时长为6秒", 6],
+      ["在图片上使用打字机特效", 5]
+    ] as const) {
+      const created = await service.create(principal(), {
+        ...input([{ assetId: ASSET_ID, purpose: "reference-image" }]),
+        prompt,
+        durationSeconds: 5,
+        selectedEffectId: "fx.text.typewriter"
+      });
+      await waitForTerminalProcess(service, principal(), created.id);
+      expect(provider.requests.at(-1)?.planning?.durationSeconds).toBe(expected);
+    }
+    await service.close();
+  });
+
+  it("rejects malformed description durations and durations beyond a verified video", async () => {
+    const provider = new RecordingProvider();
+    const videoResolver: AiAssetResolver = { resolve: async (_owner, assetId) => verified(assetId, `C:/media/${assetId}.mp4`, "video", 4) };
+    const service = new AiPlanService(provider, videoResolver);
+    await expect(service.create(principal(), {
+      ...input([{ assetId: ASSET_ID, purpose: "reference-video" }]),
+      prompt: "输出视频时长为很多秒",
+      durationSeconds: 3
+    })).rejects.toMatchObject({ code: "AI_DURATION_INVALID" });
+    await expect(service.create(principal(), {
+      ...input([{ assetId: ASSET_ID, purpose: "reference-video" }]),
+      prompt: "输出视频时长为 6 秒",
+      durationSeconds: 3
+    })).rejects.toMatchObject({ code: "AI_DURATION_EXCEEDS_VIDEO" });
+    expect(provider.requests).toHaveLength(0);
+    await service.close();
   });
 });
 

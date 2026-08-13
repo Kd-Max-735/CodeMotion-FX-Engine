@@ -1,5 +1,5 @@
 import { CommandHistory, type EffectInstance, type JsonValue, type LayerDefinition, type MotionProject, type UndoableCommand } from "@codemotion/core";
-import { P0_BROWSER_PROJECT_AUTHORITY_V1 } from "@codemotion/effects-2d";
+import { P0_BROWSER_PROJECT_AUTHORITY_V1, createV22SampleEffectInstance } from "@codemotion/effects-2d";
 import { loadProject, saveProject, validateContract, type BrowserProjectConstraintsV1, type BrowserProjectEnvelopeV1 } from "@codemotion/schema";
 import {
   evaluateAnimatable,
@@ -161,7 +161,7 @@ export class EditorStore {
     this.snapshotValue = {
       document,
       editableProject: initial,
-      view: "workbench",
+      view: "ai-planner",
       currentTime: 0,
       zoom: 52,
       playing: false,
@@ -214,6 +214,30 @@ export class EditorStore {
   setTime(currentTime: number): void { this.publish({ currentTime: Math.max(0, Math.min(this.history.state.project.duration, currentTime)) }); }
   setZoom(zoom: number): void { this.publish({ zoom: Math.max(15, Math.min(200, zoom)) }); }
   setPlaying(playing: boolean): void { this.publish({ playing }); }
+
+  audioTrackVolume(trackId: string): number {
+    const track = this.history.state.project.audioTracks.find((item) => item.id === trackId);
+    return track ? evaluateAnimatable(track.volume, this.snapshotValue.currentTime) : 0;
+  }
+
+  setAudioTrackVolume(trackId: string, volume: number): void {
+    if (!Number.isFinite(volume)) return;
+    this.execute("调整音频音量", (draft) => {
+      const track = draft.project.audioTracks.find((item) => item.id === trackId);
+      if (track) track.volume = { mode: "constant", value: Math.max(0, Math.min(2, volume)) };
+    });
+  }
+
+  setAudioTrackStart(trackId: string, startTime: number): void {
+    if (!Number.isFinite(startTime)) return;
+    this.execute("调整音频位置", (draft) => {
+      const track = draft.project.audioTracks.find((item) => item.id === trackId);
+      if (!track) return;
+      const trackDuration = track.endTime - track.startTime;
+      track.startTime = Math.max(0, Math.min(draft.project.duration, startTime));
+      track.endTime = Math.min(draft.project.duration, track.startTime + trackDuration);
+    });
+  }
   selectLayer(selectedLayerId: string): void {
     this.selectedLayerId = selectedLayerId;
     this.publish({ selectedEffectId: null });
@@ -244,6 +268,11 @@ export class EditorStore {
   }
 
   adoptEditableProject(value: unknown): void {
+    this.loadEditableProject(value);
+    this.publish({ view: "editor" });
+  }
+
+  loadEditableProject(value: unknown): void {
     const checked = P0_BROWSER_PROJECT_AUTHORITY_V1.validateBrowserProjectEnvelope(value);
     if (!checked.valid) throw new Error(checked.error.message);
     const envelope = structuredClone(checked.value);
@@ -251,7 +280,7 @@ export class EditorStore {
     this.constraints = envelope.constraints;
     this.selectedLayerId = mainLayers(project)[0]?.id ?? null;
     this.history = new CommandHistory({ project, selectedLayerId: this.selectedLayerId }, { maxDepth: 100 });
-    this.publish({ view: "editor", currentTime: 0, selectedEffectId: null, saveStatus: "saved", error: null });
+    this.publish({ currentTime: 0, selectedEffectId: null, saveStatus: "saved", error: null });
     this.scheduleAutosave();
   }
 
@@ -429,7 +458,7 @@ export class EditorStore {
   }
 
   addEffect(layerId: string, effectId: string, presetIndex = 1): void {
-    const instance = createP0EffectInstance(effectId, presetIndex);
+    const instance = createV22SampleEffectInstance(effectId) ?? createP0EffectInstance(effectId, presetIndex);
     this.execute(`添加 ${effectDefinition(effectId).displayName}`, (draft) => {
       const layer = findLayer(draft.project, layerId);
       if (layer === undefined) throw new Error(`Layer not found: ${layerId}`);

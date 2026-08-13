@@ -11,10 +11,9 @@ const editorRoot = resolve(import.meta.dirname, "..");
 const workspaceRoot = resolve(editorRoot, "../..");
 const outputDir = resolve(editorRoot, "tmp/stage-7r-f");
 const host = "127.0.0.1";
-const port = 4187;
+const port = 4174;
 const origin = `http://${host}:${port}`;
 const execFile = promisify(execFileCallback);
-let loginCode;
 await mkdir(outputDir, { recursive: true });
 
 process.env.NODE_ENV = "development";
@@ -54,20 +53,13 @@ async function assertLayout(page, label) {
 }
 
 async function authenticate(page) {
+  const automaticSession = page.waitForResponse((response) => response.url().endsWith("/auth/dev/auto-session"));
   await page.goto(origin, { waitUntil: "networkidle" });
+  assert((await automaticSession).status() === 201, "Development session was not created automatically.");
   const openPlanner = page.getByRole("button", { name: "打开 AI 规划" });
   if (await openPlanner.count()) await openPlanner.click();
-  await page.getByRole("heading", { name: "需要服务端会话" }).waitFor();
-  const binding = page.waitForResponse((response) => response.url().endsWith("/auth/dev/login"));
-  await page.getByRole("button", { name: "绑定本地一次性 code" }).click();
-  assert((await binding).status() === 204, "Development login binding failed.");
-  assert(typeof loginCode === "string" && loginCode.length > 20, "Runtime did not issue an in-memory login code.");
-  await page.getByLabel("终端一次性 code").fill(loginCode);
-  loginCode = undefined;
-  const session = page.waitForResponse((response) => response.url().endsWith("/auth/dev/session"));
-  await page.getByRole("button", { name: "完成开发登录" }).click();
-  assert((await session).status() === 201, "Development session was not created.");
   await page.locator(".ai-session").waitFor();
+  assert(await page.getByText("绑定本地一次性 code").count() === 0, "Legacy code binding UI is still present.");
 }
 
 async function installAiRoute(page, evidence) {
@@ -258,8 +250,7 @@ async function main() {
       listenHost: host,
       publicOrigin: origin,
       mediaRoot,
-      uploadTempRoot: resolve(workspaceRoot, "tmp/stage-7r-f-upload"),
-      writeDevLoginCode(code) { loginCode = code; }
+      uploadTempRoot: resolve(workspaceRoot, "tmp/stage-7r-f-upload")
     });
     resources.runtime = "acquired";
 

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
 import { TenantMediaStore, type MediaLimits } from "@codemotion/exporter";
+import { loadServerEnvironment } from "@codemotion/ai-planner/server-environment";
 import {
   AuthSessionService,
   developmentAuthOptionsFromEnvironment,
@@ -27,7 +28,6 @@ export interface ServerRuntimeOptions {
   readonly env?: ProductionAuthEnvironment;
   readonly mediaLimits?: Partial<MediaLimits>;
   readonly fetch?: typeof fetch;
-  readonly writeDevLoginCode?: (code: string) => void;
   readonly authAudit?: (event: AuthAuditEvent) => void;
   readonly mediaAudit?: (event: Readonly<{ event: "media-index-record-rejected" | "media-index-load-failed" }>) => void;
   readonly createAiPlans?: (assets: TenantMediaStore) => AiPlanService;
@@ -46,7 +46,7 @@ export interface ServerRuntime {
 }
 
 export async function createServerRuntime(options: ServerRuntimeOptions): Promise<ServerRuntime> {
-  const env = options.env ?? process.env;
+  const env = options.env ?? loadServerEnvironment().env;
   const mediaRoot = resolve(options.mediaRoot);
   const uploadTempRoot = resolve(options.uploadTempRoot);
   const exportRoot = resolve(options.exportRoot ?? join(mediaRoot, "..", "exports"));
@@ -54,11 +54,7 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
     ? developmentAuthOptionsFromEnvironment(env, {
       configureServer: options.configureServer === true,
       listenHost: options.listenHost ?? "",
-      publicOrigin: options.publicOrigin ?? "",
-      writeLoginCode: options.writeDevLoginCode ?? ((code) => {
-        if (!process.stderr.isTTY) throw new Error("Dev login code requires an interactive controlling terminal.");
-        process.stderr.write(`CodeMotion local login code: ${code}\n`);
-      })
+      publicOrigin: options.publicOrigin ?? ""
     }, { ...(options.authAudit === undefined ? {} : { audit: options.authAudit }) })
     : productionAuthOptionsFromEnvironment(env, {
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
@@ -86,8 +82,20 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
   let previews: EditorPreviewService | undefined;
   let exports: ExportTaskService | undefined;
   try {
-    mediaAssets = new MediaAssetService({ store: mediaStore, auth, uploadTempRoot, cursorSecret });
-    aiPlans = options.createAiPlans?.(mediaStore) ?? createProductionAiPlanService(mediaStore);
+    mediaAssets = new MediaAssetService({
+      store: mediaStore,
+      auth,
+      uploadTempRoot,
+      cursorSecret,
+      isAssetInUse: (owner, assetId) => aiPlans?.usesAsset(owner, assetId) === true
+        || previews?.usesAsset(owner, assetId) === true
+        || exports?.usesAsset(owner, assetId) === true
+    });
+    aiPlans = options.createAiPlans?.(mediaStore) ?? createProductionAiPlanService(
+      mediaStore,
+      options.mode === "development" && options.configureServer === true,
+      env
+    );
     previews = new EditorPreviewService(mediaStore);
     exports = new ExportTaskService({ resolver: mediaStore, outputRoot: exportRoot });
     await exports.initialize();

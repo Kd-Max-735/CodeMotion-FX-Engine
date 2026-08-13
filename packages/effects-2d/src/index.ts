@@ -12,5 +12,6 @@ export type {
   Formal2dRasterRequestV1
 } from "./project-raster-sources.js";
 export * from "./runtime.js";
+export * from "./sample-cards.js";
 export * from "./shader.js";
 export * from "./types.js";

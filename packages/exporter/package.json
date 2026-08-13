@@ -14,7 +14,7 @@
   "files": ["dist/**/*.js", "dist/**/*.js.map", "dist/**/*.d.ts", "dist/**/*.d.ts.map"],
   "dependencies": {
     "@codemotion/core": "0.3.0",
-    "@codemotion/effects-2d": "1.2.0",
+    "@codemotion/effects-2d": "1.3.0",
     "@codemotion/effects-3d": "1.0.0",
     "@codemotion/renderer-api": "0.3.0",
     "@codemotion/renderer-webgl": "0.1.0",

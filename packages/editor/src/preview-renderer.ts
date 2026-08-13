@@ -24,16 +24,67 @@ export interface PreviewStats {
   error?: string;
 }
 
+interface QueuedPreviewRender {
+  editableProject: BrowserProjectEnvelopeV1;
+  time: number;
+  target: HTMLCanvasElement;
+  waiters: Array<{ resolve: (stats: PreviewStats) => void; reject: (cause: unknown) => void }>;
+}
+
 export class ProjectPreviewRenderer {
   private controller: AbortController | undefined;
+  private active = false;
+  private pending: QueuedPreviewRender | undefined;
+  private generation = 0;
 
   dispose(): void {
+    this.generation += 1;
     this.controller?.abort();
+    this.controller = undefined;
+    const aborted = new DOMException("Preview renderer disposed.", "AbortError");
+    for (const waiter of this.pending?.waiters ?? []) waiter.reject(aborted);
+    this.pending = undefined;
+  }
+
+  render(editableProject: BrowserProjectEnvelopeV1, time: number, target: HTMLCanvasElement): Promise<PreviewStats> {
+    return new Promise<PreviewStats>((resolve, reject) => {
+      if (this.active) {
+        if (this.pending) {
+          this.pending.editableProject = editableProject;
+          this.pending.time = time;
+          this.pending.target = target;
+          this.pending.waiters.push({ resolve, reject });
+        } else {
+          this.pending = { editableProject, time, target, waiters: [{ resolve, reject }] };
+        }
+        return;
+      }
+      this.active = true;
+      void this.drain({ editableProject, time, target, waiters: [{ resolve, reject }] }, this.generation);
+    });
+  }
+
+  private async drain(initial: QueuedPreviewRender, generation: number): Promise<void> {
+    let current: QueuedPreviewRender | undefined = initial;
+    while (current && generation === this.generation) {
+      try {
+        const stats = await this.perform(current.editableProject, current.time, current.target);
+        for (const waiter of current.waiters) waiter.resolve(stats);
+      } catch (cause) {
+        for (const waiter of current.waiters) waiter.reject(cause);
+      }
+      current = this.pending;
+      this.pending = undefined;
+    }
+    if (current) {
+      const aborted = new DOMException("Preview renderer disposed.", "AbortError");
+      for (const waiter of current.waiters) waiter.reject(aborted);
+    }
+    this.active = false;
     this.controller = undefined;
   }
 
-  async render(editableProject: BrowserProjectEnvelopeV1, time: number, target: HTMLCanvasElement): Promise<PreviewStats> {
-    this.controller?.abort();
+  private async perform(editableProject: BrowserProjectEnvelopeV1, time: number, target: HTMLCanvasElement): Promise<PreviewStats> {
     const controller = new AbortController();
     this.controller = controller;
     const started = performance.now();
@@ -101,6 +152,8 @@ export class ProjectPreviewRenderer {
         height,
         error: cause instanceof Error ? cause.message : String(cause)
       };
+    } finally {
+      if (this.controller === controller) this.controller = undefined;
     }
   }
 }

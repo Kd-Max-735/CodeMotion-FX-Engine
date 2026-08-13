@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { P0_EFFECTS } from "@codemotion/effects-2d";
+import { effectCardForEffectId } from "@codemotion/effects-2d";
 import { verifyStoredMediaAsset, type VerifiedStoredMedia } from "@codemotion/exporter";
 import {
   ARK_V1_MODEL,
@@ -12,8 +12,7 @@ import {
   type AiTaskPrincipal,
   type LocalResourceInput,
   type ModelProvider,
-  type ModelStoryboard,
-  type NormalizedUnderstanding,
+  type ModelIntentDto,
   type PlanningContext,
   type ProviderAuditRecord,
   type ProviderAuditSink,
@@ -23,7 +22,9 @@ import {
   type UnderstandingRequest,
   type UnderstandingResult
 } from "./provider.js";
-import { MODEL_PLANNING_JSON_SCHEMA, STRUCTURE_INSTRUCTION } from "./understanding-schema.js";
+import { buildDeterministicPlanStructure } from "./deterministic-plan.js";
+import { intentTargetKind, resolveIntentCandidates } from "./intent-planning.js";
+import { MODEL_INTENT_JSON_SCHEMA, STRUCTURE_INSTRUCTION } from "./understanding-schema.js";
 import { fingerprintProviderRequestId, sanitizeUserText } from "./security.js";
 
 const DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
@@ -65,6 +66,7 @@ interface ArkProviderOptions {
   readonly userCostCnyPerMinute?: number;
   readonly maxRetries?: number;
   readonly processingPollMs?: number;
+  readonly allowVerifiedSampleCards?: boolean;
 }
 
 interface ArkFile {
@@ -391,31 +393,25 @@ function deepFreeze<T>(value: T): T {
   return Object.freeze(value);
 }
 
-function requestPlanningSchema(): typeof MODEL_PLANNING_JSON_SCHEMA {
-  return deepFreeze(structuredClone(MODEL_PLANNING_JSON_SCHEMA));
+function schemaObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Internal planning Schema shape is invalid.");
+  }
+  return value as Record<string, unknown>;
 }
 
-function effectParameterSnapshots(params: Record<string, unknown>): readonly Record<string, unknown>[] {
-  const base: Record<string, unknown> = {};
-  const keyframes = new Map<string, unknown[]>();
-  for (const [name, value] of Object.entries(params)) {
-    if (typeof value !== "object" || value === null || Array.isArray(value) || !("mode" in value)) {
-      base[name] = value;
-      continue;
-    }
-    const animatable = value as Record<string, unknown>;
-    if (animatable.mode === "constant") {
-      base[name] = animatable.value;
-    } else if (animatable.mode === "keyframes" && Array.isArray(animatable.keyframes)) {
-      const values = animatable.keyframes.flatMap((item) =>
-        typeof item === "object" && item !== null && "value" in item ? [(item as Record<string, unknown>).value] : []);
-      if (values.length > 0) {
-        base[name] = values[0];
-        keyframes.set(name, values);
-      }
-    }
-  }
-  return [base, ...[...keyframes].flatMap(([name, values]) => values.map((value) => ({ ...base, [name]: value })))];
+function requestPlanningSchema(
+  effectIds: readonly string[],
+  expectedAddedText: string | null
+): typeof MODEL_INTENT_JSON_SCHEMA {
+  const schema = structuredClone(MODEL_INTENT_JSON_SCHEMA);
+  const properties = schemaObject(schemaObject(schema).properties);
+  schemaObject(properties.effectId).enum = [...effectIds];
+  schemaObject(properties.targetKind).enum = [...new Set(effectIds.map(intentTargetKind))];
+  properties.addedText = expectedAddedText === null
+    ? { const: null }
+    : { anyOf: [{ const: null }, { const: expectedAddedText }] };
+  return deepFreeze(schema);
 }
 
 function usage(body: unknown, hasAudio: boolean): UnderstandingResult["trace"]["usage"] {
@@ -515,18 +511,24 @@ function snapshotPlanning(value: UnderstandingRequest["planning"]): PlanningCont
     const requiredText = brand.requiredText;
     const forbiddenContent = brand.forbiddenContent;
     const logoAssetIds = brand.logoAssetIds;
+    const selectedEffectId = source.selectedEffectId;
     assertStringArray(style, "Planning style", 16, 200);
     assertStringArray(colors, "Planning brand colors", 16, 9, /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/);
     assertStringArray(tone, "Planning brand tone", 16, 200);
     assertStringArray(requiredText, "Planning required text", 16, 500);
     assertStringArray(forbiddenContent, "Planning forbidden content", 16, 500);
     assertStringArray(logoAssetIds, "Planning logo asset IDs", 8, 128);
+    if (selectedEffectId !== undefined
+      && (typeof selectedEffectId !== "string" || effectCardForEffectId(selectedEffectId) === undefined)) {
+      throw new ProviderError("invalid_input", "Planning selectedEffectId is not an eligible sample card.");
+    }
     return deepFreeze({
       width: source.width,
       height: source.height,
       fps: source.fps,
       durationSeconds: source.durationSeconds,
       style: [...style],
+      ...(source.selectedEffectId === undefined ? {} : { selectedEffectId: source.selectedEffectId }),
       brand: {
         colors: [...colors],
         tone: [...tone],
@@ -581,29 +583,54 @@ function assertInput(request: UnderstandingRequest, planning: PlanningContext): 
   }
 }
 
-const MODEL_EFFECT_CATALOG = Object.freeze(P0_EFFECTS.map((effect) => Object.freeze({
-  sourceId: effect.sourceId,
-  effectId: effect.effectId,
-  effectVersion: effect.version,
-  displayName: effect.displayName,
-  description: effect.description,
-  category: effect.category,
-  tags: effect.tags,
-  inputTypes: effect.inputTypes,
-  parameterSchema: effect.parameterSchema,
-  defaultPreset: effect.defaultPreset
-})));
+function modelEffectCatalog(
+  prompt: string,
+  resources: readonly LocalResourceInput[],
+  planning: PlanningContext,
+  allowVerifiedSampleCards: boolean,
+) {
+  const resolved = resolveIntentCandidates(prompt, resources, planning, allowVerifiedSampleCards);
+  return Object.freeze({
+    expectedAddedText: resolved.expectedAddedText,
+    catalog: Object.freeze(resolved.definitions.map((effect) => Object.freeze({
+      effectId: effect.effectId,
+      displayName: effect.displayName,
+      description: effect.description,
+      category: effect.category,
+      aliases: effectCardForEffectId(effect.effectId)?.ai.aliases ?? [],
+      targetKind: intentTargetKind(effect.effectId)
+    })))
+  });
+}
 
-function planningInstruction(planning: PlanningContext): string {
+function planningInstruction(
+  planning: PlanningContext,
+  catalog: ReturnType<typeof modelEffectCatalog>["catalog"],
+  resources: readonly LocalResourceInput[]
+): string {
   return [
-    `Planning constraints: ${JSON.stringify(planning)}`,
-    "Copy width, height, fps, and durationSeconds into Storyboard width, height, fps, and duration without inference.",
-    "Copy style and every brand array value exactly. Do not translate, rewrite, sort, append, or remove array items.",
-    "Copy supplied localAssetId values exactly and never invent an asset ID.",
-    "Every requiredText value must occur verbatim in visible text-layer text; forbiddenContent must not occur.",
-    `Authoritative ordered 40-effect catalog: ${JSON.stringify(MODEL_EFFECT_CATALOG)}`,
-    "Choose effects only from that catalog and copy sourceId, effectId, effectVersion, and valid params exactly."
+    `Server-authoritative target context: ${JSON.stringify({
+      selectedEffectId: planning.selectedEffectId ?? null,
+      visualCount: resources.filter((resource) => resource.modality === "image" || resource.modality === "video").length,
+      hasAudio: resources.some((resource) => resource.modality === "audio")
+    })}`,
+    `Authoritative compatible effect candidates: ${JSON.stringify(catalog)}`,
+    "When the candidate list has one item, return that exact effectId.",
+    "When multiple candidates remain, choose the single best semantic match for the user request.",
+    "Do not infer editable effect parameters; the server applies the authoritative P0 card preset."
   ].join("\n");
+}
+
+function repairInstruction(reason: ProviderFailureReason | undefined): string {
+  const corrections: Partial<Record<ProviderFailureReason, string>> = {
+    NO_OUTPUT: "Return one non-empty JSON object.",
+    INVALID_JSON: "Return syntactically valid JSON without Markdown or prose.",
+    SCHEMA_INVALID: "Return exactly the required DTO fields and no extra fields.",
+    EFFECT_ID_INVALID: "Use one exact effectId from the supplied Schema enum.",
+    TEXT_REQUIRED: "Preserve the complete explicitly requested addedText and matching targetKind.",
+    ASSET_COUNT_INCOMPATIBLE: "Choose only an effect compatible with the supplied visual count."
+  };
+  return corrections[reason ?? "SCHEMA_INVALID"] ?? "Return a DTO that exactly matches the supplied Schema.";
 }
 
 function emit(callback: UnderstandingRequest["onProgress"], event: ProviderProgress): void {
@@ -667,6 +694,7 @@ export class VolcengineArkProvider implements ModelProvider {
   private readonly audit: ProviderAuditSink | undefined;
   private readonly maxRetries: number;
   private readonly processingPollMs: number;
+  private readonly allowVerifiedSampleCards: boolean;
 
   constructor(private readonly options: ArkProviderOptions) {
     if (options.apiKey.trim().length < 10) throw new ProviderError("authentication", "A server-side Ark API key is required.");
@@ -689,12 +717,26 @@ export class VolcengineArkProvider implements ModelProvider {
     this.gate = new RequestGate(limits);
     this.maxRetries = options.maxRetries ?? 2;
     this.processingPollMs = options.processingPollMs ?? 2_000;
+    this.allowVerifiedSampleCards = options.allowVerifiedSampleCards ?? process.env.NODE_ENV !== "production";
   }
 
   async understand(request: UnderstandingRequest): Promise<UnderstandingResult> {
     const planning = snapshotPlanning(request.planning);
     assertInput(request, planning);
-    const schema = requestPlanningSchema();
+    const intentCandidates = modelEffectCatalog(
+      request.prompt,
+      request.resources ?? [],
+      planning,
+      this.allowVerifiedSampleCards,
+    );
+    const effectCatalog = intentCandidates.catalog;
+    if (effectCatalog.length === 0) {
+      throw new ProviderError("unsupported", "No published effect candidate matches this request.");
+    }
+    const schema = requestPlanningSchema(
+      effectCatalog.map((effect) => effect.effectId),
+      intentCandidates.expectedAddedText
+    );
     const linked = combineSignal(request.signal, request.timeoutMs ?? 120_000);
     const scope = auditScope(request.principal);
     const operation = this.gate.run<UnderstandingResult>(request.principal, linked.signal, async () => {
@@ -715,7 +757,7 @@ export class VolcengineArkProvider implements ModelProvider {
         }
         const content: Array<Record<string, unknown>> = [{
           type: "input_text",
-          text: `${STRUCTURE_INSTRUCTION}\n${planningInstruction(planning)}\nUser request: ${sanitizeUserText(request.prompt)}`
+          text: `${STRUCTURE_INSTRUCTION}\n${planningInstruction(planning, effectCatalog, request.resources ?? [])}\nUser request: ${sanitizeUserText(request.prompt)}`
         }];
         for (const resource of prepared) {
           content.push({
@@ -755,18 +797,19 @@ export class VolcengineArkProvider implements ModelProvider {
             ...content,
             {
               type: "input_text",
-              text: `Correction request. Previous safe failure category: ${retryReason ?? "STRUCTURED_OUTPUT_INVALID"}. Regenerate the complete ai-task/v1 JSON contract only. Do not quote or discuss the previous response.`
+              text: `Correction request. Safe failure category: ${retryReason ?? "SCHEMA_INVALID"}. ${repairInstruction(retryReason)} Regenerate only the minimum intent DTO. Do not quote or discuss the previous response.`
             }
           ];
           const response = await this.jsonRequest("responses.create", `${this.baseUrl}/responses`, {
             method: "POST",
             body: JSON.stringify({
               model: ARK_V1_MODEL,
+              max_output_tokens: 500,
               input: [{ role: "user", content: attemptContent }],
               text: {
                 format: {
                   type: "json_schema",
-                  name: "codemotion_ai_task_v1",
+                  name: "codemotion_ai_intent_v1",
                   strict: true,
                   schema
                 }
@@ -797,7 +840,13 @@ export class VolcengineArkProvider implements ModelProvider {
                 { outputCharacters: outputText.length }
               );
             }
-            const planned = this.validatePlanning(parsed, prepared, planning, schema);
+            const intent = this.validateIntent(
+              parsed,
+              schema,
+              new Set(effectCatalog.map((effect) => effect.effectId)),
+              intentCandidates.expectedAddedText
+            );
+            const planned = buildDeterministicPlanStructure(request, planning, intent);
             const combinedUsage = usageRecords.reduce<UnderstandingResult["trace"]["usage"]>((total, item) => ({
               inputTokens: total.inputTokens + item.inputTokens,
               outputTokens: total.outputTokens + item.outputTokens,
@@ -848,8 +897,10 @@ export class VolcengineArkProvider implements ModelProvider {
               attempt,
               safeCounts: cause.safeCounts
             });
-            if (cause.code !== "provider_response" || attempt === GENERATION_ATTEMPTS) {
-              throw new ProviderError(cause.code, cause.message, { cause });
+            const repairable = cause.code === "provider_response"
+              || cause.code === "security" && cause.reason === "ASSET_BINDING";
+            if (!repairable || attempt === GENERATION_ATTEMPTS) {
+              throw new ProviderError(cause.code, cause.message, { cause, reason: cause.reason });
             }
             retryReason = cause.reason;
             await providerDelay(GENERATION_RETRY_DELAY_MS, linked.signal);
@@ -1072,6 +1123,7 @@ export class VolcengineArkProvider implements ModelProvider {
           latencyMs,
           requestFingerprint: fingerprint,
           errorCode: code,
+          ...(code === "provider_unavailable" ? { reason: "ARK_UNAVAILABLE" as const } : {}),
           ...(modelId === undefined ? {} : { modelId }),
           ...(localAssetId === undefined ? {} : { localAssetId }),
           ...(generationAttempt === undefined ? {} : { attempt: generationAttempt })
@@ -1079,7 +1131,8 @@ export class VolcengineArkProvider implements ModelProvider {
         if (!isRetryable(response.status) || attempt === requestRetries) {
           throw new ProviderError(code, safeMessage(response.status), {
             retryable: isRetryable(response.status),
-            status: response.status
+            status: response.status,
+            ...(code === "provider_unavailable" ? { reason: "ARK_UNAVAILABLE" as const } : {})
           });
         }
       } catch (cause) {
@@ -1094,21 +1147,31 @@ export class VolcengineArkProvider implements ModelProvider {
           if (cause instanceof ProviderError) throw cause;
           throw new ProviderError("provider_unavailable", "Provider network request failed.", {
             retryable: true,
-            cause
+            cause,
+            reason: "ARK_UNAVAILABLE"
           });
         }
       }
       await delay(250 * (2 ** attempt), undefined, { signal });
     }
-    throw new ProviderError("provider_unavailable", "Provider network request failed.", { cause: lastCause });
+    throw new ProviderError("provider_unavailable", "Provider network request failed.", {
+      cause: lastCause,
+      reason: "ARK_UNAVAILABLE"
+    });
   }
 
-  private validatePlanning(
+  private validateIntent(
     value: unknown,
-    resources: readonly PreparedResource[],
-    planning: PlanningContext,
-    schema: typeof MODEL_PLANNING_JSON_SCHEMA
-  ): { understanding: NormalizedUnderstanding; storyboard: ModelStoryboard } {
+    schema: typeof MODEL_INTENT_JSON_SCHEMA,
+    allowedEffectIds: ReadonlySet<string>,
+    expectedAddedText: string | null
+  ): ModelIntentDto {
+    const rawEffectId = typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>).effectId
+      : undefined;
+    if (typeof rawEffectId === "string" && !allowedEffectIds.has(rawEffectId)) {
+      throw new PlanningResponseError("EFFECT_ID_INVALID", "Model selected an effect outside the dynamic enum.");
+    }
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     const validate = ajv.compile(schema);
     if (!validate(value)) {
@@ -1118,143 +1181,24 @@ export class VolcengineArkProvider implements ModelProvider {
         { validationErrors: validate.errors?.length ?? 0 }
       );
     }
-    const modelEnvelope = structuredClone(value) as {
-      contract: "ai-task/v1";
-      understanding: NormalizedUnderstanding;
-      storyboard: ModelStoryboard;
-    };
-    const envelope = {
-      contract: modelEnvelope.contract,
-      understanding: modelEnvelope.understanding,
-      storyboard: {
-        ...modelEnvelope.storyboard,
-        duration: planning.durationSeconds,
-        width: planning.width,
-        height: planning.height,
-        fps: planning.fps,
-        style: [...planning.style],
-        brand: {
-          colors: [...planning.brand.colors],
-          tone: [...planning.brand.tone],
-          requiredText: [...planning.brand.requiredText],
-          forbiddenContent: [...planning.brand.forbiddenContent],
-          logoAssetIds: [...planning.brand.logoAssetIds]
-        }
-      }
-    } satisfies { contract: "ai-task/v1"; understanding: NormalizedUnderstanding; storyboard: ModelStoryboard };
-    if (!validate(envelope)) {
+    const intent = structuredClone(value) as ModelIntentDto;
+    if (!allowedEffectIds.has(intent.effectId)) {
+      throw new PlanningResponseError("EFFECT_ID_INVALID", "Model selected an effect outside the dynamic enum.");
+    }
+    const expectedKind = intentTargetKind(intent.effectId);
+    if (intent.targetKind !== expectedKind) {
       throw new PlanningResponseError(
-        "PLANNING_CONSTRAINT",
-        "Server-authoritative planning projection failed schema validation.",
-        { validationErrors: validate.errors?.length ?? 0 }
+        expectedKind === "added-text" ? "TEXT_REQUIRED" : "SCHEMA_INVALID",
+        "Model returned a target kind incompatible with the selected effect."
       );
     }
-    const result = envelope.understanding;
-    const expectedImages = resources.filter((item) => item.input.modality === "image").map((item) => item.input.localAssetId);
-    const expectedAudio = resources.filter((item) => item.input.modality === "audio").map((item) => item.input.localAssetId);
-    const expectedVideo = resources.filter((item) => item.input.modality === "video").map((item) => item.input.localAssetId);
-    this.assertExactAssetIds("image", expectedImages, result.images.map((item) => item.localAssetId));
-    this.assertExactAssetIds("audio", expectedAudio, result.audio.map((item) => item.localAssetId));
-    this.assertExactAssetIds("video", expectedVideo, result.video.map((item) => item.localAssetId));
-    const expectedVisual = new Set([...expectedImages, ...expectedVideo]);
-    const storyboardAssetIds = envelope.storyboard.layers
-      .filter((layer) => layer.type === "image" || layer.type === "video")
-      .map((layer) => layer.localAssetId);
-    if (storyboardAssetIds.some((id) => id === undefined)
-      || new Set(storyboardAssetIds).size !== storyboardAssetIds.length
-      || storyboardAssetIds.some((id) => !expectedVisual.has(id!))
-      || [...expectedVisual].some((id) => !storyboardAssetIds.includes(id))) {
-      throw new PlanningResponseError(
-        "ASSET_BINDING",
-        "Storyboard asset bindings did not exactly match verified visual inputs.",
-        {},
-        "security"
-      );
+    if (expectedKind === "added-text" && (expectedAddedText === null || intent.addedText !== expectedAddedText)) {
+      throw new PlanningResponseError("TEXT_REQUIRED", "Model omitted or changed the explicit new text.");
     }
-    for (const item of result.video) {
-      for (const shot of item.shots) {
-        if (shot.range.end < shot.range.start) {
-          throw new PlanningResponseError("SHOT_RANGE", "Video time range is reversed.");
-        }
-      }
+    if (expectedKind === "visual" && intent.addedText !== null) {
+      throw new PlanningResponseError("SCHEMA_INVALID", "Model returned unrequested added text.");
     }
-    const layersById = new Map(envelope.storyboard.layers.map((layer) => [layer.id, layer]));
-    if (layersById.size !== envelope.storyboard.layers.length) {
-      throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard layer IDs were not unique.");
-    }
-    const visibleText = envelope.storyboard.layers
-      .filter((layer): layer is Extract<ModelStoryboard["layers"][number], { type: "text" }> => layer.type === "text")
-      .map((layer) => layer.text);
-    if (planning.brand.requiredText.some((required) => !visibleText.some((text) => text.includes(required)))) {
-      throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard omitted required visible brand text.");
-    }
-    if (planning.brand.forbiddenContent.some((forbidden) => forbidden.length > 0
-      && visibleText.some((text) => text.toLowerCase().includes(forbidden.toLowerCase())))) {
-      throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard contained forbidden brand text.");
-    }
-    if (planning.brand.logoAssetIds.some((id) => !expectedImages.includes(id))) {
-      throw new PlanningResponseError(
-        "ASSET_BINDING",
-        "Planning logo IDs did not match verified image inputs.",
-        {},
-        "security"
-      );
-    }
-    const shotIds = new Set<string>();
-    for (const shot of envelope.storyboard.shots) {
-      if (shotIds.has(shot.id)) {
-        throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard shot IDs were not unique.");
-      }
-      shotIds.add(shot.id);
-      if (shot.end <= shot.start || shot.end > envelope.storyboard.duration) {
-        throw new PlanningResponseError("SHOT_RANGE", "Storyboard shot range was outside the authoritative duration.");
-      }
-      const shotLayerIds = new Set(shot.layerIds);
-      if (shotLayerIds.size !== shot.layerIds.length || shot.layerIds.some((id) => !layersById.has(id))) {
-        throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard shot referenced duplicate or unknown layers.");
-      }
-      for (const selection of shot.effects) {
-        const definition = P0_EFFECTS.find((effect) => effect.effectId === selection.effectId);
-        if (definition === undefined || definition.sourceId !== selection.sourceId
-          || definition.version !== selection.effectVersion) {
-          throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard effect did not match the authoritative catalog.");
-        }
-        if (!shotLayerIds.has(selection.targetLayerId)) {
-          throw new PlanningResponseError("PLANNING_CONSTRAINT", "Storyboard effect target was outside its shot.");
-        }
-        const validateParams = new Ajv2020({ allErrors: true, strict: false }).compile(definition.parameterSchema);
-        const mergedParams = { ...structuredClone(definition.defaultPreset), ...selection.params };
-        const snapshots = effectParameterSnapshots(mergedParams);
-        if (snapshots.some((params) => !validateParams(params))) {
-          throw new PlanningResponseError(
-            "PLANNING_CONSTRAINT",
-            "Storyboard effect params failed the authoritative catalog schema.",
-            { validationErrors: validateParams.errors?.length ?? 0 }
-          );
-        }
-      }
-    }
-    return { understanding: result, storyboard: envelope.storyboard };
-  }
-
-  private assertExactAssetIds(modality: string, expected: readonly string[], actual: readonly string[]): void {
-    if (actual.length !== expected.length || new Set(actual).size !== actual.length) {
-      throw new PlanningResponseError(
-        "ASSET_BINDING",
-        `Model output ${modality} IDs were duplicate, missing, or extra.`,
-        {},
-        "security"
-      );
-    }
-    const expectedSet = new Set(expected);
-    if (actual.some((id) => !expectedSet.has(id)) || expected.some((id) => !actual.includes(id))) {
-      throw new PlanningResponseError(
-        "ASSET_BINDING",
-        `Model output ${modality} IDs did not match verified inputs.`,
-        {},
-        "security"
-      );
-    }
+    return intent;
   }
 
   private inputHash(request: UnderstandingRequest, resources: readonly PreparedResource[]): string {

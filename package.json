@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false && tsc -p tsconfig.tests.json --pretty false",
-    "test": "npm run build && vitest run",
+    "test": "npm run build && vitest run --maxWorkers=1 --fileParallelism=false",
     "dev": "npm run dev -w @codemotion/editor",
     "preview": "npm run preview -w @codemotion/editor"
   },

@@ -6,7 +6,7 @@ import {
   P0_BROWSER_PROJECT_AUTHORITY_V1,
   resolveFormal2dRasterSourceV1
 } from "@codemotion/effects-2d";
-import { createProjectFrameProducer } from "@codemotion/exporter";
+import { createProjectFrameProducer, MediaPreviewDecodeError, type OwnerContext } from "@codemotion/exporter";
 import type { EditorPreviewRequestV1 } from "@codemotion/schema";
 import type { CoverageBuffer, LayerRasterSource } from "@codemotion/renderer-api";
 import type {
@@ -37,6 +37,7 @@ export function sendSafeProjectError(response: ServerResponse, status: number, c
     MEDIA_VALIDATION_FAILED: "Media validation failed.",
     ASSET_CHANGED_DURING_MATERIALIZATION: "The project asset changed during validation.",
     SERVICE_CLOSING: "The service is closing.",
+    MEDIA_PREVIEW_DECODE_FAILED: "The project media could not be decoded for preview.",
     PREVIEW_RENDER_FAILED: "Preview rendering failed."
   });
   response.statusCode = status;
@@ -72,6 +73,7 @@ async function jsonBody(request: IncomingMessage, signal: AbortSignal): Promise<
 
 export class EditorPreviewService {
   private readonly active = new Set<AbortController>();
+  private readonly currentProjectAssets = new Map<string, ReadonlySet<string>>();
   private closing = false;
 
   private readonly resolver: OwnerMediaResolverV1;
@@ -86,6 +88,10 @@ export class EditorPreviewService {
     if (!Object.isFrozen(P0_BROWSER_PROJECT_AUTHORITY_V1)) {
       throw new Error("Browser project authority is not configured.");
     }
+  }
+
+  usesAsset(owner: OwnerContext, assetId: string): boolean {
+    return this.currentProjectAssets.get(JSON.stringify([owner.tenantId, owner.userId]))?.has(assetId) === true;
   }
 
   async render(
@@ -111,6 +117,10 @@ export class EditorPreviewService {
     const request: EditorPreviewRequestV1 = validated.value;
     const materialized = await materializeBrowserProjectV1(principal, request.editableProject, this.resolver, signal);
     signal?.throwIfAborted();
+    this.currentProjectAssets.set(
+      JSON.stringify([principal.tenantId, principal.userId]),
+      new Set(materialized.project.assets.map((asset) => asset.id))
+    );
     const project = structuredClone(materialized.project);
     const { width, height, quality } = request.frame;
     const time = Math.min(
@@ -159,6 +169,7 @@ export class EditorPreviewService {
 
   async close(): Promise<void> {
     this.closing = true;
+    this.currentProjectAssets.clear();
     for (const controller of this.active) controller.abort(new ProjectServiceError("SERVICE_CLOSING"));
     const deadline = Date.now() + 5_000;
     while (this.active.size > 0 && Date.now() < deadline) {
@@ -169,6 +180,12 @@ export class EditorPreviewService {
 
 function errorDetails(error: unknown): { status: number; code: string } {
   if (error instanceof ProjectServiceError) return { status: error.status, code: error.code };
+  if (error instanceof MediaPreviewDecodeError) {
+    return {
+      status: error.reason === "process" ? 500 : 422,
+      code: "MEDIA_PREVIEW_DECODE_FAILED"
+    };
+  }
   if (typeof error === "object" && error !== null && "status" in error && "code" in error) {
     const candidate = error as { status: unknown; code: unknown };
     if (typeof candidate.status === "number" && typeof candidate.code === "string") {

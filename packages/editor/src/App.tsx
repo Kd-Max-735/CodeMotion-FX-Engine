@@ -36,12 +36,15 @@ import {
   Unlock,
   Upload,
   Users,
+  Volume2,
+  VolumeX,
   X,
   Zap
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { evaluateAnimatable } from "@codemotion/timeline";
-import type { JsonValue, LayerDefinition, MotionProject, Vector3 } from "@codemotion/core";
+import { P0_EFFECT_CARDS, effectCardSupportsLayer, type EffectCard } from "@codemotion/effects-2d";
+import type { AudioTrackDefinition, JsonValue, LayerDefinition, MotionProject, Vector3 } from "@codemotion/core";
 import type { ApplicationScope } from "@codemotion/schema";
 import { EFFECT_DRAG_MIME, isLabPipelineEffect } from "./lab-effect.js";
 import {
@@ -51,14 +54,50 @@ import {
   projectResourceIds,
   type EffectParameterField
 } from "./effect-catalog.js";
-import { canvasLayerRect, findLayer, layerPropertySections, locateProjectError, mainLayers, pipelineEffect, topLayerInCanvasRect, type CanvasLayerRect, type PropertyFieldSchema } from "./model.js";
+import { canvasLayerBaseSize, canvasLayerPositionForCenter, canvasLayerRect, findLayer, layerPropertySections, locateProjectError, mainLayers, pipelineEffect, topLayerInCanvasRect, type CanvasLayerRect, type PropertyFieldSchema } from "./model.js";
 import { CorePreviewRenderer, ProjectPreviewRenderer, type PreviewStats } from "./preview-renderer.js";
 import { RenderCenter } from "./RenderCenter.js";
 import { AiPlanner } from "./AiPlanner.js";
 import { EditorStore } from "./store.js";
 import { sessionApi } from "./media-asset-client.js";
+import { EffectCardPreview } from "./EffectCardPreview.js";
 
 interface AppProps { store: EditorStore; scopes?: readonly ApplicationScope[] | undefined }
+
+const EFFECT_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  M01: "淡入", M02: "滑入", M03: "缩放弹入", M04: "旋转进入", M05: "弹跳", M06: "弹性",
+  M07: "浮动", M08: "抖动", T01: "打字机", T02: "字符级联", T03: "动态排版",
+  T04: "路径文字显现", T05: "文字变形", T06: "乱码解码", T07: "词语爆炸", T08: "三维文字挤出",
+  V01: "路径裁切", V02: "路径变形", V03: "图形重复", V04: "放射爆发", D01: "手写",
+  D02: "笔刷显现", D03: "墨迹扩散", D04: "粉笔描边", L01: "霓虹发光", L02: "扫描光束",
+  L03: "镜头光晕", L04: "能量脉冲", P01: "高斯模糊", P02: "方向模糊", P03: "径向模糊",
+  P04: "运动模糊", C01: "线性擦除", C02: "径向擦除", C03: "液态擦除", C04: "像素溶解",
+  H01: "遮罩显现", H02: "轨道遮罩", H03: "混合", H04: "置换贴图"
+});
+
+const CATEGORY_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  motion: "运动", text: "文字", vector: "矢量", draw: "绘制",
+  light: "光效", post: "后期", transition: "转场", composite: "合成"
+});
+
+const LAYER_TYPE_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  text: "文字", shape: "图形", image: "图片", video: "视频", svg: "矢量图",
+  composition: "合成", audio: "音频", camera: "相机", light: "灯光", null: "空对象"
+});
+
+function optionLabel(value: JsonValue): string {
+  const labels: Readonly<Record<string, string>> = {
+    left: "左", right: "右", up: "上", down: "下", horizontal: "水平", vertical: "垂直",
+    linear: "线性", easeIn: "缓入", easeOut: "缓出", easeInOut: "缓入缓出",
+    clamp: "边缘延展", mirror: "镜像", transparent: "透明", cover: "覆盖", contain: "包含",
+    fill: "拉伸", none: "无", normal: "正常"
+  };
+  return typeof value === "string" ? labels[value] ?? value : String(value);
+}
+
+function backendLabel(backend: PreviewStats["backend"]): string {
+  return backend === "Unavailable" ? "不可用" : backend === "G5 Shared" ? "共享渲染" : backend;
+}
 
 const IconButton = ({ label, disabled, onClick, children, active = false, pressed }: {
   label: string;
@@ -68,7 +107,7 @@ const IconButton = ({ label, disabled, onClick, children, active = false, presse
   active?: boolean;
   pressed?: boolean;
 }) => (
-  <button className={`icon-button${active ? " active" : ""}`} aria-label={label} aria-pressed={pressed} title={label} disabled={disabled} onClick={onClick}>
+  <button className={`icon-button${active ? " active" : ""}`} aria-label={label} aria-pressed={pressed} title={disabled ? `${label}：当前状态不可用` : label} disabled={disabled} onClick={onClick}>
     {children}
   </button>
 );
@@ -82,7 +121,7 @@ export function App({ store }: AppProps) {
   const [scopes, setScopes] = useState<readonly ApplicationScope[]>([]);
   useEffect(() => {
     const controller = new AbortController();
-    void sessionApi.read(controller.signal).then((session) => {
+    void sessionApi.readWithDevelopmentFallback(controller.signal).then((session) => {
       if (!controller.signal.aborted) setScopes(session.principal.scopes);
     }).catch((error) => {
       if (!controller.signal.aborted && (!(error instanceof DOMException) || error.name !== "AbortError")) setScopes([]);
@@ -128,9 +167,9 @@ function Workbench({ store }: AppProps) {
       <header className="workbench-header">
         <Brand />
         <nav className="workbench-nav" aria-label="工作台导航">
-          <button className="nav-current">项目</button><button>素材库</button><button>团队空间</button>
+          <button className="nav-current" onClick={() => store.setView("workbench")}>项目</button><button onClick={() => store.setView("ai-planner")}>素材库</button>
         </nav>
-        <button className="avatar-button" title="本地工作区">KD</button>
+        <button className="avatar-button" title="打开 AI 创作" onClick={() => store.setView("ai-planner")}>KD</button>
       </header>
       {snapshot.recoverable && (
         <section className="recovery-bar" role="status">
@@ -142,7 +181,7 @@ function Workbench({ store }: AppProps) {
       {snapshot.error && <section className="error-strip" role="alert">{snapshot.error.message}</section>}
       <div className="workbench-content">
         <section className="new-project-band">
-          <div className="section-heading"><div><span className="eyebrow">PROJECT WORKSPACE</span><h1>开始创作</h1></div><button className="secondary-command" onClick={() => fileInput.current?.click()}><Upload size={16} />导入工程</button></div>
+          <div className="section-heading"><div><span className="eyebrow">项目工作区</span><h1>开始创作</h1></div><button className="secondary-command" onClick={() => fileInput.current?.click()}><Upload size={16} />导入工程</button></div>
           <input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={importFile} />
           <div className="creator-grid">
             <div className="project-fields">
@@ -161,7 +200,7 @@ function Workbench({ store }: AppProps) {
           <div className="ai-draft-bar"><Sparkles size={17} /><span>文本、图片、音频与视频规划</span><button onClick={() => store.setView("ai-planner")}>打开 AI 规划</button></div>
         </section>
         <section className="workspace-section">
-          <div className="section-heading"><div><span className="eyebrow">RECENT</span><h2>最近项目</h2></div></div>
+          <div className="section-heading"><div><span className="eyebrow">最近项目</span><h2>最近项目</h2></div></div>
           <div className="recent-grid">
             <button className="project-tile featured" onClick={() => store.setView("editor")}>
               <span className="project-thumb"><span>CM</span><i /></span><span className="tile-meta"><b>{snapshot.document.project.name}</b><small>{snapshot.document.project.width} × {snapshot.document.project.height} · {snapshot.document.project.fps} FPS</small></span>
@@ -171,8 +210,8 @@ function Workbench({ store }: AppProps) {
           </div>
         </section>
         <div className="workbench-lower">
-          <section className="workspace-section templates"><div className="section-heading"><div><span className="eyebrow">TEMPLATES</span><h2>模板市场</h2></div></div><div className="template-row"><button onClick={() => store.newProject("数据发布", 1920, 1080, 30)}><Activity /><span><b>数据发布</b><small>16:9 · 8 秒</small></span></button><button onClick={() => store.newProject("竖屏标题", 1080, 1920, 30)}><Sparkles /><span><b>竖屏标题</b><small>9:16 · 8 秒</small></span></button><button onClick={() => store.setView("lab")}><FlaskConical /><span><b>特效实验室</b><small>WebGL 管线</small></span></button></div></section>
-          <aside className="render-queue"><div className="section-heading"><div><span className="eyebrow">RENDER QUEUE</span><h2>渲染任务</h2></div></div><button className="queue-empty" onClick={() => store.setView("render-center")}><ShieldCheck size={21} /><span><b>打开渲染中心</b><small>本地真实 exporter / FFmpeg</small></span></button></aside>
+          <section className="workspace-section templates"><div className="section-heading"><div><span className="eyebrow">模板</span><h2>模板市场</h2></div></div><div className="template-row"><button onClick={() => store.newProject("数据发布", 1920, 1080, 30)}><Activity /><span><b>数据发布</b><small>16:9 · 8 秒</small></span></button><button onClick={() => store.newProject("竖屏标题", 1080, 1920, 30)}><Sparkles /><span><b>竖屏标题</b><small>9:16 · 8 秒</small></span></button><button onClick={() => store.setView("lab")}><FlaskConical /><span><b>特效实验室</b><small>WebGL 管线</small></span></button></div></section>
+          <aside className="render-queue"><div className="section-heading"><div><span className="eyebrow">渲染队列</span><h2>渲染任务</h2></div></div><button className="queue-empty" onClick={() => store.setView("render-center")}><ShieldCheck size={21} /><span><b>打开渲染中心</b><small>本地真实渲染 / FFmpeg</small></span></button></aside>
         </div>
       </div>
     </main>
@@ -185,16 +224,21 @@ function Editor({ store, scopes }: AppProps) {
   useEffect(() => {
     if (!snapshot.playing) return;
     let frame = 0;
-    let previous = performance.now();
+    const startedAt = performance.now();
+    const projectTimeAtStart = store.getSnapshot().currentTime;
     const tick = (now: number) => {
-      const next = snapshot.currentTime + (now - previous) / 1000;
-      previous = now;
-      store.setTime(next >= project.duration ? 0 : next);
+      const next = projectTimeAtStart + (now - startedAt) / 1000;
+      if (next >= project.duration) {
+        store.setTime(project.duration);
+        store.setPlaying(false);
+        return;
+      }
+      store.setTime(next);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [snapshot.playing, project.duration]);
+  }, [snapshot.playing, project.id, project.duration, store]);
 
   const downloadProject = () => {
     const url = URL.createObjectURL(new Blob([store.exportJson()], { type: "application/json" }));
@@ -212,8 +256,8 @@ function Editor({ store, scopes }: AppProps) {
         <div className="project-crumb"><small>项目</small><b>{project.name}</b><ChevronDown size={13} /></div>
         <span className={`save-indicator ${snapshot.saveStatus}`}><i />{snapshot.saveStatus === "saved" ? "已自动保存" : snapshot.saveStatus === "saving" ? "保存中" : snapshot.saveStatus === "error" ? "保存失败" : "有改动"}</span>
         <div className="toolbar-group"><IconButton label="撤销" disabled={!store.canUndo} onClick={() => store.undo()}><Undo2 size={17} /></IconButton><IconButton label="重做" disabled={!store.canRedo} onClick={() => store.redo()}><Redo2 size={17} /></IconButton></div>
-        <div className="transport"><IconButton label={snapshot.playing ? "暂停" : "播放"} active={snapshot.playing} onClick={() => store.setPlaying(!snapshot.playing)}>{snapshot.playing ? <Pause size={17} /> : <Play size={17} />}</IconButton><b>{formatTime(snapshot.currentTime, project.fps)}</b></div>
-        <div className="toolbar-meta"><span>PREVIEW</span><span>{project.width} × {project.height}</span><span>{project.fps} FPS</span></div>
+        <div className="transport"><IconButton label={snapshot.playing ? "暂停" : "播放"} active={snapshot.playing} onClick={() => { if (!snapshot.playing && snapshot.currentTime >= project.duration) store.setTime(0); store.setPlaying(!snapshot.playing); }}>{snapshot.playing ? <Pause size={17} /> : <Play size={17} />}</IconButton><b>{formatTime(snapshot.currentTime, project.fps)}</b></div>
+        <div className="toolbar-meta"><span>预览</span><span>{project.width} × {project.height}</span><span>{project.fps} FPS</span></div>
         <div className="toolbar-group"><IconButton label="AI 动画规划" onClick={() => store.setView("ai-planner")}><Sparkles size={17} /></IconButton><IconButton label="特效实验室" onClick={() => store.setView("lab")}><FlaskConical size={17} /></IconButton><button className="secondary-command render-button" onClick={() => store.setView("render-center")}><CirclePlay size={16} />渲染</button><button className="export-button" onClick={downloadProject}><Download size={16} />工程</button></div>
       </header>
       {snapshot.error && <div className="error-strip" role="alert"><Zap size={16} /><button onClick={() => snapshot.error?.layerId && store.selectLayer(snapshot.error.layerId)}><b>{snapshot.error.message}</b><span>{[snapshot.error.layerId, snapshot.error.effectId, snapshot.error.parameter].filter(Boolean).join(" / ") || snapshot.error.path}</span></button><IconButton label="关闭错误" onClick={() => store.clearError()}><X size={15} /></IconButton></div>}
@@ -237,6 +281,19 @@ function LayerPanel({ store }: AppProps) {
     `${effect.sourceId} ${effect.displayName} ${effect.category} ${effect.tags.join(" ")}`
       .toLowerCase().includes(search.toLowerCase())
   );
+  const selectedLayer = findLayer(snapshot.document.project, selectedLayerId);
+  const canAddCard = (card: EffectCard): boolean => {
+    if (!selectedLayer || !effectCardSupportsLayer(card, selectedLayer.type)) return false;
+    if (!card.fixture.secondaryInput) return true;
+    return layers.some((layer) => layer.id !== selectedLayer.id && layer.visible
+      && !["audio", "camera", "light", "null"].includes(layer.type));
+  };
+  const addTitle = (card: EffectCard): string => {
+    if (!selectedLayer) return "请先选择图层";
+    if (!effectCardSupportsLayer(card, selectedLayer.type)) return `需要 ${card.supportedTargets.join(" / ")} 图层`;
+    if (!canAddCard(card)) return "需要另一个可见画面作为双输入";
+    return `添加到 ${selectedLayer.name}`;
+  };
   const dropEffect = (event: DragEvent, layerId: string) => {
     event.preventDefault();
     const effectId = event.dataTransfer.getData(EFFECT_DRAG_MIME);
@@ -251,7 +308,7 @@ function LayerPanel({ store }: AppProps) {
           <div key={layer.id} className={`layer-row${snapshot.document.selectedLayerId === layer.id ? " selected" : ""}`} onClick={() => store.selectLayer(layer.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => dropEffect(event, layer.id)}>
             <span className={`layer-color color-${layer.zIndex % 3}`} />
             <span className="layer-icon">{layer.type === "text" ? "T" : <Box size={14} />}</span>
-            <span className="layer-name"><b>{layer.name}</b><small>{layer.type}</small></span>
+            <span className="layer-name"><b>{layer.name}</b><small>{LAYER_TYPE_LABELS[layer.type] ?? layer.type}</small></span>
             <IconButton label={layer.visible ? "隐藏图层" : "显示图层"} onClick={() => store.toggleLayer(layer.id, "visible")}>{layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}</IconButton>
             <IconButton label={layer.locked ? "解锁图层" : "锁定图层"} onClick={() => store.toggleLayer(layer.id, "locked")}>{layer.locked ? <Lock size={14} /> : <Unlock size={14} />}</IconButton>
             <IconButton label={layer.solo ? "取消独奏" : "独奏图层"} active={layer.solo} onClick={() => store.toggleLayer(layer.id, "solo")}><span className="solo-icon">S</span></IconButton>
@@ -260,6 +317,21 @@ function LayerPanel({ store }: AppProps) {
         ))}</div>
       </> : <>
         <label className="search-box"><Search size={15} /><input placeholder="搜索效果" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+        <section className="acceptance-catalog" aria-labelledby="acceptance-catalog-title">
+          <div className="acceptance-heading"><span><b id="acceptance-catalog-title">P0 视觉验收</b><small>40 个特效 · 同源预览</small></span><strong>40 / 40</strong></div>
+          <div className="sample-card-list">{P0_EFFECT_CARDS.map((card) => <EffectCardPreview
+            key={card.id}
+            card={card}
+            canAdd={canAddCard(card)}
+            addTitle={addTitle(card)}
+            onAdd={() => selectedLayerId && canAddCard(card) && store.addEffect(selectedLayerId, card.effectId)}
+            onDragStart={(event) => {
+              if (!canAddCard(card)) { event.preventDefault(); return; }
+              event.dataTransfer.setData(EFFECT_DRAG_MIME, card.effectId);
+            }}
+          />)}</div>
+        </section>
+        <div className="full-catalog-heading"><span>完整 P0 目录</span><b>{catalog.length} / 40</b></div>
         <div className="effect-catalog">{catalog.map((effect) => <button
           key={effect.effectId}
           className="effect-item"
@@ -268,7 +340,7 @@ function LayerPanel({ store }: AppProps) {
           title={selectedLayerId ? `添加到 ${selectedLayerId}` : "请先选择图层"}
           onClick={() => selectedLayerId && store.addEffect(selectedLayerId, effect.effectId)}
           onDragStart={(event) => event.dataTransfer.setData(EFFECT_DRAG_MIME, effect.effectId)}
-        ><span className="effect-icon"><Zap size={16} /></span><span><b>{effect.displayName}</b><small>{effect.sourceId} · {effect.category}</small></span><span className="status-chip">P0</span></button>)}</div>
+        ><span className="effect-icon"><Zap size={16} /></span><span><b>{EFFECT_LABELS[effect.sourceId] ?? effect.effectId}</b><small>{effect.sourceId} · {CATEGORY_LABELS[effect.category] ?? effect.category}</small></span><span className="status-chip">P0</span></button>)}</div>
         <div className="catalog-note"><span>效果目录</span><b>{P0_EDITOR_EFFECTS.length} / 40</b><small>点击或拖拽添加正式 P0 效果</small></div>
       </>}
     </aside>
@@ -310,6 +382,9 @@ function CanvasViewport({ store, scopes = [] }: AppProps) {
   }, [renderer, project, scopes, snapshot.currentTime, snapshot.revision]);
   useEffect(() => () => renderer.dispose(), [renderer]);
   const selectionRect = selected ? canvasLayerRect(project, selected, snapshot.currentTime) : undefined;
+  const selectionLabel = selected?.type === "text"
+    ? `文字：${[...selected.properties.text].slice(0, 8).join("")}${[...selected.properties.text].length > 8 ? "…" : ""}`
+    : selected ? `${[...selected.name].slice(0, 12).join("")}${[...selected.name].length > 12 ? "…" : ""}` : "";
   const dropEffect = (event: DragEvent) => {
     event.preventDefault();
     const effectId = event.dataTransfer.getData(EFFECT_DRAG_MIME);
@@ -361,22 +436,35 @@ function CanvasViewport({ store, scopes = [] }: AppProps) {
     if (!frame) return;
     const dx = (event.clientX - drag.clientX) / frame.width * project.width;
     const dy = (event.clientY - drag.clientY) / frame.height * project.height;
-    let left = drag.rect.left;
-    let right = drag.rect.left + drag.rect.width;
-    let top = drag.rect.top;
-    let bottom = drag.rect.top + drag.rect.height;
+    const fixedX = drag.corner.includes("w") ? drag.rect.left + drag.rect.width : drag.rect.left;
+    const fixedY = drag.corner.includes("n") ? drag.rect.top + drag.rect.height : drag.rect.top;
     const minWidth = project.width * 0.02;
     const minHeight = project.height * 0.02;
-    if (drag.corner.includes("w")) left = Math.max(0, Math.min(right - minWidth, left + dx));
-    else right = Math.min(project.width, Math.max(left + minWidth, right + dx));
-    if (drag.corner.includes("n")) top = Math.max(0, Math.min(bottom - minHeight, top + dy));
-    else bottom = Math.min(project.height, Math.max(top + minHeight, bottom + dy));
+    const factorX = (drag.rect.width + (drag.corner.includes("w") ? -dx : dx)) / drag.rect.width;
+    const factorY = (drag.rect.height + (drag.corner.includes("n") ? -dy : dy)) / drag.rect.height;
+    const requestedFactor = Math.abs(factorX - 1) >= Math.abs(factorY - 1) ? factorX : factorY;
+    const maxWidth = drag.corner.includes("w") ? fixedX : project.width - fixedX;
+    const maxHeight = drag.corner.includes("n") ? fixedY : project.height - fixedY;
+    const factor = Math.max(
+      Math.max(minWidth / drag.rect.width, minHeight / drag.rect.height),
+      Math.min(requestedFactor, maxWidth / drag.rect.width, maxHeight / drag.rect.height)
+    );
+    const nextWidth = drag.rect.width * factor;
+    const nextHeight = drag.rect.height * factor;
+    const left = drag.corner.includes("w") ? fixedX - nextWidth : fixedX;
+    const top = drag.corner.includes("n") ? fixedY - nextHeight : fixedY;
+    const base = canvasLayerBaseSize(project, selected);
+    const scale = { x: nextWidth / base.width * 100, y: nextHeight / base.height * 100 };
+    const position = canvasLayerPositionForCenter(project, selected, snapshot.currentTime, {
+      x: left + nextWidth / 2,
+      y: top + nextHeight / 2
+    }, scale);
     store.updateLayerGeometry(
       selected.id,
-      (left + right) / 2 - project.width / 2,
-      (top + bottom) / 2 - project.height / 2,
-      (right - left) / (project.width * 0.36) * 100,
-      (bottom - top) / (project.height * 0.36) * 100
+      position.x,
+      position.y,
+      scale.x,
+      scale.y
     );
   };
   const resizeEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -396,12 +484,12 @@ function CanvasViewport({ store, scopes = [] }: AppProps) {
           <canvas ref={canvas} aria-label="WebGL 合成预览" />
           {grid && <div className="canvas-grid" aria-hidden="true" />}
           <div className="safe-area" />
-          {selected && selectionRect && <div className="selection-box" onPointerDown={(event) => event.stopPropagation()} style={{ left: `${selectionRect.left / project.width * 100}%`, top: `${selectionRect.top / project.height * 100}%`, width: `${selectionRect.width / project.width * 100}%`, height: `${selectionRect.height / project.height * 100}%` }}><button aria-label="左上缩放控制柄" className="handle nw" onPointerDown={(event) => resizeDown("nw", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><button aria-label="右上缩放控制柄" className="handle ne" onPointerDown={(event) => resizeDown("ne", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><button aria-label="左下缩放控制柄" className="handle sw" onPointerDown={(event) => resizeDown("sw", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><button aria-label="右下缩放控制柄" className="handle se" onPointerDown={(event) => resizeDown("se", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><label>{selected.name}</label></div>}
+          {selected && selectionRect && <div className={`selection-box${selectionRect.top < project.height * 0.06 ? " label-below" : ""}${selectionRect.left + selectionRect.width > project.width * 0.88 ? " label-right" : ""}`} onPointerDown={(event) => event.stopPropagation()} style={{ left: `${selectionRect.left / project.width * 100}%`, top: `${selectionRect.top / project.height * 100}%`, width: `${selectionRect.width / project.width * 100}%`, height: `${selectionRect.height / project.height * 100}%` }}><button aria-label="左上缩放控制柄" className="handle nw" onPointerDown={(event) => resizeDown("nw", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><button aria-label="右上缩放控制柄" className="handle ne" onPointerDown={(event) => resizeDown("ne", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><button aria-label="左下缩放控制柄" className="handle sw" onPointerDown={(event) => resizeDown("sw", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><button aria-label="右下缩放控制柄" className="handle se" onPointerDown={(event) => resizeDown("se", event)} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /><label title={selected.name}>{selectionLabel}</label></div>}
           {marqueeRect && <div className="marquee-box" style={{ left: `${marqueeRect.left / project.width * 100}%`, top: `${marqueeRect.top / project.height * 100}%`, width: `${marqueeRect.width / project.width * 100}%`, height: `${marqueeRect.height / project.height * 100}%` }} />}
           {stats.error && <div className="canvas-error"><Zap size={20} /><b>预览失败</b><span>{stats.error}</span></div>}
         </div>
       </div>
-      <div className="canvas-footer"><span><Activity size={14} />CPU {stats.cpuMs.toFixed(1)} ms</span><span>{stats.drawCalls} Draw Calls</span><span>{stats.textures} Textures</span><span>安全区 90%</span></div>
+      <div className="canvas-footer"><span><Activity size={14} />CPU {stats.cpuMs.toFixed(1)} ms</span><span>{stats.drawCalls} 次绘制</span><span>{stats.textures} 个纹理</span><span>安全区 90%</span></div>
     </section>
   );
 }
@@ -413,14 +501,14 @@ function PropertyPanel({ store }: AppProps) {
   const selectedEffect = selected.effects.find((effect) => effect.id === snapshot.selectedEffectId);
   return (
     <aside className="right-panel panel-surface">
-      <div className="inspector-head"><div><span className="layer-icon">{selected.type === "text" ? "T" : <Box size={15} />}</span><span><b>{selected.name}</b><small>{selected.id}</small></span></div><IconButton label="属性面板设置"><Settings2 size={15} /></IconButton></div>
+      <div className="inspector-head"><div><span className="layer-icon">{selected.type === "text" ? "T" : <Box size={15} />}</span><span><b>{selected.name}</b><small>{selected.id}</small></span></div><Settings2 size={15} aria-hidden="true" /></div>
       <div className="inspector-scroll">
         {layerPropertySections(selected).map((section) => <details key={section.title} open><summary>{section.title}<ChevronDown size={14} /></summary><div className="schema-fields">{section.fields.map((field) => <PropertyField key={`${field.path}-${field.component ?? ""}`} field={field} store={store} />)}</div></details>)}
         <details open><summary>效果栈 <span className="count">{selected.effects.length}</span><ChevronDown size={14} /></summary><div className="effect-stack">{selected.effects.length === 0 ? <span className="empty-state">暂无效果</span> : selected.effects.map((effect, index) => {
           const definition = P0_EDITOR_EFFECTS.find((entry) => entry.effectId === effect.effectId);
           return <div className={`stack-row${snapshot.selectedEffectId === effect.id ? " selected" : ""}`} key={effect.id} onClick={() => store.selectEffect(effect.id)}>
             <IconButton label={effect.enabled ? "停用效果" : "启用效果"} active={effect.enabled} onClick={() => store.toggleEffect(selected.id, effect.id)}>{effect.enabled ? <Eye size={13} /> : <EyeOff size={13} />}</IconButton>
-            <span><b>{definition?.displayName ?? effect.effectId}</b><small>{definition?.sourceId ?? effect.version} · {effect.id}</small></span>
+            <span><b>{definition ? EFFECT_LABELS[definition.sourceId] ?? definition.effectId : effect.effectId}</b><small>{definition?.sourceId ?? effect.version} · {effect.id}</small></span>
             <IconButton label="效果上移" disabled={index === 0} onClick={() => store.reorderEffect(selected.id, effect.id, -1)}><ArrowUp size={13} /></IconButton>
             <IconButton label="效果下移" disabled={index === selected.effects.length - 1} onClick={() => store.reorderEffect(selected.id, effect.id, 1)}><ArrowDown size={13} /></IconButton>
             <IconButton label="删除效果" onClick={() => store.deleteEffect(selected.id, effect.id)}><Trash2 size={13} /></IconButton>
@@ -438,11 +526,13 @@ function EffectInspector({ layerId, effectId, store }: { layerId: string; effect
   const effect = layer?.effects.find((entry) => entry.id === effectId);
   if (effect === undefined || isLabPipelineEffect(effect)) return null;
   const definition = effectDefinition(effect.effectId);
-  const fields = effectParameterFields(definition);
+  const card = P0_EFFECT_CARDS.find((item) => item.effectId === definition.effectId);
+  const editable = card ? new Set(card.editableParameterNames) : undefined;
+  const fields = effectParameterFields(definition).filter((field) => !editable || editable.has(field.name));
   return <details className="effect-inspector" open>
-    <summary>{definition.displayName}<span className="count">Schema</span><ChevronDown size={14} /></summary>
-    <div className="preset-buttons" aria-label={`${definition.displayName} 预设`}>
-      {definition.presets.map((preset, index) => <button key={preset.presetId} onClick={() => store.applyEffectPreset(layerId, effectId, index)}>{preset.name.replace(`${definition.displayName} `, "")}</button>)}
+    <summary>{EFFECT_LABELS[definition.sourceId] ?? definition.effectId}<span className="count">参数规范</span><ChevronDown size={14} /></summary>
+    <div className="preset-buttons" aria-label={`${EFFECT_LABELS[definition.sourceId] ?? definition.effectId} 预设`}>
+      {definition.presets.map((preset, index) => <button key={preset.presetId} onClick={() => store.applyEffectPreset(layerId, effectId, index)}>预设 {index + 1}</button>)}
     </div>
     <div className="schema-fields">{fields.map((field) => <EffectField key={field.name} layerId={layerId} effectId={effectId} field={field} store={store} />)}</div>
   </details>;
@@ -459,7 +549,7 @@ function EffectField({ layerId, effectId, field, store }: {
   const update = (next: JsonValue): void => store.updateEffectParameter(layerId, effectId, field, next);
   let input;
   if (field.control === "select") {
-    input = <select value={String(value)} onChange={(event) => update(event.target.value)}>{field.options?.map((option) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}</select>;
+    input = <select value={String(value)} onChange={(event) => update(event.target.value)}>{field.options?.map((option) => <option key={String(option)} value={String(option)}>{optionLabel(option)}</option>)}</select>;
   } else if (field.control === "toggle") {
     input = <input type="checkbox" checked={value === true} onChange={(event) => update(event.target.checked)} />;
   } else if (field.control === "color") {
@@ -495,9 +585,17 @@ function Timeline({ store }: AppProps) {
         <div className="timeline-label-head">图层 / 属性</div>
         <div className="ruler"><div className="ticks">{ticks.map((tick) => <span key={tick} style={{ left: `${tick / project.duration * 100}%` }}>{tick}s</span>)}</div><input aria-label="时间轴播放头" type="range" min="0" max={project.duration} step={1 / project.fps} value={snapshot.currentTime} onInput={(event) => store.setTime(Number(event.currentTarget.value))} /><i className="playhead" style={{ left: `${snapshot.currentTime / project.duration * 100}%` }} /></div>
         {layers.map((layer) => <TimelineRow key={layer.id} layer={layer} duration={project.duration} selected={snapshot.document.selectedLayerId === layer.id} onSelect={() => store.selectLayer(layer.id)} />)}
+        {project.audioTracks.map((track) => <AudioTimelineRow key={track.id} track={track} duration={project.duration} store={store} />)}
       </div>
     </section>
   );
+}
+
+function AudioTimelineRow({ track, duration, store }: { track: AudioTrackDefinition; duration: number; store: EditorStore }) {
+  const volume = store.audioTrackVolume(track.id);
+  const sourceAudio = track.id.startsWith("audio_source_");
+  const defaultVolume = sourceAudio ? 1 : 0.35;
+  return <><div className="timeline-audio-label"><button className="icon-button" aria-label={volume > 0 ? `静音${sourceAudio ? "视频原声" : "背景音乐"}` : `取消静音${sourceAudio ? "视频原声" : "背景音乐"}`} title={volume > 0 ? "静音" : "取消静音"} onClick={() => store.setAudioTrackVolume(track.id, volume > 0 ? 0 : defaultVolume)}>{volume > 0 ? <Volume2 size={13} /> : <VolumeX size={13} />}</button><span><b>{sourceAudio ? "视频原声" : "背景音乐"}</b><small>{track.assetId}</small></span><label>位置<input aria-label={`${track.id} 开始时间`} type="number" min="0" max={duration} step="0.1" value={track.startTime} onChange={(event) => store.setAudioTrackStart(track.id, event.target.valueAsNumber)} /></label><label>音量<input aria-label={`${track.id} 音量`} type="range" min="0" max="2" step="0.05" value={volume} onChange={(event) => store.setAudioTrackVolume(track.id, event.target.valueAsNumber)} /></label></div><div className="track audio-track"><span className="clip" style={{ left: `${track.startTime / duration * 100}%`, width: `${(track.endTime - track.startTime) / duration * 100}%` }} /></div></>;
 }
 
 function TimelineRow({ layer, duration, selected, onSelect }: { layer: LayerDefinition; duration: number; selected: boolean; onSelect: () => void }) {
@@ -546,13 +644,13 @@ function EffectLab({ store }: AppProps) {
   };
   return (
     <main className="lab-shell">
-      <header className="lab-header"><button className="brand-button" onClick={() => store.setView("workbench")}><Brand compact /></button><div><span className="eyebrow">EFFECT LAB</span><h1>WebGL 管线校验</h1></div><span className={`backend-status ${stats.backend === "WebGL2" ? "ok" : "fail"}`}><i />{stats.backend}</span><button className="secondary-command" onClick={() => store.setView("editor")}><Layers3 size={16} />返回编辑器</button></header>
+      <header className="lab-header"><button className="brand-button" onClick={() => store.setView("workbench")}><Brand compact /></button><div><span className="eyebrow">特效实验室</span><h1>WebGL 管线校验</h1></div><span className={`backend-status ${stats.backend === "WebGL2" ? "ok" : "fail"}`}><i />{backendLabel(stats.backend)}</span><button className="secondary-command" onClick={() => store.setView("editor")}><Layers3 size={16} />返回编辑器</button></header>
       <div className="lab-grid">
-        <section className="lab-preview"><div className="lab-panel-head"><span><FlaskConical size={15} />效果预览</span><div><button className="chip active">Preview</button><button className="chip">100%</button></div></div><div className="lab-canvas"><canvas ref={canvas} />{stats.error && <span className="canvas-error">{stats.error}</span>}</div><div className="metric-strip"><span><small>CPU TIME</small><b>{stats.cpuMs.toFixed(2)} ms</b></span><span><small>DRAW CALLS</small><b>{stats.drawCalls}</b></span><span><small>TEXTURES</small><b>{stats.textures}</b></span><span><small>VRAM EST.</small><b>{((stats.width * stats.height * 4 * stats.textures) / 1048576).toFixed(1)} MB</b></span></div></section>
-        <aside className="lab-params"><div className="lab-panel-head"><span><Settings2 size={15} />参数</span><span className="status-chip">Schema</span></div><label>强度<input type="range" min="0" max="1" step="0.01" defaultValue="1" /></label><label>预览质量<select defaultValue="preview"><option>draft</option><option>preview</option><option>final</option></select></label><label>当前后端<strong>{stats.backend}</strong></label><button className="primary-command" onClick={runValidation}><Play size={15} />运行校验</button><span className={`test-result ${result}`}>{result}</span></aside>
-        <section className="code-panel"><div className="code-tabs"><button className="active">Shader</button><button>JSON 输入</button><span>GLSL ES 3.00</span></div><textarea aria-label="Shader 编辑器" value={shader} onChange={(event) => setShader(event.target.value)} spellCheck={false} /></section>
+        <section className="lab-preview"><div className="lab-panel-head"><span><FlaskConical size={15} />效果预览</span><div><span className="chip active">预览</span><span className="chip">100%</span></div></div><div className="lab-canvas"><canvas ref={canvas} />{stats.error && <span className="canvas-error">{stats.error}</span>}</div><div className="metric-strip"><span><small>CPU 耗时</small><b>{stats.cpuMs.toFixed(2)} ms</b></span><span><small>绘制次数</small><b>{stats.drawCalls}</b></span><span><small>纹理数量</small><b>{stats.textures}</b></span><span><small>显存估算</small><b>{((stats.width * stats.height * 4 * stats.textures) / 1048576).toFixed(1)} MB</b></span></div></section>
+        <aside className="lab-params"><div className="lab-panel-head"><span><Settings2 size={15} />参数</span><span className="status-chip">参数规范</span></div><label>当前后端<strong>{backendLabel(stats.backend)}</strong></label><button className="primary-command" onClick={runValidation}><Play size={15} />运行校验</button><span className={`test-result ${result}`}>{result === "PASS" ? "通过" : result === "BLOCKED" ? "受阻" : result === "JSON ERROR" ? "JSON 错误" : result}</span></aside>
+        <section className="code-panel"><div className="code-tabs"><span className="active">着色器</span><span>GLSL ES 3.00</span></div><textarea aria-label="着色器编辑器" value={shader} onChange={(event) => setShader(event.target.value)} spellCheck={false} /></section>
         <section className="json-panel"><div className="lab-panel-head"><span>参数 JSON</span><button className="text-button" onClick={() => setJson(JSON.stringify(JSON.parse(json), null, 2))}>格式化</button></div><textarea aria-label="效果参数 JSON" value={json} onChange={(event) => setJson(event.target.value)} spellCheck={false} /></section>
-        <section className="lab-tests"><div className="lab-panel-head"><span><Check size={15} />当前视图状态</span></div><div className="test-row"><span>Core renderer</span><b className={stats.backend === "WebGL2" ? "pass" : "blocked"}>{stats.backend === "WebGL2" ? "可用" : "不可用"}</b></div><div className="test-row"><span>参数与 Shader</span><b>{result}</b></div><div className="test-row"><span>截图验证</span><b>由独立 QA 执行</b></div><div className="test-row"><span>导出验证</span><b>请在渲染中心查看</b></div></section>
+        <section className="lab-tests"><div className="lab-panel-head"><span><Check size={15} />当前视图状态</span></div><div className="test-row"><span>核心渲染器</span><b className={stats.backend === "WebGL2" ? "pass" : "blocked"}>{stats.backend === "WebGL2" ? "可用" : "不可用"}</b></div><div className="test-row"><span>参数与着色器</span><b>{result === "PASS" ? "通过" : result === "BLOCKED" ? "受阻" : result === "JSON ERROR" ? "JSON 错误" : result}</b></div><div className="test-row"><span>截图验证</span><b>由独立质量检查执行</b></div><div className="test-row"><span>导出验证</span><b>请在渲染中心查看</b></div></section>
       </div>
     </main>
   );

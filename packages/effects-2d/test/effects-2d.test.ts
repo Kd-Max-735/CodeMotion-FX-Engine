@@ -643,7 +643,7 @@ describe("Group 2 P0 catalog", () => {
     const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "M01")!;
     const uiFields = effect.uiSchema.fields as JsonObject;
     const durationField = uiFields.duration as JsonObject;
-    expect(effect.defaultPreset.duration).toBe(1);
+    expect(effect.defaultPreset.duration).toBe(1.2);
     expect(durationField.unit).toBe("seconds");
 
     for (const seconds of [0, 0.25, 1, 3, 5.9]) {
@@ -1371,7 +1371,7 @@ describe("Group 2 P0 catalog", () => {
     };
     const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
     const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
-    expect(packageJson.version).toBe("1.2.0");
+    expect(packageJson.version).toBe("1.3.0");
     expect(readme).toContain("1.1.0");
     expect(changelog).toContain("1.1.0");
     for (const effect of GROUP_2_P0_EFFECTS) {
@@ -1439,5 +1439,37 @@ describe("Group 2 P0 catalog", () => {
     expect(t08!.supportsAlpha).toBe(true);
     expect(t08!.supportsMask).toBe(true);
     expect(t08!.deterministic).toBe(true);
+  });
+});
+
+describe("typewriter first-glyph boundary", () => {
+  const alphaPixels = (surface: PixelSurface) => {
+    let count = 0;
+    for (let index = 3; index < surface.data.length; index += 4) if (surface.data[index]! > 0) count += 1;
+    return count;
+  };
+
+  it("keeps body glyphs empty at t=0 and before the first interval, then reveals and completes", () => {
+    const effect = GROUP_2_P0_EFFECTS.find((item) => item.sourceId === "T01")!;
+    const renderAt = (seconds: number, speed: number) => {
+      const fixture = realFixture(effect, `typewriter.boundary.${seconds}`, seconds, 64, 36, "srgb", 7, "final", 0, 100, 1);
+      return { source: fixture.source.surface, output: effect.renderPixels(fixture.source.surface, {
+        ...effect.defaultPreset, speed, cursor: false, wordMode: false
+      }, fixture.options) };
+    };
+    expect(alphaPixels(renderAt(0, 2).output)).toBe(0);
+    expect(alphaPixels(renderAt(0.49, 2).output)).toBe(0);
+    expect(alphaPixels(renderAt(0.51, 2).output)).toBeGreaterThan(0);
+    const completed = renderAt(1, 120);
+    expect(alphaPixels(completed.output)).toBe(alphaPixels(completed.source));
+  });
+
+  it("uses the same strict index-plus-one threshold in the shader", () => {
+    const effect = GROUP_2_P0_EFFECTS.find((item) => item.sourceId === "T01")!;
+    const blueprint = GROUP_2_BLUEPRINTS.find((item) => item.sourceId === "T01")!;
+    const fixture = realFixture(effect, "typewriter.shader.boundary", 0, 16, 9);
+    const pass = createCatalogWebGLPass(blueprint, { ...effect.defaultPreset, cursor: false }, fixture.time, 7, "preview", 16, 9, fixture.source.input);
+    expect(pass.fragmentSource).toContain("step(index + 1.0, revealedGlyphs)");
+    expect(pass.fragmentSource).not.toContain("step(index, revealedGlyphs)");
   });
 });

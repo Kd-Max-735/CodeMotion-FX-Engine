@@ -7,6 +7,7 @@ import type { Readable, Writable } from "node:stream";
 import { finished } from "node:stream/promises";
 import Busboy from "busboy";
 import {
+  OwnerMediaResolverError,
   TenantMediaStore,
   type MediaAssetPurpose,
   type OwnerContext,
@@ -82,6 +83,7 @@ export interface MediaAssetServiceOptions {
   readonly observeMultipartPumpSliceBytes?: (bytes: number) => void;
   readonly observeMultipartRequestReadBytes?: (bytes: number) => void;
   readonly createUploadWriteStream?: (path: string) => Writable;
+  readonly isAssetInUse?: (owner: OwnerContext, assetId: string) => boolean | Promise<boolean>;
 }
 
 export interface MultipartBufferSnapshot {
@@ -117,7 +119,7 @@ export interface MultipartBufferSnapshot {
 
 class MediaHttpError extends Error {
   constructor(
-    readonly status: 400 | 413 | 415 | 422 | 429 | 499 | 500 | 503,
+    readonly status: 400 | 404 | 409 | 413 | 415 | 422 | 429 | 499 | 500 | 503,
     readonly code: string,
     message: string
   ) { super(message); }
@@ -932,9 +934,13 @@ export class MediaAssetService {
   handle() {
     return (request: IncomingMessage, response: ServerResponse, next: () => void): Promise<void> => {
       const url = new URL(request.url ?? "/", "http://localhost");
-      if (url.pathname !== "/api/media-assets") {
+      const item = /^\/api\/media-assets\/(asset_[a-fA-F0-9]{24})$/.exec(url.pathname);
+      if (url.pathname !== "/api/media-assets" && item === null) {
         next();
         return Promise.resolve();
+      }
+      if (request.method === "DELETE" && item !== null) {
+        return this.handleFailure(request, response, () => this.delete(request, response, item[1]!));
       }
       if (request.method === "POST") return this.startUpload(request, response);
       if (request.method === "GET") {
@@ -1164,6 +1170,29 @@ export class MediaAssetService {
     const last = page.at(-1);
     const nextCursor = items.length > limit && last !== undefined ? this.makeCursor(owner, kind, last) : null;
     safeJson(response, 200, { items: page, nextCursor });
+  }
+
+  private async delete(request: IncomingMessage, response: ServerResponse, assetId: string): Promise<void> {
+    const principal = await this.options.auth.authorize(request, response, "assets:write", true);
+    if (request.headers["transfer-encoding"] !== undefined
+      || (request.headers["content-length"] !== undefined && request.headers["content-length"] !== "0")) {
+      throw new MediaHttpError(400, "MALFORMED_REQUEST", "The media delete request must not contain a body.");
+    }
+    const owner = ownerOf(principal);
+    if (await this.options.isAssetInUse?.(owner, assetId)) {
+      throw new MediaHttpError(409, "ASSET_IN_USE", "The media asset is referenced by a project or task.");
+    }
+    try {
+      await this.options.store.delete(owner, assetId);
+    } catch (cause) {
+      if (cause instanceof OwnerMediaResolverError && cause.code === "OWNER_NOT_FOUND") {
+        throw new MediaHttpError(404, "NOT_FOUND", "The media asset was not found.");
+      }
+      throw cause;
+    }
+    response.statusCode = 204;
+    response.setHeader("cache-control", "no-store");
+    response.end();
   }
 
   private ownerDigest(owner: OwnerContext): string {

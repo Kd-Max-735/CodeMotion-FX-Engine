@@ -206,35 +206,31 @@ The BFF routes are fixed:
 
 ## Local development authentication
 
-Local development uses the same server-side session and CSRF model, not a fixed
-principal callback. It is enabled only when all of these conditions are true:
+Historical note: the original Stage 7R PASS used a browser-bound, single-use code.
+The user's 2026-08-05 local-auth authorization supersedes that development-only
+flow without changing the historical evidence or the production OIDC boundary.
 
-1. the Vite `configureServer` development hook is running;
-2. `NODE_ENV` is exactly `development`;
-3. `CODEMOTION_DEV_AUTH` is exactly `1`;
-4. the listen address and request peer are literal loopback (`127.0.0.1` or `::1`);
-5. Host and Origin are an explicit loopback origin allowlisted at startup; and
-6. explicit `CODEMOTION_DEV_TENANT_ID`, `CODEMOTION_DEV_USER_ID`, and
-   `CODEMOTION_DEV_SCOPES` are present and valid. None has a default.
+Local development now starts with `npm run dev` and no required authentication
+environment variables. Vite listens only on `127.0.0.1:4174` with
+`strictPort: true`. The development runtime is created only by `configureServer`.
+The default server-owned principal is:
 
-At startup the dev server creates a 256-bit random, five-minute, single-use login
-code, retains only its domain-separated SHA-256 digest in memory, and writes the
-code once to the interactive controlling terminal. `GET /auth/dev/login` requires
-literal-loopback peer/Host plus the same Referer and Fetch Metadata navigation
-evidence as production login, using the explicitly allowlisted loopback origin.
-The first valid navigation atomically binds the outstanding code record to a new
-256-bit browser binding and sets `cmfx_dev_login` (`HttpOnly; SameSite=Strict;
-Path=/`; no `Domain`; maximum five minutes; `Secure` omitted only for literal HTTP
-loopback). The server stores only a domain-separated binding digest; another
-browser cannot claim that outstanding code.
+- tenant: `local-tenant`;
+- user: `local-user`; and
+- scopes: `ai:plan assets:read assets:write project:preview export:create export:read`.
 
-The user enters the code into that browser's local form. `POST /auth/dev/session`
-accepts exactly `{ "code": "..." }` after the loopback peer/Host, exact Origin,
-and matching `cmfx_dev_login` checks. The code and binding are compared in constant
-time and consumed together before a random server session with a maximum one-hour
-absolute lifetime is created. The binding cookie is cleared on success, failure,
-timeout, restart, or replay. A code submitted from another browser, even when
-correct, cannot establish or replace a session.
+`CODEMOTION_DEV_TENANT_ID`, `CODEMOTION_DEV_USER_ID`, and
+`CODEMOTION_DEV_SCOPES` remain optional validated server-side overrides.
+`CODEMOTION_DEV_AUTH`, when present, must still be `1`, but it is not required.
+The browser never submits or persists identity or scopes.
+
+After an unauthenticated `GET /api/session`, the development client sends
+`POST /auth/dev/auto-session` with an empty body or exact empty JSON object. The
+server requires development mode, active `configureServer`, literal
+`127.0.0.1` listen and peer addresses, an exact Host and Origin match to
+`http://127.0.0.1:4174`, and `Sec-Fetch-Site: same-origin`. Any body that attempts
+to supply tenant, user, scopes, Cookie attributes, or a redirect is malformed.
+The server then creates a random opaque session with a maximum one-hour lifetime.
 
 The dev principal has issuer
 `urn:codemotion:dev-loopback:<random-server-instance-id>`, audience
@@ -249,7 +245,7 @@ The dev-auth module is never registered by `configurePreviewServer` or a product
 server entry. Production startup must fail if any of `CODEMOTION_DEV_AUTH`,
 `CODEMOTION_DEV_TENANT_ID`, `CODEMOTION_DEV_USER_ID`, or
 `CODEMOTION_DEV_SCOPES` is present. A production bundle/server must not expose
-`/auth/dev/session`. Setting `NODE_ENV` or an identity header in an HTTP request
+`/auth/dev/auto-session`. Setting `NODE_ENV` or an identity header in an HTTP request
 cannot enable it.
 
 ## Authorization-before-input order
@@ -301,6 +297,15 @@ The exact routes are:
 | --- | --- | --- |
 | `POST /api/media-assets` | `assets:write` | `201 {"asset": BrowserAssetSummaryV1}` |
 | `GET /api/media-assets?limit=&cursor=&kind=` | `assets:read` | `200 {"items": BrowserAssetSummaryV1[],"nextCursor":string|null}` |
+| `DELETE /api/media-assets/:assetId` | `assets:write` | `204` for one current-owner asset |
+
+The single-asset DELETE accepts no request body and never accepts owner or path input.
+It resolves `(tenantId,userId,assetId)` from the authenticated session and persistent
+record, verifies the stored file again, and removes only that explicit file. Current
+project or active planning/preview/export references return `409 ASSET_IN_USE`.
+Cross-owner absence is `404`; exact Origin, CSRF, and Session checks are unchanged.
+SVG records whose verified storage spans a source and proxy are logically tombstoned
+rather than performing a multi-file operation.
 
 Selection is a browser-local action over a listed `assetId`; there is no mutable
 selection endpoint. Planning sends the selected opaque IDs in `ai-task/v1.assets`,
@@ -555,10 +560,10 @@ Group 5 succeeds only when tests prove:
 - session cookie flags, CSRF token binding, exact Origin, logout, expiry, and log
    redaction match this record;
 - production refuses missing OIDC configuration, refuses every dev-auth setting,
-  and has no `/auth/dev/session` route;
-- dev auth requires explicit enablement, literal loopback, explicit identity/scopes,
-  a valid one-time code bound to the initiating browser, and rejects another
-  browser, replay, non-loopback, or preview use;
+  and has no `/auth/dev/auto-session` route;
+- dev auth requires `configureServer`, literal `127.0.0.1`, exact Host/Origin and
+  same-origin Fetch Metadata; rejects client identity fields, non-loopback peers,
+  port fallback, cross-site requests, and preview use;
 - authentication and `ai:plan` happen before body reads, queue mutation, asset
   lookup, disk access, or fetch/provider calls;
 - upload authentication/scope/Origin/CSRF precede limits and any temp-file write;

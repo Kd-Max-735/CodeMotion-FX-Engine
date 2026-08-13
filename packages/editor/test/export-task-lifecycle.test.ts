@@ -36,9 +36,12 @@ function exportFixture(): { editableProject: unknown; verified: VerifiedStoredMe
     metadata: { mime: "image/png", codec: "png", bytes: 4, width: 1, height: 1, decodeVerified: true }
   };
   const project = createStarterProject("Export close", 32, 24, 24);
+  project.duration = 0.1;
+  project.compositions[0]!.duration = 0.1;
   const template = project.compositions[0]!.layers[0]!;
   project.compositions[0]!.layers = [{
     ...template, id: "layer.export.image", name: "Export image", type: "image",
+    endTime: 0.1, outPoint: 0.1,
     source: { assetId: asset.id }, properties: { fit: "fill" }, effects: [], masks: []
   } as unknown as LayerDefinition];
   project.compositions[0]!.markers = [];
@@ -59,9 +62,12 @@ function exportFixture(): { editableProject: unknown; verified: VerifiedStoredMe
 
 function mediaFreeExportFixture(): unknown {
   const project = createStarterProject("Active download", 32, 24, 24);
+  project.duration = 0.1;
+  project.compositions[0]!.duration = 0.1;
   const template = project.compositions[0]!.layers[0]!;
   project.compositions[0]!.layers = [{
     ...template, id: "layer.download.shape", name: "Download shape", type: "shape",
+    endTime: 0.1, outPoint: 0.1,
     properties: { shapes: [{ path: "M0 0 L32 0 L32 24 L0 24 Z", fill: "#20C997FF" }], fill: "#20C997FF" },
     effects: [], masks: []
   } as unknown as LayerDefinition];
@@ -524,18 +530,45 @@ describe("export persisted insertion abort rollback", () => {
   }, 30_000);
 });
 
+describe("single export history clearing", () => {
+  it("rejects active work and tombstones one completed task without affecting another", async () => {
+    const outputRoot = await mkdtemp(resolve(tmpdir(), "cmfx-clear-task-"));
+    const service = await new ExportTaskService({
+      outputRoot,
+      resolver: { resolve: async (): Promise<never> => { throw new Error("media not expected"); } }
+    }).initialize();
+    const exportPrincipal = { ...principal, scopes: ["export:create", "export:read"] } as AuthenticatedSessionPrincipal;
+    const request = {
+      contract: "export-request/v1" as const,
+      editableProject: mediaFreeExportFixture(),
+      settings: { format: "png-sequence" as const, width: 32, height: 24, fps: 24, duration: 0.1, alpha: true, audio: false }
+    };
+    try {
+      const active = await service.create(exportPrincipal, request);
+      await expect(service.clear(exportPrincipal, active.id)).rejects.toMatchObject({ status: 409, code: "EXPORT_TASK_ACTIVE" });
+      await vi.waitFor(async () => expect((await service.get(exportPrincipal, active.id)).status).toBe("completed"), { timeout: 10_000, interval: 25 });
+      const retained = await service.create(exportPrincipal, request);
+      await vi.waitFor(async () => expect((await service.get(exportPrincipal, retained.id)).status).toBe("completed"), { timeout: 10_000, interval: 25 });
+      await service.clear(exportPrincipal, active.id);
+      await expect(service.get(exportPrincipal, active.id)).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
+      expect((await service.list(exportPrincipal)).map((task) => task.id)).toEqual([retained.id]);
+    } finally { await service.close(); }
+  }, 30_000);
+});
+
 describe("export route authorization matrix", () => {
   it.each([
     ["GET", "/api/editor-exports", "export:read", false],
     ["POST", "/api/editor-exports", "export:create", true],
     ["GET", "/api/editor-exports/task-id", "export:read", false],
+    ["DELETE", "/api/editor-exports/task-id", "export:create", true],
     ["POST", "/api/editor-exports/task-id/cancel", "export:create", true],
     ["POST", "/api/editor-exports/task-id/retry", "export:create", true],
     ["GET", "/api/editor-exports/task-id/download", "export:read", false]
   ] as const)("authorizes %s %s with exact %s before task or disk work", async (method, path, scope, stateChanging) => {
     filesystem.open.mockClear();
     const methods = {
-      list: vi.fn(), create: vi.fn(), get: vi.fn(), cancel: vi.fn(), retry: vi.fn(), acquireDownload: vi.fn()
+      list: vi.fn(), create: vi.fn(), get: vi.fn(), clear: vi.fn(), cancel: vi.fn(), retry: vi.fn(), acquireDownload: vi.fn()
     };
     const service = methods as unknown as ExportTaskService;
     const authorize = vi.fn(async () => { throw { status: 401, code: "UNAUTHENTICATED" }; });

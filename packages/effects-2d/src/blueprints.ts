@@ -123,7 +123,7 @@ const b = (
 export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   b("M01", "fx.motion.fade", "Fade", "motion", "Deterministic opacity fade.", [
     number("from", 0, 0, 1, 0.01), number("to", 1, 0, 1, 0.01),
-    number("duration", 1, 0.01, 60, 0.01, "seconds"), choice("easing", "easeOut", ["linear", "easeIn", "easeOut", "easeInOut"])
+    number("duration", 1.2, 0.01, 60, 0.01, "seconds"), choice("easing", "easeOut", ["linear", "easeIn", "easeOut", "easeInOut"])
   ], "light", 4),
   b("M02", "fx.motion.slide", "Slide", "motion", "Directional slide with overshoot.", [
     choice("direction", "left", ["left", "right", "up", "down"]), number("distance", 0.35, 0, 2, 0.01, "canvas"),
