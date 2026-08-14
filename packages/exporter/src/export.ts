@@ -6,6 +6,7 @@ import type { ColorSpace } from "@codemotion/core";
 import { compositePixelSurfaces } from "@codemotion/renderer-webgl";
 import type { ExportPreset } from "./presets.js";
 import { validateExportPreset } from "./presets.js";
+import { runProcess } from "./process.js";
 
 export interface FrameRequest {
   readonly frame: number;
@@ -75,6 +76,14 @@ function flattenFrameAlpha(
   request: FrameRequest,
   colorSpace: ColorSpace
 ): Uint8Array {
+  let opaque = true;
+  for (let index = 3; index < frame.length; index += 4) {
+    if (frame[index] !== 255) {
+      opaque = false;
+      break;
+    }
+  }
+  if (opaque) return frame;
   const flattened = compositePixelSurfaces(
     {
       width: request.width,
@@ -107,7 +116,7 @@ export interface ExportReport {
   readonly qa?: AggregateExportQaReport;
 }
 
-function encoderArgs(preset: ExportPreset, output: string, startFrame: number, audioPath?: string): string[] {
+function encoderArgs(preset: ExportPreset, output: string, startFrame: number, encoder: string, audioPath?: string): string[] {
   const { width, height, fps, alpha, audio, videoCodec, audioCodec, crf } = preset.settings;
   const input = ["-f", "rawvideo", "-pixel_format", "rgba", "-video_size", `${width}x${height}`, "-framerate", String(fps), "-i", "pipe:0"];
   const audioInput = audio && audioPath !== undefined ? ["-i", resolve(audioPath)] : [];
@@ -121,8 +130,32 @@ function encoderArgs(preset: ExportPreset, output: string, startFrame: number, a
     return [...input, ...audioInput, "-c:v", videoCodec ?? "libvpx-vp9", "-crf", String(crf ?? 18), "-b:v", "0",
       "-pix_fmt", alpha ? "yuva420p" : "yuv420p", ...(audioInput.length ? ["-c:a", audioCodec ?? "libopus", "-shortest"] : ["-an"]), output];
   }
-  return [...input, ...audioInput, "-c:v", videoCodec ?? "libx264", "-crf", String(crf ?? 18), "-pix_fmt", "yuv420p",
+  const codecOptions = encoder === "h264_nvenc"
+    ? ["-c:v", encoder, "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", String(crf ?? 18), "-b:v", "0"]
+    : ["-c:v", videoCodec ?? "libx264", "-preset", "veryfast", "-crf", String(crf ?? 18)];
+  return [...input, ...audioInput, ...codecOptions, "-pix_fmt", "yuv420p",
     ...(audioInput.length ? ["-c:a", audioCodec ?? "aac", "-shortest"] : ["-an"]), "-movflags", "+faststart", output];
+}
+
+const nvencAvailability = new Map<string, Promise<boolean>>();
+
+function supportsNvenc(ffmpegPath: string): Promise<boolean> {
+  const existing = nvencAvailability.get(ffmpegPath);
+  if (existing !== undefined) return existing;
+  const probe = runProcess(ffmpegPath, [
+    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=0.04",
+    "-frames:v", "1", "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr",
+    "-cq", "18", "-b:v", "0", "-pix_fmt", "yuv420p", "-f", "null", "-"
+  ]).then(() => true, () => false);
+  nvencAvailability.set(ffmpegPath, probe);
+  return probe;
+}
+
+async function selectVideoEncoder(preset: ExportPreset, ffmpegPath: string): Promise<string> {
+  if (preset.format === "mp4" && preset.id === "ae-agent-mp4" && await supportsNvenc(ffmpegPath)) {
+    return "h264_nvenc";
+  }
+  return preset.settings.videoCodec ?? (preset.format === "png-sequence" ? "png" : preset.format === "gif" ? "gif" : "libx264");
 }
 
 function inspect(frame: Uint8Array, request: FrameRequest): FrameInspection {
@@ -161,8 +194,10 @@ export async function exportFixedFrames(options: ExportOptions): Promise<ExportR
   const output = resolve(options.outputPath);
   await mkdir(preset.format === "png-sequence" ? output : dirname(output), { recursive: true });
   const target = preset.format === "png-sequence" ? `${output}/frame-%08d.png` : output;
-  const args = ["-hide_banner", "-y", ...encoderArgs(preset, target, start, options.audioPath)];
-  const child = spawn(options.ffmpegPath ?? "ffmpeg", args, { windowsHide: true, stdio: ["pipe", "ignore", "pipe"] });
+  const ffmpegPath = options.ffmpegPath ?? "ffmpeg";
+  const encoder = await selectVideoEncoder(preset, ffmpegPath);
+  const args = ["-hide_banner", "-y", ...encoderArgs(preset, target, start, encoder, options.audioPath)];
+  const child = spawn(ffmpegPath, args, { windowsHide: true, stdio: ["pipe", "ignore", "pipe"] });
   let stderr = "";
   child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
   const closed = new Promise<number | null>((resolveClose, reject) => {
@@ -263,7 +298,7 @@ export async function exportFixedFrames(options: ExportOptions): Promise<ExportR
     outputPath: output,
     frameCount,
     inspections,
-    encoder: preset.settings.videoCodec ?? (preset.format === "png-sequence" ? "png" : preset.format === "gif" ? "gif" : "libx264"),
+    encoder,
     ...(options.qa === undefined ? {} : {
       qa: {
         activeFrames: qaActiveFrames,

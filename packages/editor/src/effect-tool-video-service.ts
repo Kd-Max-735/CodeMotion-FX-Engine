@@ -131,11 +131,14 @@ function frameBytes(result: EffectRenderResult, request: FrameRequest): Uint8Arr
   if (!Array.isArray(data) && !(data instanceof Uint8Array) && !(data instanceof Uint8ClampedArray)) {
     throw new TypeError("The effect output frame is invalid.");
   }
-  const bytes = Uint8Array.from(data as ArrayLike<number>);
-  if (bytes.byteLength !== request.width * request.height * 4) {
+  if (data.length !== request.width * request.height * 4) {
     throw new RangeError("The effect output frame byte length is invalid.");
   }
-  return bytes;
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof Uint8ClampedArray) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+  return Uint8Array.from(data);
 }
 
 function safeFailureMessage(error: unknown): string {

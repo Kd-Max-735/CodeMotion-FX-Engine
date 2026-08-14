@@ -10,7 +10,7 @@ import type {
 export interface RgbaFrame {
   readonly width: number;
   readonly height: number;
-  readonly data: readonly number[];
+  readonly data: readonly number[] | Uint8Array | Uint8ClampedArray;
 }
 
 export interface DepthField {
@@ -84,7 +84,14 @@ export function frameInput(context: ServerEffectRenderContext, slot = "source_fr
   if (value.width !== context.width || value.height !== context.height) {
     throw new RangeError(`${slot} dimensions must match the server render context.`);
   }
-  const data = numericArray(value.data, value.width * value.height * 4, slot);
+  const expectedLength = value.width * value.height * 4;
+  if ((value.data instanceof Uint8Array || value.data instanceof Uint8ClampedArray)
+    && value.data.length !== expectedLength) {
+    throw new RangeError(`${slot} data length does not match its dimensions.`);
+  }
+  const data = value.data instanceof Uint8Array || value.data instanceof Uint8ClampedArray
+    ? value.data
+    : numericArray(value.data, expectedLength, slot);
   if (data.some((entry) => !Number.isInteger(entry) || entry < 0 || entry > 255)) {
     throw new RangeError(`${slot} must contain 8-bit RGBA channel values.`);
   }
@@ -192,7 +199,7 @@ export function hsvToRgb(hue: number, saturation: number, value: number): readon
 export function frameResult(
   definition: EffectToolDefinition,
   frame: RgbaFrame,
-  data: readonly number[],
+  data: readonly number[] | Uint8Array | Uint8ClampedArray,
   warnings: readonly string[] = []
 ): EffectRenderResult<RgbaFrame> {
   return {

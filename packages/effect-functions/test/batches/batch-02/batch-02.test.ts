@@ -91,7 +91,7 @@ async function render(
 
 function pixel(frame: RgbaFrame, x: number, y: number): readonly number[] {
   const offset = (y * frame.width + x) * 4;
-  return frame.data.slice(offset, offset + 4);
+  return Array.from(frame.data.slice(offset, offset + 4));
 }
 
 describe("batch-02 definitions", () => {
