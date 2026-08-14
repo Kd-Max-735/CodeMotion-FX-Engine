@@ -19,6 +19,8 @@ import {
   type VerifiedStoredMedia
 } from "@codemotion/exporter";
 
+const DEFAULT_VIDEO_DURATION_SECONDS = 5;
+const DEFAULT_VIDEO_FPS = 30;
 const MAX_VIDEO_DURATION_SECONDS = 3_600;
 const MAX_EFFECT_DIMENSION = 4_096;
 
@@ -31,7 +33,7 @@ export interface EffectToolVideoExecutionView {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly source: {
-    readonly kind: "video";
+    readonly kind: "image";
     readonly assetId: string;
   };
   readonly video: {
@@ -75,6 +77,8 @@ export interface EffectToolVideoServiceOptions {
   readonly ffmpegPath?: string;
   readonly exportFrames?: typeof exportFixedFrames;
   readonly decodeFrame?: typeof decodeMediaFrame;
+  readonly durationSeconds?: number;
+  readonly fps?: number;
 }
 
 function taskKey(owner: OwnerContext, id: string): string {
@@ -83,20 +87,20 @@ function taskKey(owner: OwnerContext, id: string): string {
 
 function safeNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new RangeError(`Video ${label} is invalid.`);
+    throw new RangeError(`${label} is invalid.`);
   }
   return value;
 }
 
-function videoMetadata(media: VerifiedStoredMedia) {
-  if (media.asset.type !== "video") throw new TypeError("source_video requires an authorized video asset.");
-  const sourceWidth = safeNumber(media.asset.metadata.width, "width");
-  const sourceHeight = safeNumber(media.asset.metadata.height, "height");
-  const durationSeconds = safeNumber(media.asset.metadata.duration, "duration");
-  const sourceFps = safeNumber(media.asset.metadata.fps, "frame rate");
+function outputMetadata(media: VerifiedStoredMedia, durationSeconds: number, fps: number) {
+  if (media.asset.type !== "image" && media.asset.type !== "svg") {
+    throw new TypeError("source_image requires an authorized image asset.");
+  }
+  const sourceWidth = safeNumber(media.asset.metadata.width, "Image width");
+  const sourceHeight = safeNumber(media.asset.metadata.height, "Image height");
   if (!Number.isInteger(sourceWidth) || !Number.isInteger(sourceHeight)
     || sourceWidth > MAX_EFFECT_DIMENSION || sourceHeight > MAX_EFFECT_DIMENSION) {
-    throw new RangeError("Video dimensions exceed the effect render limit.");
+    throw new RangeError("Image dimensions exceed the effect render limit.");
   }
   if (durationSeconds > MAX_VIDEO_DURATION_SECONDS) {
     throw new RangeError("Video duration exceeds the effect render limit.");
@@ -105,14 +109,13 @@ function videoMetadata(media: VerifiedStoredMedia) {
   const width = sourceWidth - sourceWidth % 2;
   const height = sourceHeight - sourceHeight % 2;
   if (width < 2 || height < 2) throw new RangeError("Video dimensions are too small to encode as MP4.");
-  const fps = Math.min(120, sourceFps);
   return {
     width,
     height,
     durationSeconds,
     fps,
     frameCount: Math.ceil(durationSeconds * fps),
-    audio: Number(media.asset.metadata.audioStreams ?? 0) > 0
+    audio: false
   };
 }
 
@@ -147,11 +150,18 @@ export class EffectToolVideoService {
   private readonly outputRoot: string;
   private readonly exportFrames: typeof exportFixedFrames;
   private readonly decodeFrame: typeof decodeMediaFrame;
+  private readonly durationSeconds: number;
+  private readonly fps: number;
 
   constructor(private readonly options: EffectToolVideoServiceOptions) {
     this.outputRoot = resolve(options.outputRoot);
     this.exportFrames = options.exportFrames ?? exportFixedFrames;
     this.decodeFrame = options.decodeFrame ?? decodeMediaFrame;
+    this.durationSeconds = safeNumber(options.durationSeconds ?? DEFAULT_VIDEO_DURATION_SECONDS, "Video duration");
+    this.fps = safeNumber(options.fps ?? DEFAULT_VIDEO_FPS, "Video frame rate");
+    if (this.durationSeconds > MAX_VIDEO_DURATION_SECONDS || !Number.isInteger(this.fps) || this.fps > 120) {
+      throw new RangeError("Video output settings exceed the effect render limit.");
+    }
   }
 
   async create(
@@ -163,7 +173,7 @@ export class EffectToolVideoService {
   ): Promise<EffectToolVideoExecutionView> {
     if (this.closing) throw new Error("Effect video service is closing.");
     const media = await this.options.media.resolve(owner, sourceAssetId);
-    const metadata = videoMetadata(media);
+    const metadata = outputMetadata(media, this.durationSeconds, this.fps);
     const id = randomUUID();
     const directory = join(this.outputRoot, id);
     const outputPath = join(directory, "output.mp4");
@@ -179,7 +189,7 @@ export class EffectToolVideoService {
         toolName: definition.toolName,
         createdAt: now,
         updatedAt: now,
-        source: { kind: "video", assetId: sourceAssetId },
+        source: { kind: "image", assetId: sourceAssetId },
         video: {
           format: "mp4",
           mime: "video/mp4",
@@ -256,9 +266,17 @@ export class EffectToolVideoService {
       await mkdir(join(this.outputRoot, task.view.id), { recursive: true });
       const media = await this.options.media.resolve(task.owner, task.sourceAssetId, task.controller.signal);
       if (media.asset.hash !== initialMedia.asset.hash || media.trustedBytes !== initialMedia.trustedBytes) {
-        throw new Error("The source video changed before rendering.");
+        throw new Error("The source image changed before rendering.");
       }
-      const metadata = videoMetadata(media);
+      const metadata = outputMetadata(media, this.durationSeconds, this.fps);
+      const sourcePixels = await this.decodeFrame(media, {
+        frame: 0,
+        time: 0,
+        deltaTime: 1 / metadata.fps,
+        fps: metadata.fps,
+        width: metadata.width,
+        height: metadata.height
+      }, { signal: task.controller.signal });
       const preset = validateExportPreset({
         id: "ae-agent-mp4",
         name: "AE Agent MP4",
@@ -269,9 +287,8 @@ export class EffectToolVideoService {
           height: metadata.height,
           fps: metadata.fps,
           alpha: false,
-          audio: metadata.audio,
+          audio: false,
           videoCodec: "libx264",
-          ...(metadata.audio ? { audioCodec: "aac" } : {}),
           crf: 18
         }
       });
@@ -279,11 +296,9 @@ export class EffectToolVideoService {
         preset,
         duration: metadata.durationSeconds,
         outputPath: task.outputPath,
-        ...(metadata.audio ? { audioPath: media.storedPath } : {}),
         ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
         signal: task.controller.signal,
         renderFrame: async (request, signal) => {
-          const pixels = await this.decodeFrame(media, request, signal === undefined ? {} : { signal });
           const context: ServerEffectRenderContext = {
             environment: "server",
             requestId: `${task.view.id}:${request.frame}`,
@@ -305,7 +320,7 @@ export class EffectToolVideoService {
                 tenantId: task.owner.tenantId,
                 userId: task.owner.userId,
                 locked: true,
-                binding: { width: request.width, height: request.height, data: pixels }
+                binding: { width: request.width, height: request.height, data: sourcePixels }
               }
             },
             ...(signal === undefined ? {} : { signal })

@@ -99,17 +99,16 @@ async function testVideoService() {
   const outputRoot = await mkdtemp(join(tmpdir(), "cmfx-effect-video-"));
   const media: VerifiedStoredMedia = {
     asset: {
-      id: "asset_videoabcdefgh",
-      type: "video",
-      uri: "media://video.mp4",
-      hash: "sha256:test-video",
+      id: "asset_imageabcdefgh",
+      type: "image",
+      uri: "media://image.png",
+      hash: "sha256:test-image",
       metadata: {
-        mime: "video/mp4", width: 2, height: 2, duration: 1 / 30, fps: 30,
-        audioStreams: 0, codec: "h264"
+        mime: "image/png", width: 2, height: 2, codec: "png"
       }
     },
-    descriptor: { id: "asset_videoabcdefgh", type: "media/video", cacheKey: "test-video", metadata: {} },
-    storedPath: join(outputRoot, "source.mp4"),
+    descriptor: { id: "asset_imageabcdefgh", type: "media/image", cacheKey: "test-image", metadata: {} },
+    storedPath: join(outputRoot, "source.png"),
     arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: false, reason: "test" },
     trustedBytes: 128
   };
@@ -126,7 +125,9 @@ async function testVideoService() {
     media: { resolve: vi.fn(async () => media) },
     outputRoot,
     exportFrames: exportFrames as never,
-    decodeFrame: decodeFrame as never
+    decodeFrame: decodeFrame as never,
+    durationSeconds: 1 / 30,
+    fps: 30
   });
   return { service, exportFrames, decodeFrame };
 }
@@ -357,7 +358,7 @@ describe("server single effect-tool service", () => {
     };
     const turn = await service.turn(principal, {
       prompt: "添加粗粝的16mm胶片颗粒",
-      inputIds: { source_video: "asset_videoabcdefgh" }
+      inputIds: { source_image: "asset_imageabcdefgh" }
     });
     expect(turn).toMatchObject({
       kind: "tool_call",
@@ -370,7 +371,7 @@ describe("server single effect-tool service", () => {
       },
       execution: {
         toolName: "film_grain",
-        source: { kind: "video", assetId: "asset_videoabcdefgh" },
+        source: { kind: "image", assetId: "asset_imageabcdefgh" },
         video: { format: "mp4", mime: "video/mp4", width: 2, height: 2, frameCount: 1 }
       }
     });
@@ -536,7 +537,7 @@ describe("server single effect-tool service", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           prompt: "添加胶片颗粒",
-          inputIds: { source_video: "asset_videoabcdefgh" }
+          inputIds: { source_image: "asset_imageabcdefgh" }
         })
       });
       expect(called.status).toBe(200);

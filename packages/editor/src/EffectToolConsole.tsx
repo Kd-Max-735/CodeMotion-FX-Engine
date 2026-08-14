@@ -1,5 +1,5 @@
 import {
-  Check, ChevronDown, Clock3, Copy, Download, LoaderCircle, Menu, Paperclip,
+  Check, ChevronDown, Clock3, Copy, Download, FileImage, LoaderCircle, Menu, Paperclip,
   Plus, Search, Send, Settings, Square, Video, Wrench, X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
@@ -12,7 +12,7 @@ type ConversationEntry = Readonly<{ id: string; role: "user"; content: string; a
 function errorMessage(error: unknown): string {
   if (error instanceof BrowserApiError) {
     if (error.code === "ARK_PROVIDER_UNAVAILABLE") return "Ark 尚未配置，请检查服务器 ARK_API_KEY。";
-    if (error.code === "EFFECT_TOOL_REQUEST_INVALID") return "执行工具前需要选择一个已授权的视频素材。";
+    if (error.code === "EFFECT_TOOL_REQUEST_INVALID") return "执行工具前需要选择一张已授权的图片素材。";
     return `${error.message} (${error.code})`;
   }
   return error instanceof Error ? error.message : "请求失败。";
@@ -81,7 +81,7 @@ function ToolResult({ turn }: { turn: Extract<NativeEffectTurn, { kind: "tool_ca
         <div className="tool-detail">
           <span>Tool Call · {turn.toolCall.id}</span>
           <pre>{JSON.stringify(envelope, null, 2)}</pre>
-          <div className="execution-line"><b>H.264 MP4 · {turn.execution.video.width} × {turn.execution.video.height}</b><em>{turn.execution.video.audio ? "保留音轨" : "无音轨"}</em></div>
+          <div className="execution-line"><b>H.264 MP4 · {turn.execution.video.width} × {turn.execution.video.height}</b><em>{turn.execution.video.durationSeconds} 秒 · {turn.execution.video.fps} FPS</em></div>
         </div>
       </details>
       <section className="artifact-card">
@@ -106,8 +106,8 @@ export function EffectToolConsole() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string>();
-  const videoAssets = useMemo(() => assets.filter((asset) => asset.kind === "video"), [assets]);
-  const selectedAsset = videoAssets.find((asset) => asset.assetId === selectedAssetId);
+  const imageAssets = useMemo(() => assets.filter((asset) => asset.kind === "image" || asset.kind === "svg"), [assets]);
+  const selectedAsset = imageAssets.find((asset) => asset.assetId === selectedAssetId);
   const artifactTotal = entries.filter((entry) => entry.role === "assistant" && entry.turn.kind === "tool_call").length;
 
   useEffect(() => {
@@ -121,7 +121,7 @@ export function EffectToolConsole() {
       if (controller.signal.aborted) return;
       setTool(nextTool);
       setAssets(page.items);
-      setSelectedAssetId(page.items.find((asset) => asset.kind === "video")?.assetId);
+      setSelectedAssetId(page.items.find((asset) => asset.kind === "image" || asset.kind === "svg")?.assetId);
     }).catch((cause) => { if (!controller.signal.aborted) setError(errorMessage(cause)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -136,7 +136,7 @@ export function EffectToolConsole() {
     setUploading(true);
     setError(undefined);
     try {
-      const asset = await mediaAssetApi.upload(file, "reference-video");
+      const asset = await mediaAssetApi.upload(file, "reference-image");
       setAssets((current) => [asset, ...current.filter((item) => item.assetId !== asset.assetId)]);
       setSelectedAssetId(asset.assetId);
     } catch (cause) { setError(errorMessage(cause)); }
@@ -154,7 +154,7 @@ export function EffectToolConsole() {
     setToolMenuOpen(false);
     setEntries((current) => [...current, { id: crypto.randomUUID(), role: "user", content: value, ...(selectedAsset === undefined ? {} : { asset: selectedAsset }) }]);
     try {
-      const turn = await nativeEffectToolApi.turn({ prompt: value, ...(selectedAssetId === undefined ? {} : { sourceVideoId: selectedAssetId }) });
+      const turn = await nativeEffectToolApi.turn({ prompt: value, ...(selectedAssetId === undefined ? {} : { sourceImageId: selectedAssetId }) });
       setEntries((current) => [...current, { id: crypto.randomUUID(), role: "assistant", turn, elapsedMs: Math.max(1, Math.round(performance.now() - startedAt)) }]);
     } catch (cause) { setError(errorMessage(cause)); }
     finally { setBusy(false); }
@@ -185,10 +185,10 @@ export function EffectToolConsole() {
         </header>
         <section className="messages">
           {error && <div className="agent-error" role="alert"><X size={15} />{error}</div>}
-          {entries.length === 0 && !loading && <div className="empty-state"><div className="empty-mark"><span>›</span><i>_</i></div><h1>想要制作什么视频特效？</h1><p>上传视频并描述效果。Doubao 会理解请求；需要执行时，服务器会逐帧调用已加载的胶片颗粒工具并导出 MP4。</p><div className="starter-prompts"><button type="button" onClick={() => setPrompt("给视频添加粗粝的16mm胶片颗粒，暗部明显一些")}>16mm 胶片颗粒</button><button type="button" onClick={() => setPrompt("temporal 参数有什么作用？")}>询问参数</button></div></div>}
+          {entries.length === 0 && !loading && <div className="empty-state"><div className="empty-mark"><span>›</span><i>_</i></div><h1>想要制作什么视频特效？</h1><p>上传图片并描述效果。Doubao 会理解请求；需要执行时，服务器会让特效随帧变化并导出 MP4。</p><div className="starter-prompts"><button type="button" onClick={() => setPrompt("让这张图片呈现粗粝的16mm动态胶片颗粒，暗部明显一些")}>16mm 胶片颗粒</button><button type="button" onClick={() => setPrompt("temporal 参数有什么作用？")}>询问参数</button></div></div>}
           {loading && <div className="empty-state compact"><LoaderCircle className="spin" size={23} /><p>正在连接服务器</p></div>}
           {entries.map((entry) => entry.role === "user" ? (
-            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>胶片颗粒 · film_grain</span></div>{entry.asset && <div className="user-assets"><span className="user-file"><Video size={13} />{entry.asset.displayName}</span></div>}</div></article>
+            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>胶片颗粒 · film_grain</span></div>{entry.asset && <div className="user-assets"><span className="user-file"><FileImage size={13} />{entry.asset.displayName}</span></div>}</div></article>
           ) : (
             <article key={entry.id} className="message agent-message"><div className="agent-avatar">AE</div><div className="agent-content"><div className="turn-duration"><Clock3 size={13} /><span>已思考 <b>{formatElapsed(entry.elapsedMs)}</b></span></div>{thinking && entry.turn.reasoningContent && <details className="process-section" open><summary><span className="section-icon thinking-icon" /><strong>深度思考</strong><span className="process-summary">理解需求并判断是否调用工具</span><ChevronDown className="process-chevron" size={13} /></summary><div className="process-timeline"><div className="thinking-row completed"><span className="thinking-dot" /><p>{entry.turn.reasoningContent}</p><small>完成</small></div></div></details>}{entry.turn.content && <div className="assistant-text markdown-body"><p>{entry.turn.content}</p></div>}{entry.turn.kind === "tool_call" && <ToolResult turn={entry.turn} />}</div></article>
           ))}
@@ -197,12 +197,12 @@ export function EffectToolConsole() {
         </section>
         <footer className="composer-wrap">
           <form className="composer-shell" onSubmit={(event) => void submit(event)}>
-            <div className="selected-tool-tray"><span><Wrench size={12} /><b>胶片颗粒</b><code>film_grain</code></span>{selectedAsset && <button type="button" title="切换服务器视频" onClick={() => fileInput.current?.click()}><Video size={12} />{selectedAsset.displayName}</button>}</div>
+            <div className="selected-tool-tray"><span><Wrench size={12} /><b>胶片颗粒</b><code>film_grain</code></span>{selectedAsset && <button type="button" title="切换服务器图片" onClick={() => fileInput.current?.click()}><FileImage size={12} />{selectedAsset.displayName}</button>}</div>
             <textarea rows={1} maxLength={4_000} placeholder="描述视频特效需求" value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={onComposerKeyDown} />
             <div className="composer-toolbar">
-              <label className="attach-button" title="上传视频"><input ref={fileInput} type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska" aria-label="上传视频" onChange={(event) => void upload(event)} />{uploading ? <LoaderCircle className="spin" size={16} /> : <Paperclip size={17} />}</label>
+              <label className="attach-button" title="上传图片"><input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/avif,image/svg+xml" aria-label="上传图片" onChange={(event) => void upload(event)} />{uploading ? <LoaderCircle className="spin" size={16} /> : <Paperclip size={17} />}</label>
               <label className="thinking-toggle"><input type="checkbox" checked={thinking} onChange={(event) => setThinking(event.target.checked)} /><span>深度思考</span></label>
-              <div className="composer-actions-right"><span className="model-label">Doubao 2.0 Lite</span><div className="tool-picker"><button className="tool-picker-button" type="button" aria-label="添加工具" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((current) => !current)}><Plus size={15} /><b>工具</b><i>1</i></button>{toolMenuOpen && <div className="tool-menu" role="dialog" aria-label="添加工具"><div className="tool-menu-head"><div><strong>已加载工具</strong><small>当前仅开放 1 个工具</small></div><button type="button" title="关闭" onClick={() => setToolMenuOpen(false)}><X size={15} /></button></div><button className="tool-option is-selected" type="button" aria-pressed="true"><span className="tool-option-copy"><span className="tool-option-heading"><strong>胶片颗粒</strong><b>视频特效</b></span><small>film_grain</small><em>为服务器视频添加可控的动态胶片颗粒。</em></span><span className="tool-option-action selected"><Check size={13} />已加载</span></button></div>}</div><button className="send-button" type="submit" title="发送" disabled={busy || prompt.trim().length === 0}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}</button></div>
+              <div className="composer-actions-right"><span className="model-label">Doubao 2.0 Lite</span><div className="tool-picker"><button className="tool-picker-button" type="button" aria-label="添加工具" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((current) => !current)}><Plus size={15} /><b>工具</b><i>1</i></button>{toolMenuOpen && <div className="tool-menu" role="dialog" aria-label="添加工具"><div className="tool-menu-head"><div><strong>已加载工具</strong><small>当前仅开放 1 个工具</small></div><button type="button" title="关闭" onClick={() => setToolMenuOpen(false)}><X size={15} /></button></div><button className="tool-option is-selected" type="button" aria-pressed="true"><span className="tool-option-copy"><span className="tool-option-heading"><strong>胶片颗粒</strong><b>视频特效</b></span><small>film_grain</small><em>让服务器图片生成可控的动态胶片颗粒视频。</em></span><span className="tool-option-action selected"><Check size={13} />已加载</span></button></div>}</div><button className="send-button" type="submit" title="发送" disabled={busy || prompt.trim().length === 0}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}</button></div>
             </div>
           </form>
           <small className="composer-note">AI 生成内容可能不准确，请检查重要结果。</small>

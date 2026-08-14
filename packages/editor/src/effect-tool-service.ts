@@ -582,7 +582,7 @@ export class EffectToolService {
       throw new TypeError("prompt is required and must not exceed 10000 characters.");
     }
     const rawInputIds = exactObject(request.inputIds, "inputIds");
-    exactKeys(rawInputIds, ["source_video"], "inputIds");
+    exactKeys(rawInputIds, ["source_image"], "inputIds");
     const controller = new AbortController();
     this.controllers.add(controller);
     try {
@@ -608,14 +608,14 @@ export class EffectToolService {
         type: definition.toolName,
         data: modelTurn.toolCall.arguments
       });
-      const sourceVideo = rawInputIds.source_video;
-      if (typeof sourceVideo !== "string" || !RESOURCE_ID.test(sourceVideo)) {
-        throw new TypeError("source_video requires one safe opaque resource ID.");
+      const sourceImage = rawInputIds.source_image;
+      if (typeof sourceImage !== "string" || !RESOURCE_ID.test(sourceImage)) {
+        throw new TypeError("source_image requires one safe opaque resource ID.");
       }
       if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
       const execution = await this.nativeVideos.create(
         owner,
-        sourceVideo,
+        sourceImage,
         definition,
         envelope,
         20260814

@@ -25,7 +25,7 @@ export interface NativeExecutionView {
   readonly toolName: "film_grain";
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly source: { readonly kind: "video"; readonly assetId: string };
+  readonly source: { readonly kind: "image"; readonly assetId: string };
   readonly video: {
     readonly format: "mp4";
     readonly mime: "video/mp4";
@@ -102,7 +102,7 @@ function execution(value: unknown): NativeExecutionView {
   const status = raw.status;
   if (typeof raw.id !== "string" || !["queued", "running", "completed", "failed"].includes(String(status))
     || raw.toolName !== "film_grain" || typeof raw.createdAt !== "string" || typeof raw.updatedAt !== "string"
-    || source.kind !== "video" || typeof source.assetId !== "string"
+    || source.kind !== "image" || typeof source.assetId !== "string"
     || video.format !== "mp4" || video.mime !== "video/mp4"
     || ![video.width, video.height, video.fps, video.durationSeconds, video.frameCount,
       video.completedFrames, video.progress].every((item) => typeof item === "number" && Number.isFinite(item))
@@ -121,7 +121,7 @@ function execution(value: unknown): NativeExecutionView {
     toolName: "film_grain",
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
-    source: { kind: "video", assetId: source.assetId as string },
+    source: { kind: "image", assetId: source.assetId as string },
     video: {
       format: "mp4",
       mime: "video/mp4",
@@ -183,14 +183,14 @@ export const nativeEffectToolApi = {
   },
   turn: async (request: {
     readonly prompt: string;
-    readonly sourceVideoId?: string;
+    readonly sourceImageId?: string;
   }, signal?: AbortSignal): Promise<NativeEffectTurn> => {
     const body = object(await jsonRequest("/api/effect-tools/v2/turns", {
       method: "POST",
       headers: csrfHeaders(),
       body: JSON.stringify({
         prompt: request.prompt,
-        inputIds: request.sourceVideoId === undefined ? {} : { source_video: request.sourceVideoId }
+        inputIds: request.sourceImageId === undefined ? {} : { source_image: request.sourceImageId }
       }),
       ...(signal === undefined ? {} : { signal })
     }));
