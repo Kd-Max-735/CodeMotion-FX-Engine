@@ -1,5 +1,7 @@
 # Stage 7R Group 1 contract and boundary freeze
 
+> **SUPERSEDED IN PART (2026-08-14):** The AI Storyboard, effect selection, retrieval, parameter, and project DSL portions of this historical freeze are superseded by `docs/api/current-server-single-tool-architecture.md`. Authentication, tenant isolation, and media/export safety constraints remain in force.
+
 Status: **GROUP 1 FROZEN** on 2026-07-30. This record decides contracts only. It
 does not claim that the Group 5 or Group 6 remediation listed below is implemented.
 

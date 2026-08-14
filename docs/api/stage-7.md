@@ -1,5 +1,7 @@
 # Stage 7 server-side multimodal planning
 
+> **SUPERSEDED IN PART (2026-08-14):** The planning, effect retrieval/selection, Storyboard, multi-effect DSL, and browser-preview workflow in this historical record is superseded by `docs/api/current-server-single-tool-architecture.md`. The sole server-side Ark Provider and recorded security evidence remain preserved.
+
 Status: **GROUP 6 PASS** and **GROUP 8 REVERIFIED** on 2026-07-29.
 
 ## Boundary

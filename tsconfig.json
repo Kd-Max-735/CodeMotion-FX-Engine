@@ -11,6 +11,7 @@
     { "path": "./packages/resource-manager" },
     { "path": "./packages/cache" },
     { "path": "./packages/schema" },
+    { "path": "./packages/effect-functions" },
     { "path": "./packages/effects-2d" },
     { "path": "./packages/effects-3d" },
     { "path": "./packages/exporter" },

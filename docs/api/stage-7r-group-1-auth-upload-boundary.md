@@ -1,5 +1,7 @@
 # Stage 7R authentication and browser media boundary
 
+> **SUPERSEDED IN PART (2026-08-14):** Browser AI payload and AI resource-selection details are superseded by `docs/api/current-server-single-tool-architecture.md`. OIDC/session, exact Origin, CSRF, authorization-before-body, tenant isolation, upload/media integrity, and audit rules remain authoritative.
+
 Status: **GROUP 1 FROZEN** on 2026-07-31. This record is the authoritative
 `1-S7R-F0` contract, as closed by `1-S7R-F0-CORRECTION`, for authentication,
 browser media ingress, and server wiring. It defines implementation work for Groups

@@ -1,5 +1,7 @@
 # Stage 7R project materialization, preview, and export boundary
 
+> **SUPERSEDED IN PART (2026-08-14):** The browser project/edit/preview materialization and model-planned multi-effect workflow is superseded by `docs/api/current-server-single-tool-architecture.md`. Owner-scoped resource resolution, server rendering, and export/download safety constraints remain authoritative.
+
 Status: **GROUP 1 FROZEN** on 2026-08-03 under `1-S7R-G0`, corrected by
 `1-S7R-G0-CORRECTION` and the authority ownership allocation was corrected by
 `1-S7R-G0-1-AUTHORITY-BOUNDARY-CORRECTION`; the G0-2 test scope and version

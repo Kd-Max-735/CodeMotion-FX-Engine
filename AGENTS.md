@@ -16,9 +16,20 @@
 
 The authoritative governance order is Chapter 27 in `27_GOVERNANCE.md`.
 
-## Current V2.2 sample-card refactor
+## Current server single-tool architecture
 
-- The user's 2026-08-05 refactor prompt authorized the initial controlled eight-effect sample-card refactor. The user's 2026-08-13 direction extends the original card workflow to all 40 registered P0 effects and defers ReAct/Agent development until 120 real effect functions are complete.
+- The user's 2026-08-14 direction supersedes the V2.2 card/model-selection workflow and every conflicting AI retrieval, ranking, composition, browser-rendering, and editor workflow. The authority is `docs/api/current-server-single-tool-architecture.md`.
+- The user manually selects exactly one snake_case tool. The sole Ark model reads only that selected tool's Chinese Markdown and returns exactly `{ "type": "selected_tool", "data": { ...effectParams } }`.
+- Model parameters and server-authorized inputs/resources are separate contracts. Resource IDs, paths, URLs, images, video, audio, masks, LUTs, depth maps, fonts, models, and textures never enter the model parameter Schema.
+- Preview, rendering, and export are server-only. Preserve authentication, exact Origin, CSRF, tenant isolation, media safety, audit, preview, and export safety chains.
+- Do not develop ReAct, Agent, multi-tool calls, multi-effect composition, or a front-end editing page before all 120 real effect functions are complete.
+- This refactor may use parallel coding only under the disjoint `effect-functions` batch and field-spec directory ownership recorded in the current architecture. Shared contracts, registry, governance, staging, and Git commits remain serial.
+- Add versioned paths and adapters; do not batch-delete historical code. The public registry must not import a batch until its implementation exists and passes its contract tests.
+- Never restore, reconstruct, or reference `D:\CodeMotion FX Engine`, an old commit, a backup, or `doubao_glm_api_package/`.
+
+## Historical V2.2 sample-card refactor
+
+- The user's 2026-08-05 refactor prompt authorized the initial controlled eight-effect sample-card refactor. The user's 2026-08-13 direction extended the original card workflow to all 40 registered P0 effects. This workflow is historical and is superseded where it conflicts with the current server single-tool architecture.
 - Historical group PASS records remain evidence, but Group 7/Group 8 handoffs do not apply to this refactor. No separate stage-opening prompt is required.
 - Preserve all 40 registered P0 effects and the existing authentication, tenant isolation, media safety, preview, and export chains.
 - The user's 2026-08-13 Git instruction supersedes the earlier no-commit rule: create a local commit after each tested logical iteration so every change has a rollback point. A commit does not mean human visual acceptance or publication. Inspect status and the complete staged diff before every commit, report the commit hash afterward, and do not push without explicit authorization.

@@ -170,3 +170,13 @@ The endpoint exists only in the Vite development `configureServer` runtime and m
 ## 27.11 Forty-effect function-first phase
 
 The user's 2026-08-13 direction removes the uncommitted ReAct/Agent console and restores the pre-ReAct card-based creation workflow. All 40 registered P0 effects are exposed through the shared real-runtime card adapter. ReAct, Tool Call orchestration, and multi-effect Agent composition are deferred until 120 real effect functions have been implemented. The server-side single-pass Ark planner remains the sole AI planning path during this phase. Automated verification and local commits do not change `pending-human` or publication state.
+
+## 27.12 Current server single-tool contract refactor
+
+The user's 2026-08-14 direction supersedes Sections 27.9 and 27.11 only where their card workflow, model effect selection, retrieval/ranking, browser rendering, project planning, or front-end editing conflicts with the new architecture. Historical PASS records remain evidence. The current authority is `docs/api/current-server-single-tool-architecture.md`.
+
+The user manually selects exactly one snake_case tool and one request executes only that tool. The server-side Ark model `doubao-seed-2-0-lite-260428` reads only the selected tool's Chinese Markdown and returns exactly `{type,data}`. `data` contains only the selected function's closed Schema parameters. All media, masks, LUTs, depth maps, fonts, models, textures, paths, URLs, and resource IDs are authenticated, tenant-authorized, bound, and locked through a separate server input channel. Preview, render, and export remain server-only. Authentication, Origin, CSRF, tenant isolation, media integrity, audit, and export safety records remain mandatory.
+
+`@codemotion/effect-functions` owns the additive versioned public contract. Existing 40-effect definitions and persisted renderer/project contracts remain preserved until explicit adapters are separately specified and tested. ReAct, Agent, multi-tool execution, multi-effect composition, and front-end editing are prohibited until all 120 real effect functions are complete.
+
+For this refactor only, coding may be parallel under the disjoint `src/batches/batch-01` through `batch-08`, matching test roots, and `field-specs/batch-01` through `batch-08`, `existing-01`, and `existing-02` ownership roots. Shared public contracts, registry, governance, staging, status/diff inspection, and commits remain serial. No registry entry may import a nonexistent or unverified batch. No old project, old commit, backup, or `doubao_glm_api_package/` recovery is permitted.
