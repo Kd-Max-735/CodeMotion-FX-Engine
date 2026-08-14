@@ -1,0 +1,37 @@
+import type { EffectToolDefinition } from "../../types.js";
+import { BACKGROUND_REMOVE_COMPOSE_DEFINITION } from "./background-remove-compose.js";
+import { ECHO_TRAIL_DEFINITION } from "./echo-trail.js";
+import { IMAGE_DEPTH_PARALLAX_DEFINITION } from "./image-depth-parallax.js";
+import { KEN_BURNS_DEFINITION } from "./ken-burns.js";
+import { OBJECT_EXPLODE_DEFINITION } from "./object-explode.js";
+import { PHOTO_STACK_DEFINITION } from "./photo-stack.js";
+import { SMART_CROP_ANIMATE_DEFINITION } from "./smart-crop-animate.js";
+import { SPEED_RAMP_DEFINITION } from "./speed-ramp.js";
+import { TEXT_LOGO_REVEAL_DEFINITION } from "./text-logo-reveal.js";
+import { VIDEO_FREEZE_FRAME_DEFINITION } from "./video-freeze-frame.js";
+
+export {
+  BACKGROUND_REMOVE_COMPOSE_DEFINITION,
+  ECHO_TRAIL_DEFINITION,
+  IMAGE_DEPTH_PARALLAX_DEFINITION,
+  KEN_BURNS_DEFINITION,
+  OBJECT_EXPLODE_DEFINITION,
+  PHOTO_STACK_DEFINITION,
+  SMART_CROP_ANIMATE_DEFINITION,
+  SPEED_RAMP_DEFINITION,
+  TEXT_LOGO_REVEAL_DEFINITION,
+  VIDEO_FREEZE_FRAME_DEFINITION
+};
+
+export const BATCH_06_DEFINITIONS: readonly EffectToolDefinition[] = Object.freeze([
+  OBJECT_EXPLODE_DEFINITION,
+  TEXT_LOGO_REVEAL_DEFINITION,
+  KEN_BURNS_DEFINITION,
+  SMART_CROP_ANIMATE_DEFINITION,
+  IMAGE_DEPTH_PARALLAX_DEFINITION,
+  PHOTO_STACK_DEFINITION,
+  VIDEO_FREEZE_FRAME_DEFINITION,
+  SPEED_RAMP_DEFINITION,
+  ECHO_TRAIL_DEFINITION,
+  BACKGROUND_REMOVE_COMPOSE_DEFINITION
+]);
