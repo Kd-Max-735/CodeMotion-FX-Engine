@@ -22,6 +22,22 @@ export interface SelectedToolParameterProvider {
   generate(request: SelectedToolParameterRequest): Promise<unknown>;
 }
 
+export interface SelectedToolNativeCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: Readonly<Record<string, unknown>>;
+}
+
+export interface SelectedToolModelTurn {
+  readonly reasoningContent: string;
+  readonly content: string;
+  readonly toolCall?: SelectedToolNativeCall;
+}
+
+export interface SelectedToolConversationProvider extends SelectedToolParameterProvider {
+  respond(request: SelectedToolParameterRequest): Promise<SelectedToolModelTurn>;
+}
+
 export interface VolcengineArkSelectedToolProviderOptions {
   readonly apiKey: string;
   readonly baseUrl?: string;
@@ -37,28 +53,79 @@ function exactNonEmpty(value: string, label: string, maximum: number): string {
   return normalized;
 }
 
-function extractOutputText(body: unknown): string {
-  if (typeof body !== "object" || body === null) {
-    throw new ProviderError("provider_response", "Ark returned an invalid response object.");
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new ProviderError("provider_response", `Ark returned an invalid ${label}.`);
   }
-  const root = body as Record<string, unknown>;
-  if (typeof root.output_text === "string") return root.output_text;
-  if (!Array.isArray(root.output)) {
-    throw new ProviderError("provider_response", "Ark returned no structured output.");
+  return value as Record<string, unknown>;
+}
+
+function parseArguments(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value !== "string") {
+    throw new ProviderError("provider_response", "Ark tool arguments were not a JSON string.", {
+      reason: "INVALID_TOOL_RESPONSE"
+    });
   }
-  for (const output of root.output) {
-    if (typeof output !== "object" || output === null) continue;
-    const content = (output as Record<string, unknown>).content;
-    if (!Array.isArray(content)) continue;
-    for (const part of content) {
-      if (typeof part === "object" && part !== null
-        && (part as Record<string, unknown>).type === "output_text"
-        && typeof (part as Record<string, unknown>).text === "string") {
-        return (part as Record<string, unknown>).text as string;
-      }
+  let parsed: unknown;
+  try { parsed = JSON.parse(value) as unknown; }
+  catch (cause) {
+    throw new ProviderError("provider_response", "Ark tool arguments were not valid JSON.", {
+      cause,
+      reason: "INVALID_JSON"
+    });
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new ProviderError("provider_response", "Ark tool arguments must be a JSON object.", {
+      reason: "INVALID_TOOL_RESPONSE"
+    });
+  }
+  return parsed as Readonly<Record<string, unknown>>;
+}
+
+function parseTurn(body: unknown, toolName: string): SelectedToolModelTurn {
+  const root = record(body, "response object");
+  if (!Array.isArray(root.choices) || root.choices.length !== 1) {
+    throw new ProviderError("provider_response", "Ark returned an invalid completion choice count.");
+  }
+  const choice = record(root.choices[0], "completion choice");
+  const message = record(choice.message, "assistant message");
+  const content = message.content === null || message.content === undefined
+    ? "" : typeof message.content === "string" ? message.content : undefined;
+  const reasoningContent = message.reasoning_content === null || message.reasoning_content === undefined
+    ? "" : typeof message.reasoning_content === "string" ? message.reasoning_content : undefined;
+  if (content === undefined || reasoningContent === undefined) {
+    throw new ProviderError("provider_response", "Ark returned invalid assistant text fields.");
+  }
+  if (message.tool_calls === undefined || message.tool_calls === null) {
+    if (content.trim().length === 0) {
+      throw new ProviderError("provider_response", "Ark returned neither text nor a tool call.", {
+        reason: "NO_OUTPUT"
+      });
     }
+    return Object.freeze({ reasoningContent, content });
   }
-  throw new ProviderError("provider_response", "Ark returned no structured output text.");
+  if (!Array.isArray(message.tool_calls) || message.tool_calls.length !== 1) {
+    throw new ProviderError("provider_response", "Ark must return exactly one selected tool call.", {
+      reason: "INVALID_TOOL_RESPONSE"
+    });
+  }
+  const call = record(message.tool_calls[0], "tool call");
+  const fn = record(call.function, "tool function");
+  if (call.type !== "function" || typeof call.id !== "string" || call.id.length === 0
+    || fn.name !== toolName) {
+    throw new ProviderError("security", "Ark attempted an unexpected tool call.", {
+      reason: "INVALID_TOOL_RESPONSE"
+    });
+  }
+  return Object.freeze({
+    reasoningContent,
+    content,
+    toolCall: Object.freeze({
+      id: call.id,
+      name: toolName,
+      arguments: parseArguments(fn.arguments)
+    })
+  });
 }
 
 function safeStatusMessage(status: number): string {
@@ -78,7 +145,7 @@ function ownerFingerprint(tenantId: string, userId: string): string {
     .digest("hex").slice(0, 32)}`;
 }
 
-export class VolcengineArkSelectedToolProvider implements SelectedToolParameterProvider {
+export class VolcengineArkSelectedToolProvider implements SelectedToolConversationProvider {
   readonly id = "volcengine-ark-selected-tool-v1";
   private readonly baseUrl: string;
   private readonly transport: typeof fetch;
@@ -90,52 +157,64 @@ export class VolcengineArkSelectedToolProvider implements SelectedToolParameterP
   }
 
   async generate(request: SelectedToolParameterRequest): Promise<unknown> {
+    const turn = await this.complete(request, "required");
+    if (turn.toolCall === undefined) {
+      throw new ProviderError("provider_response", "Ark did not call the required selected tool.", {
+        reason: "INVALID_TOOL_RESPONSE"
+      });
+    }
+    return { type: request.toolName, data: turn.toolCall.arguments };
+  }
+
+  async respond(request: SelectedToolParameterRequest): Promise<SelectedToolModelTurn> {
+    return this.complete(request, "auto");
+  }
+
+  private async complete(
+    request: SelectedToolParameterRequest,
+    toolChoice: "auto" | "required"
+  ): Promise<SelectedToolModelTurn> {
     if (!TOOL_NAME.test(request.toolName)) {
       throw new ProviderError("invalid_input", "Selected tool name is invalid.");
     }
     const prompt = sanitizeUserText(exactNonEmpty(request.prompt, "Prompt", 10_000));
     const fieldSpec = exactNonEmpty(request.fieldSpec, "Field specification", 100_000);
-    const schema = {
-      $schema: "https://json-schema.org/draft/2020-12/schema",
-      type: "object",
-      additionalProperties: false,
-      required: ["type", "data"],
-      properties: {
-        type: { const: request.toolName },
-        data: request.parameterSchema
-      }
-    };
     const body = {
       model: ARK_V1_MODEL,
-      max_output_tokens: 2_000,
-      input: [{
-        role: "user",
-        content: [{
-          type: "input_text",
-          text: [
-            "你只为用户已经手动选择的一个特效工具生成参数。",
-            "只输出符合给定 JSON Schema 的 {type,data}，不得选择其他工具、输出资源标识或解释。",
+      max_tokens: 2_000,
+      thinking: { type: "enabled" },
+      messages: [
+        {
+          role: "system",
+          content: [
+            "你是 CodeMotion FX 的单工具助手。当前唯一可用工具由用户在界面中预先选择。",
+            "当用户要求实际生成或修改效果时调用该工具；当用户只是咨询参数、能力或使用方式时直接用简洁中文回答，不调用工具。",
+            "不得调用其他工具，不得在参数中输出素材、路径、URL、资源 ID、渲染设置或导出设置。",
             `当前唯一工具：${request.toolName}`,
             "当前工具字段说明：",
-            fieldSpec,
-            "用户描述：",
-            prompt
+            fieldSpec
           ].join("\n")
-        }]
-      }],
-      text: {
-        format: {
-          type: "json_schema",
-          name: `codemotion_${request.toolName}_v1`,
+        },
+        { role: "user", content: prompt }
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: request.toolName,
+          description: `根据用户需求生成并执行已选择的 ${request.toolName} 特效参数。`,
           strict: true,
-          schema
+          parameters: request.parameterSchema
         }
+      }],
+      tool_choice: toolChoice === "auto" ? "auto" : {
+        type: "function",
+        function: { name: request.toolName }
       }
     };
     const started = Date.now();
     let response: Response;
     try {
-      response = await this.transport(`${this.baseUrl}/responses`, {
+      response = await this.transport(`${this.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${this.options.apiKey}`,
@@ -157,7 +236,7 @@ export class VolcengineArkSelectedToolProvider implements SelectedToolParameterP
     try { responseBody = await response.json(); }
     catch { responseBody = undefined; }
     this.options.audit?.({
-      endpoint: "responses.create",
+      endpoint: "chat.completions.create",
       modelId: ARK_V1_MODEL,
       status: response.status,
       latencyMs: Date.now() - started,
@@ -180,13 +259,6 @@ export class VolcengineArkSelectedToolProvider implements SelectedToolParameterP
         reason: "MODEL_MISMATCH"
       });
     }
-    const text = extractOutputText(responseBody);
-    try { return JSON.parse(text) as unknown; }
-    catch (cause) {
-      throw new ProviderError("provider_response", "Ark output was not valid JSON.", {
-        cause,
-        reason: "INVALID_JSON"
-      });
-    }
+    return parseTurn(responseBody, request.toolName);
   }
 }

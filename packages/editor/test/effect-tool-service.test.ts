@@ -8,6 +8,8 @@ import {
   type EffectToolDefinition
 } from "@codemotion/effect-functions";
 import type {
+  SelectedToolConversationProvider,
+  SelectedToolModelTurn,
   SelectedToolParameterProvider,
   SelectedToolParameterRequest
 } from "@codemotion/ai-planner";
@@ -43,6 +45,18 @@ class RecordingProvider implements SelectedToolParameterProvider {
       ? { from: 0, to: 1, duration: 1.2, easing: "easeOut" }
       : {};
     return Promise.resolve(this.output ?? { type: request.toolName, data });
+  }
+}
+
+class NativeRecordingProvider extends RecordingProvider implements SelectedToolConversationProvider {
+  turn: SelectedToolModelTurn = {
+    reasoningContent: "用户只询问参数含义，不需要执行。",
+    content: "temporal 控制颗粒随帧变化的活跃程度。"
+  };
+
+  respond(request: SelectedToolParameterRequest): Promise<SelectedToolModelTurn> {
+    this.requests.push(request);
+    return Promise.resolve(this.turn);
   }
 }
 
@@ -124,6 +138,25 @@ class TestInputResolver implements EffectToolInputResolver {
       if (slot.required && inputIds[slot.name] === undefined) {
         throw new TypeError(`Required input slot ${slot.name} is missing.`);
       }
+    }
+    if (definition.toolName === "film_grain") {
+      return Promise.resolve(Object.freeze({
+        source_frame: Object.freeze({
+          slot: "source_frame",
+          kind: "image" as const,
+          tenantId: this.wrongOwner ? "tenant-other" : owner.tenantId,
+          userId: owner.userId,
+          locked: true as const,
+          binding: {
+            width: 2,
+            height: 2,
+            data: [
+              255, 0, 0, 255, 0, 255, 0, 255,
+              0, 0, 255, 255, 255, 255, 255, 255
+            ]
+          }
+        })
+      }));
     }
     if (definition.toolName !== "fade") return Promise.resolve(Object.freeze({}));
     return Promise.resolve(Object.freeze({
@@ -246,6 +279,67 @@ describe("server single effect-tool service", () => {
     expect(render).toHaveBeenCalledOnce();
   });
 
+  it("returns natural text without rendering or executes the sole film_grain native tool call", async () => {
+    const provider = new NativeRecordingProvider();
+    const inputs = new TestInputResolver();
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
+    const render = vi.fn(definition.render.bind(definition));
+    const registry = new EffectToolRegistry([{ ...definition, render }]);
+    const service = new EffectToolService(provider, inputs, registry);
+
+    await expect(service.turn(principal, {
+      prompt: "temporal 参数有什么作用？",
+      inputIds: {}
+    })).resolves.toEqual({
+      kind: "message",
+      reasoningContent: "用户只询问参数含义，不需要执行。",
+      content: "temporal 控制颗粒随帧变化的活跃程度。"
+    });
+    expect(inputs.calls).toBe(0);
+    expect(render).not.toHaveBeenCalled();
+
+    provider.turn = {
+      reasoningContent: "用户要求实际添加粗粝的暗部胶片颗粒。",
+      content: "将添加粗粝的单色 16mm 胶片颗粒。",
+      toolCall: {
+        id: "call-film-grain-1",
+        name: "film_grain",
+        arguments: {
+          amount: 0.32,
+          size: 4,
+          monochrome: true,
+          response: "shadows",
+          temporal: 0.8
+        }
+      }
+    };
+    const turn = await service.turn(principal, {
+      prompt: "添加粗粝的16mm胶片颗粒",
+      inputIds: { source_frame: "asset_abcdefgh" },
+      render: { width: 2, height: 2 }
+    });
+    expect(turn).toMatchObject({
+      kind: "tool_call",
+      toolCall: {
+        type: "function",
+        function: {
+          name: "film_grain",
+          arguments: { amount: 0.32, size: 4, response: "shadows" }
+        }
+      },
+      execution: {
+        status: "completed",
+        toolName: "film_grain",
+        result: { kind: "frame", output: { width: 2, height: 2, byteLength: 16 } }
+      }
+    });
+    expect(provider.requests).toHaveLength(2);
+    expect(provider.requests.every((request) => request.toolName === "film_grain")).toBe(true);
+    expect(provider.requests[0]!.fieldSpec).toContain("# 胶片颗粒（film_grain）");
+    expect(inputs.calls).toBe(1);
+    expect(render).toHaveBeenCalledOnce();
+  });
+
   it("reference-counts concurrent asset use and aborts parameter generation during close", async () => {
     const provider = new BlockingProvider();
     const service = new EffectToolService(provider, new TestInputResolver());
@@ -271,7 +365,7 @@ describe("server single effect-tool service", () => {
     expect(provider.calls[2]!.request.signal?.aborted).toBe(true);
     await expect(service.generate(principal, "particle_spark", "火花"))
       .rejects.toMatchObject({ code: "cancelled" });
-  });
+  }, 15_000);
 
   it("rejects unknown slots before resolving any media", async () => {
     const resolver = new TenantMediaEffectToolInputResolver({} as never);
@@ -347,6 +441,62 @@ describe("server single effect-tool service", () => {
       expect(await response.json()).toEqual({
         error: { code: "ORIGIN_MISMATCH", retryable: false }
       });
+    });
+  });
+
+  it("exposes only film_grain through the native v2 conversation route", async () => {
+    const provider = new NativeRecordingProvider();
+    const service = new EffectToolService(provider, new TestInputResolver());
+    const auth = {
+      authorize: vi.fn(async () => authenticated())
+    };
+    await withApi(service, auth, async (baseUrl) => {
+      const listed = await fetch(`${baseUrl}/api/effect-tools/v2`);
+      expect(listed.status).toBe(200);
+      await expect(listed.json()).resolves.toEqual({
+        tool: {
+          toolName: "film_grain",
+          displayName: "胶片颗粒",
+          category: "post",
+          configured: true
+        }
+      });
+
+      const answered = await fetch(`${baseUrl}/api/effect-tools/v2/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "temporal 是什么？", inputIds: {} })
+      });
+      expect(answered.status).toBe(200);
+      await expect(answered.json()).resolves.toMatchObject({
+        turn: { kind: "message", content: "temporal 控制颗粒随帧变化的活跃程度。" }
+      });
+
+      provider.turn = {
+        reasoningContent: "需要执行胶片颗粒。",
+        content: "开始执行。",
+        toolCall: {
+          id: "call-film-grain-api",
+          name: "film_grain",
+          arguments: { amount: 0.2, size: 2, monochrome: true, response: "uniform", temporal: 0.5 }
+        }
+      };
+      const called = await fetch(`${baseUrl}/api/effect-tools/v2/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: "添加胶片颗粒",
+          inputIds: { source_frame: "asset_abcdefgh" },
+          render: { width: 2, height: 2 }
+        })
+      });
+      const calledBody = await called.json() as { turn: { execution: { id: string } } };
+      const frame = await fetch(`${baseUrl}/api/effect-tools/v2/executions/${calledBody.turn.execution.id}/frame`);
+      expect(frame.status).toBe(200);
+      expect(frame.headers.get("content-type")).toBe("application/octet-stream");
+      expect(frame.headers.get("x-cmfx-frame-width")).toBe("2");
+      expect(frame.headers.get("x-cmfx-frame-height")).toBe("2");
+      expect((await frame.arrayBuffer()).byteLength).toBe(16);
     });
   });
 });

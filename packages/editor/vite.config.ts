@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin, type PluginOption, type ViteDevServer } from "vite";
+import { defineConfig, loadEnv, type Plugin, type PluginOption, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
@@ -45,13 +45,15 @@ export function createServerRuntimePlugin(
       const port = 4174;
       let runtime: RuntimeLifecycle;
       try {
+        const env = { ...process.env, ...loadEnv("development", workspaceRoot, "") };
         runtime = await createRuntime({
           mode: "development",
           configureServer: true,
           listenHost: host,
           publicOrigin: `http://${host}:${port}`,
           mediaRoot: resolve(workspaceRoot, "tmp/stage-6-media"),
-          uploadTempRoot: resolve(workspaceRoot, "tmp/browser-upload")
+          uploadTempRoot: resolve(workspaceRoot, "tmp/browser-upload"),
+          env
         });
       } catch (error) {
         throw error;

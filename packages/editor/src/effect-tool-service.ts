@@ -18,6 +18,8 @@ import {
 import {
   ProviderError,
   VolcengineArkSelectedToolProvider,
+  type SelectedToolConversationProvider,
+  type SelectedToolModelTurn,
   type SelectedToolParameterProvider
 } from "@codemotion/ai-planner";
 import {
@@ -34,6 +36,7 @@ import { AuthHttpError, type AuthSessionService } from "./auth-session-service.j
 const MAX_BODY_BYTES = 64 * 1024;
 const RESOURCE_ID = /^[a-z][a-z0-9_-]{7,127}$/u;
 const EXISTING_BACKEND = "effect-functions-existing-cpu-v1";
+export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
 export interface EffectToolPrincipal {
   readonly tenantId: string;
@@ -94,6 +97,33 @@ export interface EffectToolExecutionView {
   readonly createdAt: string;
   readonly result: SafeRenderResult;
 }
+
+export interface EffectToolFrameView {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8Array;
+}
+
+export interface EffectToolNativeCallView {
+  readonly id: string;
+  readonly type: "function";
+  readonly function: {
+    readonly name: typeof NATIVE_EFFECT_TOOL_NAME;
+    readonly arguments: Readonly<Record<string, unknown>>;
+  };
+}
+
+export type EffectToolTurnView = Readonly<{
+  kind: "message";
+  reasoningContent: string;
+  content: string;
+}> | Readonly<{
+  kind: "tool_call";
+  reasoningContent: string;
+  content: string;
+  toolCall: EffectToolNativeCallView;
+  execution: EffectToolExecutionView;
+}>;
 
 interface StoredExecution {
   readonly view: EffectToolExecutionView;
@@ -169,6 +199,15 @@ function safeResult(result: EffectRenderResult): SafeRenderResult {
     warnings: Object.freeze([...result.warnings]),
     output: safeOutput(result)
   });
+}
+
+function conversationProvider(
+  provider: SelectedToolParameterProvider | undefined
+): SelectedToolConversationProvider {
+  if (provider === undefined || typeof (provider as Partial<SelectedToolConversationProvider>).respond !== "function") {
+    throw new ProviderError("provider_unavailable", "Native Ark Tool Call is not configured.");
+  }
+  return provider as SelectedToolConversationProvider;
 }
 
 function visualKind(asset: VerifiedStoredMedia["asset"]): "image" | "video" | undefined {
@@ -424,6 +463,16 @@ export class EffectToolService {
     })));
   }
 
+  nativeTool(): EffectToolListItem & { readonly configured: boolean } {
+    const definition = this.selected(NATIVE_EFFECT_TOOL_NAME);
+    return Object.freeze({
+      toolName: definition.toolName,
+      displayName: definition.displayName,
+      category: definition.category,
+      configured: this.configured
+    });
+  }
+
   usesAsset(owner: OwnerContext, assetId: string): boolean {
     return (this.activeAssets.get(JSON.stringify([owner.tenantId, owner.userId, assetId])) ?? 0) > 0;
   }
@@ -510,8 +559,108 @@ export class EffectToolService {
     }
   }
 
+  async turn(
+    principal: EffectToolPrincipal,
+    request: {
+      readonly prompt: string;
+      readonly inputIds: EffectToolInputIds;
+      readonly render?: unknown;
+    }
+  ): Promise<EffectToolTurnView> {
+    if (this.closing) throw new ProviderError("cancelled", "Effect tool service is closing.");
+    const owner = ownerOf(principal);
+    const definition = this.selected(NATIVE_EFFECT_TOOL_NAME);
+    if (typeof request.prompt !== "string" || request.prompt.trim().length === 0
+      || request.prompt.length > 10_000) {
+      throw new TypeError("prompt is required and must not exceed 10000 characters.");
+    }
+    const rawInputIds = exactObject(request.inputIds, "inputIds") as EffectToolInputIds;
+    const controller = new AbortController();
+    this.controllers.add(controller);
+    const activeKeys: string[] = [];
+    try {
+      const fieldSpec = await loadEffectFieldSpec(definition.toolName);
+      const modelTurn: SelectedToolModelTurn = await conversationProvider(this.provider).respond({
+        requestId: randomUUID(),
+        tenantId: principal.tenantId,
+        userId: principal.userId,
+        toolName: definition.toolName,
+        prompt: request.prompt,
+        fieldSpec,
+        parameterSchema: definition.parameterSchema,
+        signal: controller.signal
+      });
+      if (modelTurn.toolCall === undefined) {
+        return Object.freeze({
+          kind: "message",
+          reasoningContent: modelTurn.reasoningContent,
+          content: modelTurn.content
+        });
+      }
+      const envelope = validateAndNormalizeEffectEnvelope(definition, definition.toolName, {
+        type: definition.toolName,
+        data: modelTurn.toolCall.arguments
+      });
+      const render = renderSettings(request.render);
+      const ids = Object.values(rawInputIds).flatMap((value) => Array.isArray(value) ? value : [value])
+        .filter((value): value is string => typeof value === "string");
+      activeKeys.push(...ids.map((id) => JSON.stringify([owner.tenantId, owner.userId, id])));
+      activeKeys.forEach((key) => this.activeAssets.set(key, (this.activeAssets.get(key) ?? 0) + 1));
+      const execution = await this.renderEnvelope(
+        principal,
+        definition,
+        rawInputIds,
+        render,
+        envelope,
+        controller.signal
+      );
+      return Object.freeze({
+        kind: "tool_call",
+        reasoningContent: modelTurn.reasoningContent,
+        content: modelTurn.content,
+        toolCall: Object.freeze({
+          id: modelTurn.toolCall.id,
+          type: "function",
+          function: Object.freeze({
+            name: NATIVE_EFFECT_TOOL_NAME,
+            arguments: structuredClone(envelope.data)
+          })
+        }),
+        execution
+      });
+    } finally {
+      this.controllers.delete(controller);
+      activeKeys.forEach((key) => {
+        const remaining = (this.activeAssets.get(key) ?? 1) - 1;
+        if (remaining > 0) this.activeAssets.set(key, remaining);
+        else this.activeAssets.delete(key);
+      });
+    }
+  }
+
   get(principal: EffectToolPrincipal, id: string): EffectToolExecutionView {
     return structuredClone(this.executions.get(ownerOf(principal), id).value.view);
+  }
+
+  frame(principal: EffectToolPrincipal, id: string): EffectToolFrameView {
+    const result = this.executions.get(ownerOf(principal), id).value.result;
+    if (result.kind !== "frame" || typeof result.output !== "object" || result.output === null) {
+      throw new RangeError("Execution has no frame output.");
+    }
+    const output = result.output as Record<string, unknown>;
+    const width = output.width;
+    const height = output.height;
+    const data = output.data;
+    if (!Number.isInteger(width) || !Number.isInteger(height)
+      || (width as number) < 1 || (height as number) < 1
+      || (!Array.isArray(data) && !(data instanceof Uint8Array) && !(data instanceof Uint8ClampedArray))) {
+      throw new TypeError("Stored frame output is invalid.");
+    }
+    const bytes = Uint8Array.from(data as ArrayLike<number>);
+    if (bytes.byteLength !== (width as number) * (height as number) * 4) {
+      throw new TypeError("Stored frame byte length is invalid.");
+    }
+    return { width: width as number, height: height as number, data: bytes };
   }
 
   async close(): Promise<void> {
@@ -549,6 +698,45 @@ export class EffectToolService {
       ...(signal === undefined ? {} : { signal })
     });
     return validateAndNormalizeEffectEnvelope(definition, definition.toolName, output);
+  }
+
+  private async renderEnvelope(
+    principal: EffectToolPrincipal,
+    definition: EffectToolDefinition,
+    inputIds: EffectToolInputIds,
+    render: EffectToolRenderSettings,
+    envelope: ReturnType<typeof validateAndNormalizeEffectEnvelope>,
+    signal: AbortSignal
+  ): Promise<EffectToolExecutionView> {
+    const inputs = await this.inputs.resolve(principal, definition, inputIds, render, signal);
+    const id = randomUUID();
+    const context: ServerEffectRenderContext = {
+      environment: "server",
+      requestId: id,
+      tenantId: principal.tenantId,
+      userId: principal.userId,
+      time: render.time,
+      deltaTime: 1 / render.fps,
+      frame: Math.floor(render.time * render.fps),
+      fps: render.fps,
+      width: render.width,
+      height: render.height,
+      seed: render.seed,
+      quality: render.quality,
+      backend: definition.primaryBackend,
+      inputs,
+      signal
+    };
+    const result = await executeSelectedEffectTool(definition, definition.toolName, envelope, context);
+    const view = Object.freeze({
+      id,
+      status: "completed" as const,
+      toolName: definition.toolName,
+      createdAt: new Date().toISOString(),
+      result: safeResult(result)
+    });
+    this.executions.put(ownerOf(principal), id, { view, result });
+    return structuredClone(view);
   }
 }
 
@@ -607,6 +795,9 @@ function safeError(error: unknown): { status: number; code: string } {
   if (error instanceof RangeError && error.message === "Unknown effect tool name.") {
     return { status: 404, code: "TOOL_NOT_FOUND" };
   }
+  if (error instanceof RangeError && error.message === "Execution has no frame output.") {
+    return { status: 409, code: "FRAME_NOT_AVAILABLE" };
+  }
   if (error instanceof Error && error.message === "Task not found or access denied.") {
     return { status: 404, code: "EXECUTION_NOT_FOUND" };
   }
@@ -622,15 +813,35 @@ export function createEffectToolApi(
     const collection = url.pathname === "/api/effect-tools/v1";
     const parameters = url.pathname === "/api/effect-tools/v1/parameters";
     const executions = url.pathname === "/api/effect-tools/v1/executions";
+    const nativeTool = url.pathname === "/api/effect-tools/v2";
+    const nativeTurns = url.pathname === "/api/effect-tools/v2/turns";
     const execution = /^\/api\/effect-tools\/v1\/executions\/([^/]+)$/u.exec(url.pathname);
-    const matched = request.method === "GET" && (collection || execution !== null)
-      || request.method === "POST" && (parameters || executions);
+    const nativeFrame = /^\/api\/effect-tools\/v2\/executions\/([^/]+)\/frame$/u.exec(url.pathname);
+    const matched = request.method === "GET" && (collection || nativeTool || execution !== null)
+      || request.method === "GET" && nativeFrame !== null
+      || request.method === "POST" && (parameters || executions || nativeTurns);
     if (!matched) return next();
     try {
       if (auth === undefined) throw new AuthHttpError(401, "UNAUTHENTICATED");
       if (request.method === "GET" && collection) {
         await auth.authorize(request, response, "ai:plan", false);
         return sendJson(response, 200, { tools: service.list() });
+      }
+      if (request.method === "GET" && nativeTool) {
+        await auth.authorize(request, response, "ai:plan", false);
+        return sendJson(response, 200, { tool: service.nativeTool() });
+      }
+      if (request.method === "GET" && nativeFrame) {
+        const principal = await auth.authorize(request, response, "project:preview", false);
+        const frame = service.frame(principal, decodeURIComponent(nativeFrame[1]!));
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/octet-stream");
+        response.setHeader("cache-control", "no-store");
+        response.setHeader("x-cmfx-frame-width", String(frame.width));
+        response.setHeader("x-cmfx-frame-height", String(frame.height));
+        response.setHeader("content-length", String(frame.data.byteLength));
+        response.end(frame.data);
+        return;
       }
       if (request.method === "GET" && execution) {
         const principal = await auth.authorize(request, response, "project:preview", false);
@@ -642,6 +853,18 @@ export function createEffectToolApi(
         exactKeys(body, ["toolName", "prompt"], "request body");
         const envelope = await service.generate(principal, body.toolName as string, body.prompt as string);
         return sendJson(response, 200, { envelope });
+      }
+      if (nativeTurns) {
+        const principal = await auth.authorize(request, response, "project:preview", true);
+        if (!principal.scopes.includes("ai:plan")) throw new AuthHttpError(403, "FORBIDDEN");
+        const body = exactObject(await jsonBody(request), "request body");
+        exactKeys(body, ["prompt", "inputIds", "render"], "request body");
+        const turn = await service.turn(principal, {
+          prompt: body.prompt as string,
+          inputIds: body.inputIds as EffectToolInputIds,
+          ...(body.render === undefined ? {} : { render: body.render })
+        });
+        return sendJson(response, 200, { turn });
       }
       const principal = await auth.authorize(request, response, "project:preview", true);
       if (!principal.scopes.includes("ai:plan")) throw new AuthHttpError(403, "FORBIDDEN");

@@ -222,7 +222,7 @@ export class ProviderError extends Error {
 }
 
 export interface ProviderAuditRecord {
-  readonly endpoint: "files.create" | "files.retrieve" | "files.delete" | "responses.create";
+  readonly endpoint: "files.create" | "files.retrieve" | "files.delete" | "responses.create" | "chat.completions.create";
   readonly modelId?: typeof ARK_V1_MODEL;
   readonly status: number;
   readonly latencyMs: number;
