@@ -12,6 +12,11 @@ import {
 } from "./auth-session-service.js";
 import { AiPlanService, createAiPlanApi, createProductionAiPlanService } from "./ai-plan-service.js";
 import { ExportTaskService, createExportApi } from "./export-task-service.js";
+import {
+  EffectToolService,
+  createEffectToolApi,
+  createProductionEffectToolService
+} from "./effect-tool-service.js";
 import { MediaAssetService } from "./media-asset-service.js";
 import { EditorPreviewService, createEditorPreviewApi, sendSafeProjectError } from "./preview-task-service.js";
 
@@ -31,6 +36,7 @@ export interface ServerRuntimeOptions {
   readonly authAudit?: (event: AuthAuditEvent) => void;
   readonly mediaAudit?: (event: Readonly<{ event: "media-index-record-rejected" | "media-index-load-failed" }>) => void;
   readonly createAiPlans?: (assets: TenantMediaStore) => AiPlanService;
+  readonly createEffectTools?: (assets: TenantMediaStore) => EffectToolService;
 }
 
 export interface ServerRuntime {
@@ -38,6 +44,7 @@ export interface ServerRuntime {
   readonly mediaStore: TenantMediaStore;
   readonly mediaAssets: MediaAssetService;
   readonly aiPlans: AiPlanService;
+  readonly effectTools: EffectToolService;
   readonly previews: EditorPreviewService;
   readonly exports: ExportTaskService;
   readonly handle: Middleware;
@@ -79,6 +86,7 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
     .update(authOptions.sessionSecret).update(randomBytes(32)).digest();
   let mediaAssets: MediaAssetService | undefined;
   let aiPlans: AiPlanService | undefined;
+  let effectTools: EffectToolService | undefined;
   let previews: EditorPreviewService | undefined;
   let exports: ExportTaskService | undefined;
   try {
@@ -88,6 +96,7 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
       uploadTempRoot,
       cursorSecret,
       isAssetInUse: (owner, assetId) => aiPlans?.usesAsset(owner, assetId) === true
+        || effectTools?.usesAsset(owner, assetId) === true
         || previews?.usesAsset(owner, assetId) === true
         || exports?.usesAsset(owner, assetId) === true
     });
@@ -96,6 +105,8 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
       options.mode === "development" && options.configureServer === true,
       env
     );
+    effectTools = options.createEffectTools?.(mediaStore)
+      ?? createProductionEffectToolService(mediaStore, env, options.fetch);
     previews = new EditorPreviewService(mediaStore);
     exports = new ExportTaskService({ resolver: mediaStore, outputRoot: exportRoot });
     await exports.initialize();
@@ -103,6 +114,7 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
     const cleanup = await Promise.allSettled([
       mediaAssets?.close(),
       aiPlans?.close(),
+      effectTools?.close(),
       previews?.close(),
       exports?.close()
     ]);
@@ -122,6 +134,7 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
       (request, response) => auth.resolveSession(request, response),
       (request, response) => auth.authorize(request, response, "ai:plan", true).then(() => undefined)
     ),
+    createEffectToolApi(effectTools, auth),
     createEditorPreviewApi(previews, auth),
     createExportApi(exports, auth)
   ];
@@ -149,8 +162,10 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
   const close = (): Promise<void> => {
     if (closePromise !== undefined) return closePromise;
     closing = true;
-    closePromise = Promise.all([mediaAssets.close(), aiPlans.close(), previews.close(), exports.close()]).then(() => undefined);
+    closePromise = Promise.all([
+      mediaAssets.close(), aiPlans.close(), effectTools.close(), previews.close(), exports.close()
+    ]).then(() => undefined);
     return closePromise;
   };
-  return { auth, mediaStore, mediaAssets, aiPlans, previews, exports, handle, close, dispose: close };
+  return { auth, mediaStore, mediaAssets, aiPlans, effectTools, previews, exports, handle, close, dispose: close };
 }

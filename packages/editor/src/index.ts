@@ -15,6 +15,12 @@ export type {
 } from "./project-materialization.js";
 export { EditorPreviewService, createEditorPreviewApi } from "./preview-task-service.js";
 export { ExportTaskService, ExportServiceError, createExportApi } from "./export-task-service.js";
+export {
+  EffectToolService,
+  TenantMediaEffectToolInputResolver,
+  createEffectToolApi,
+  createProductionEffectToolService
+} from "./effect-tool-service.js";
 export { createServerRuntime } from "./server-runtime.js";
 export { AUTOSAVE_KEY, EditorStore, RECENTS_KEY } from "./store.js";
 export type { EditorSnapshot, StorageLike } from "./store.js";

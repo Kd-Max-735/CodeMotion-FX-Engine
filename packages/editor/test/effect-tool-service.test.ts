@@ -1,0 +1,352 @@
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { describe, expect, it, vi } from "vitest";
+import {
+  EFFECT_TOOL_REGISTRY,
+  EffectToolRegistry,
+  type AuthorizedEffectInputs,
+  type EffectToolDefinition
+} from "@codemotion/effect-functions";
+import type {
+  SelectedToolParameterProvider,
+  SelectedToolParameterRequest
+} from "@codemotion/ai-planner";
+import type { ApplicationScope } from "@codemotion/schema";
+import {
+  AuthHttpError,
+  type AuthenticatedSessionPrincipal
+} from "../src/auth-session-service.js";
+import {
+  EffectToolService,
+  TenantMediaEffectToolInputResolver,
+  createEffectToolApi,
+  type EffectToolInputIds,
+  type EffectToolInputResolver,
+  type EffectToolPrincipal,
+  type EffectToolRenderSettings
+} from "../src/effect-tool-service.js";
+
+const principal: EffectToolPrincipal = {
+  tenantId: "tenant-effect-tools",
+  userId: "user-effect-tools",
+  scopes: ["ai:plan", "project:preview"]
+};
+
+class RecordingProvider implements SelectedToolParameterProvider {
+  readonly id = "recording-selected-tool-provider";
+  readonly requests: SelectedToolParameterRequest[] = [];
+  output: unknown = undefined;
+
+  generate(request: SelectedToolParameterRequest): Promise<unknown> {
+    this.requests.push(request);
+    const data = request.toolName === "fade"
+      ? { from: 0, to: 1, duration: 1.2, easing: "easeOut" }
+      : {};
+    return Promise.resolve(this.output ?? { type: request.toolName, data });
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+class BlockingProvider implements SelectedToolParameterProvider {
+  readonly id = "blocking-selected-tool-provider";
+  readonly calls: Array<{
+    request: SelectedToolParameterRequest;
+    result: ReturnType<typeof deferred<unknown>>;
+  }> = [];
+
+  generate(request: SelectedToolParameterRequest): Promise<unknown> {
+    const result = deferred<unknown>();
+    this.calls.push({ request, result });
+    request.signal?.addEventListener("abort", () => result.reject(request.signal?.reason), { once: true });
+    return result.promise;
+  }
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 1_000; attempt += 1) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Condition was not reached within the deterministic turn budget.");
+}
+
+function rasterBinding() {
+  const data = new Uint8ClampedArray([
+    255, 0, 0, 255, 0, 255, 0, 255,
+    0, 0, 255, 255, 255, 255, 255, 255
+  ]);
+  return {
+    surface: { width: 2, height: 2, data, colorSpace: "srgb", alphaMode: "straight" },
+    rasterInput: {
+      layerId: "single-tool-test-layer",
+      layerType: "image",
+      source: {
+        kind: "image",
+        assetId: "asset_testsource",
+        assetHash: "sha256:test-source-fixture",
+        frameTime: 0,
+        pixels: {
+          width: 2, height: 2, data, colorSpace: "srgb", alphaMode: "straight", rowOrder: "top-to-bottom"
+        }
+      },
+      time: {
+        contractVersion: "1.1.0", layerId: "single-tool-test-layer", active: true,
+        projectTime: 0, localTime: 0, sourceTime: 0, deltaTime: 1 / 30
+      },
+      transform: { matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1], anchor: [0, 0] },
+      opacity: 1,
+      masks: [],
+      target: {
+        width: 2, height: 2, format: "rgba8", colorSpace: "srgb", samples: 1, usage: "input"
+      }
+    }
+  };
+}
+
+class TestInputResolver implements EffectToolInputResolver {
+  calls = 0;
+  wrongOwner = false;
+
+  resolve(
+    owner: EffectToolPrincipal,
+    definition: EffectToolDefinition,
+    inputIds: EffectToolInputIds,
+    _render: EffectToolRenderSettings
+  ): Promise<AuthorizedEffectInputs> {
+    this.calls += 1;
+    for (const slot of definition.inputSlots) {
+      if (slot.required && inputIds[slot.name] === undefined) {
+        throw new TypeError(`Required input slot ${slot.name} is missing.`);
+      }
+    }
+    if (definition.toolName !== "fade") return Promise.resolve(Object.freeze({}));
+    return Promise.resolve(Object.freeze({
+      source_layer: Object.freeze({
+        slot: "source_layer",
+        kind: "data" as const,
+        tenantId: this.wrongOwner ? "tenant-other" : owner.tenantId,
+        userId: owner.userId,
+        locked: true as const,
+        binding: rasterBinding()
+      })
+    }));
+  }
+}
+
+function authenticated(): AuthenticatedSessionPrincipal {
+  return {
+    ...principal,
+    scopes: ["ai:plan", "project:preview"],
+    issuer: "urn:test",
+    audience: "test",
+    issuedAt: 1,
+    expiresAt: 2_000_000_000,
+    sessionId: "effect-tool-session-012345678901234567890123",
+    authSource: "local-dev-session"
+  };
+}
+
+async function withApi<T>(
+  service: EffectToolService,
+  auth: Parameters<typeof createEffectToolApi>[1],
+  run: (baseUrl: string) => Promise<T>
+): Promise<T> {
+  const handler = createEffectToolApi(service, auth);
+  const server = createServer((request, response) => {
+    void handler(request, response, () => {
+      response.statusCode = 404;
+      response.end();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    return await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}
+
+describe("server single effect-tool service", () => {
+  it("executes one existing adapter and one new definition through the server service", async () => {
+    const provider = new RecordingProvider();
+    const inputs = new TestInputResolver();
+    const service = new EffectToolService(provider, inputs);
+
+    const existing = await service.execute(principal, {
+      toolName: "fade",
+      prompt: "快速淡入",
+      inputIds: { source_layer: "asset_abcdefgh" },
+      render: { width: 2, height: 2, time: 0.5 }
+    });
+    const added = await service.execute(principal, {
+      toolName: "particle_spark",
+      prompt: "轻微火花",
+      inputIds: {},
+      render: { width: 32, height: 18, time: 0.1 }
+    });
+
+    expect(service.list()).toHaveLength(120);
+    expect(existing).toMatchObject({ toolName: "fade", result: { kind: "frame", degraded: false } });
+    expect(existing.result.output).toMatchObject({ width: 2, height: 2, byteLength: 16 });
+    expect(added).toMatchObject({ toolName: "particle_spark", result: { kind: "metadata" } });
+    expect(provider.requests.map((request) => request.toolName)).toEqual(["fade", "particle_spark"]);
+    expect(provider.requests[0]!.fieldSpec).toContain("# 淡入淡出 `fade`");
+    expect(provider.requests[1]!.fieldSpec).toContain("`particle_spark`");
+    expect(() => service.get({ ...principal, tenantId: "tenant-other" }, added.id)).toThrow(/access denied/u);
+  });
+
+  it("rejects mismatched type, unknown model fields, missing inputs, and wrong-owner bindings", async () => {
+    const provider = new RecordingProvider();
+    const inputs = new TestInputResolver();
+    const service = new EffectToolService(provider, inputs);
+
+    provider.output = { type: "fade", data: {} };
+    await expect(service.execute(principal, {
+      toolName: "particle_spark", prompt: "火花", inputIds: {}
+    })).rejects.toMatchObject({ code: "TYPE_MISMATCH" });
+
+    provider.output = { type: "particle_spark", data: { assetId: "asset_abcdefgh" } };
+    await expect(service.execute(principal, {
+      toolName: "particle_spark", prompt: "火花", inputIds: {}
+    })).rejects.toMatchObject({ code: "RESOURCE_INJECTION" });
+
+    provider.output = { type: "particle_spark", data: { rogue: 1 } };
+    await expect(service.execute(principal, {
+      toolName: "particle_spark", prompt: "火花", inputIds: {}
+    })).rejects.toMatchObject({ code: "PARAMETER_INVALID" });
+
+    provider.output = undefined;
+    const beforeMissing = provider.requests.length;
+    await expect(service.execute(principal, {
+      toolName: "fade", prompt: "淡入", inputIds: {}
+    })).rejects.toThrow(/Required input slot source_layer is missing/u);
+    expect(provider.requests).toHaveLength(beforeMissing);
+
+    inputs.wrongOwner = true;
+    await expect(service.execute(principal, {
+      toolName: "fade", prompt: "淡入", inputIds: { source_layer: "asset_abcdefgh" }
+    })).rejects.toMatchObject({ code: "INPUT_AUTHORIZATION_INVALID" });
+  });
+
+  it("invokes the selected render function exactly once for a legal request", async () => {
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("particle_spark")!;
+    const render = vi.fn(definition.render.bind(definition));
+    const registry = new EffectToolRegistry([{ ...definition, render }]);
+    const service = new EffectToolService(new RecordingProvider(), new TestInputResolver(), registry);
+
+    await service.execute(principal, {
+      toolName: "particle_spark", prompt: "火花", inputIds: {}
+    });
+    expect(render).toHaveBeenCalledOnce();
+  });
+
+  it("reference-counts concurrent asset use and aborts parameter generation during close", async () => {
+    const provider = new BlockingProvider();
+    const service = new EffectToolService(provider, new TestInputResolver());
+    const inputIds = { source_layer: "asset_abcdefgh" };
+    const first = service.execute(principal, { toolName: "fade", prompt: "淡入", inputIds });
+    const second = service.execute(principal, { toolName: "fade", prompt: "淡入", inputIds });
+    await waitFor(() => provider.calls.length === 2);
+    expect(service.usesAsset(principal, "asset_abcdefgh")).toBe(true);
+
+    const envelope = { type: "fade", data: { from: 0, to: 1, duration: 1.2, easing: "easeOut" } };
+    provider.calls[0]!.result.resolve(envelope);
+    await first;
+    expect(service.usesAsset(principal, "asset_abcdefgh")).toBe(true);
+    provider.calls[1]!.result.resolve(envelope);
+    await second;
+    expect(service.usesAsset(principal, "asset_abcdefgh")).toBe(false);
+
+    const generating = service.generate(principal, "particle_spark", "火花");
+    await waitFor(() => provider.calls.length === 3);
+    const closing = service.close();
+    await expect(generating).rejects.toBeDefined();
+    await closing;
+    expect(provider.calls[2]!.request.signal?.aborted).toBe(true);
+    await expect(service.generate(principal, "particle_spark", "火花"))
+      .rejects.toMatchObject({ code: "cancelled" });
+  });
+
+  it("rejects unknown slots before resolving any media", async () => {
+    const resolver = new TenantMediaEffectToolInputResolver({} as never);
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("particle_spark")!;
+    await expect(resolver.resolve(principal, definition, {
+      rogue_slot: "asset_abcdefgh"
+    }, { time: 0, fps: 30, width: 2, height: 2, seed: 1, quality: "preview" }))
+      .rejects.toThrow(/unknown slot/u);
+  });
+
+  it("exposes versioned authenticated list, parameter, execute, and owner-scoped result routes", async () => {
+    const provider = new RecordingProvider();
+    const service = new EffectToolService(provider, new TestInputResolver());
+    const calls: Array<[ApplicationScope, boolean]> = [];
+    const auth = {
+      authorize: vi.fn(async (
+        _request: IncomingMessage,
+        _response: ServerResponse,
+        scope: ApplicationScope,
+        stateChanging = false
+      ) => {
+        calls.push([scope, stateChanging]);
+        return authenticated();
+      })
+    };
+
+    await withApi(service, auth, async (baseUrl) => {
+      const list = await fetch(`${baseUrl}/api/effect-tools/v1`);
+      expect(list.status).toBe(200);
+      const listed = await list.json() as { tools: unknown[]; model?: unknown };
+      expect(listed.tools).toHaveLength(120);
+      expect(listed.model).toBeUndefined();
+
+      const parameters = await fetch(`${baseUrl}/api/effect-tools/v1/parameters`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ toolName: "particle_spark", prompt: "火花" })
+      });
+      expect(parameters.status).toBe(200);
+
+      const execution = await fetch(`${baseUrl}/api/effect-tools/v1/executions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ toolName: "particle_spark", prompt: "火花", inputIds: {} })
+      });
+      expect(execution.status).toBe(201);
+      const created = await execution.json() as { execution: { id: string } };
+      const queried = await fetch(`${baseUrl}/api/effect-tools/v1/executions/${created.execution.id}`);
+      expect(queried.status).toBe(200);
+    });
+    expect(calls).toEqual([
+      ["ai:plan", false],
+      ["ai:plan", true],
+      ["project:preview", true],
+      ["project:preview", false]
+    ]);
+  });
+
+  it("returns a safe denial when the shared Origin and CSRF authorization rejects", async () => {
+    const service = new EffectToolService(new RecordingProvider(), new TestInputResolver());
+    const auth = {
+      authorize: vi.fn(async () => {
+        throw new AuthHttpError(403, "ORIGIN_MISMATCH");
+      })
+    };
+    await withApi(service, auth, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/effect-tools/v1/parameters`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ toolName: "particle_spark", prompt: "火花" })
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: { code: "ORIGIN_MISMATCH", retryable: false }
+      });
+    });
+  });
+});

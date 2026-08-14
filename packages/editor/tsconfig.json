@@ -12,6 +12,7 @@
   "references": [
     { "path": "../ai-planner" },
     { "path": "../core" },
+    { "path": "../effect-functions" },
     { "path": "../effects-2d" },
     { "path": "../effects-3d" },
     { "path": "../exporter" },
