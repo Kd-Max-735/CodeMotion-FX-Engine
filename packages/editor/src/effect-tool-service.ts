@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { resolve } from "node:path";
 import type { RenderQuality } from "@codemotion/core";
 import {
   EFFECT_TOOL_REGISTRY,
@@ -32,6 +33,11 @@ import {
 } from "@codemotion/exporter";
 import type { LayerRasterizationInput } from "@codemotion/renderer-api";
 import { AuthHttpError, type AuthSessionService } from "./auth-session-service.js";
+import {
+  EffectToolVideoService,
+  type EffectToolVideoExecutionView,
+  type EffectToolVideoFile
+} from "./effect-tool-video-service.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const RESOURCE_ID = /^[a-z][a-z0-9_-]{7,127}$/u;
@@ -122,7 +128,7 @@ export type EffectToolTurnView = Readonly<{
   reasoningContent: string;
   content: string;
   toolCall: EffectToolNativeCallView;
-  execution: EffectToolExecutionView;
+  execution: EffectToolVideoExecutionView;
 }>;
 
 interface StoredExecution {
@@ -450,7 +456,8 @@ export class EffectToolService {
   constructor(
     private readonly provider: SelectedToolParameterProvider | undefined,
     private readonly inputs: EffectToolInputResolver,
-    private readonly registry: EffectToolRegistry = EFFECT_TOOL_REGISTRY
+    private readonly registry: EffectToolRegistry = EFFECT_TOOL_REGISTRY,
+    private readonly nativeVideos?: EffectToolVideoService
   ) {}
 
   get configured(): boolean { return this.provider !== undefined; }
@@ -474,7 +481,8 @@ export class EffectToolService {
   }
 
   usesAsset(owner: OwnerContext, assetId: string): boolean {
-    return (this.activeAssets.get(JSON.stringify([owner.tenantId, owner.userId, assetId])) ?? 0) > 0;
+    return (this.activeAssets.get(JSON.stringify([owner.tenantId, owner.userId, assetId])) ?? 0) > 0
+      || this.nativeVideos?.usesAsset(owner, assetId) === true;
   }
 
   async generate(
@@ -564,7 +572,6 @@ export class EffectToolService {
     request: {
       readonly prompt: string;
       readonly inputIds: EffectToolInputIds;
-      readonly render?: unknown;
     }
   ): Promise<EffectToolTurnView> {
     if (this.closing) throw new ProviderError("cancelled", "Effect tool service is closing.");
@@ -574,10 +581,10 @@ export class EffectToolService {
       || request.prompt.length > 10_000) {
       throw new TypeError("prompt is required and must not exceed 10000 characters.");
     }
-    const rawInputIds = exactObject(request.inputIds, "inputIds") as EffectToolInputIds;
+    const rawInputIds = exactObject(request.inputIds, "inputIds");
+    exactKeys(rawInputIds, ["source_video"], "inputIds");
     const controller = new AbortController();
     this.controllers.add(controller);
-    const activeKeys: string[] = [];
     try {
       const fieldSpec = await loadEffectFieldSpec(definition.toolName);
       const modelTurn: SelectedToolModelTurn = await conversationProvider(this.provider).respond({
@@ -601,18 +608,17 @@ export class EffectToolService {
         type: definition.toolName,
         data: modelTurn.toolCall.arguments
       });
-      const render = renderSettings(request.render);
-      const ids = Object.values(rawInputIds).flatMap((value) => Array.isArray(value) ? value : [value])
-        .filter((value): value is string => typeof value === "string");
-      activeKeys.push(...ids.map((id) => JSON.stringify([owner.tenantId, owner.userId, id])));
-      activeKeys.forEach((key) => this.activeAssets.set(key, (this.activeAssets.get(key) ?? 0) + 1));
-      const execution = await this.renderEnvelope(
-        principal,
+      const sourceVideo = rawInputIds.source_video;
+      if (typeof sourceVideo !== "string" || !RESOURCE_ID.test(sourceVideo)) {
+        throw new TypeError("source_video requires one safe opaque resource ID.");
+      }
+      if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
+      const execution = await this.nativeVideos.create(
+        owner,
+        sourceVideo,
         definition,
-        rawInputIds,
-        render,
         envelope,
-        controller.signal
+        20260814
       );
       return Object.freeze({
         kind: "tool_call",
@@ -630,12 +636,21 @@ export class EffectToolService {
       });
     } finally {
       this.controllers.delete(controller);
-      activeKeys.forEach((key) => {
-        const remaining = (this.activeAssets.get(key) ?? 1) - 1;
-        if (remaining > 0) this.activeAssets.set(key, remaining);
-        else this.activeAssets.delete(key);
-      });
     }
+  }
+
+  videoExecution(principal: EffectToolPrincipal, id: string): EffectToolVideoExecutionView {
+    if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
+    return this.nativeVideos.get(ownerOf(principal), id);
+  }
+
+  openVideo(
+    principal: EffectToolPrincipal,
+    id: string,
+    range?: { start: number; end: number }
+  ): Promise<EffectToolVideoFile> {
+    if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
+    return this.nativeVideos.open(ownerOf(principal), id, range);
   }
 
   get(principal: EffectToolPrincipal, id: string): EffectToolExecutionView {
@@ -667,6 +682,7 @@ export class EffectToolService {
     this.closing = true;
     for (const controller of this.controllers) controller.abort(new ProviderError("cancelled", "Effect tool service is closing."));
     while (this.controllers.size > 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    await this.nativeVideos?.close();
   }
 
   private selected(toolName: string): EffectToolDefinition {
@@ -744,7 +760,8 @@ export function createProductionEffectToolService(
   media: TenantMediaStore,
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl?: typeof fetch,
-  serverResources?: EffectToolServerResourceResolver
+  serverResources?: EffectToolServerResourceResolver,
+  videoOutputRoot = resolve("tmp/effect-tool-video-exports")
 ): EffectToolService {
   const apiKey = env.ARK_API_KEY;
   const provider = apiKey && apiKey.trim().length >= 10
@@ -754,7 +771,16 @@ export function createProductionEffectToolService(
       audit: (record) => process.stderr.write(`[effect-tool] ${JSON.stringify(record)}\n`)
     })
     : undefined;
-  return new EffectToolService(provider, new TenantMediaEffectToolInputResolver(media, serverResources));
+  return new EffectToolService(
+    provider,
+    new TenantMediaEffectToolInputResolver(media, serverResources),
+    EFFECT_TOOL_REGISTRY,
+    new EffectToolVideoService({
+      media,
+      outputRoot: videoOutputRoot,
+      ...(env.FFMPEG_PATH === undefined ? {} : { ffmpegPath: env.FFMPEG_PATH })
+    })
+  );
 }
 
 async function jsonBody(request: IncomingMessage): Promise<unknown> {
@@ -798,15 +824,67 @@ function safeError(error: unknown): { status: number; code: string } {
   if (error instanceof RangeError && error.message === "Execution has no frame output.") {
     return { status: 409, code: "FRAME_NOT_AVAILABLE" };
   }
+  if (error instanceof RangeError && error.message === "Video is not available.") {
+    return { status: 409, code: "VIDEO_NOT_AVAILABLE" };
+  }
+  if (error instanceof RangeError && error.message === "Invalid video byte range.") {
+    return { status: 416, code: "INVALID_VIDEO_RANGE" };
+  }
   if (error instanceof Error && error.message === "Task not found or access denied.") {
     return { status: 404, code: "EXECUTION_NOT_FOUND" };
   }
   return { status: 400, code: "EFFECT_TOOL_REQUEST_INVALID" };
 }
 
+function videoRange(value: string | undefined, bytes: number): { start: number; end: number } | undefined {
+  if (value === undefined) return undefined;
+  const match = /^bytes=(\d+)-(\d*)$/u.exec(value);
+  if (match === null) throw new RangeError("Invalid video byte range.");
+  const start = Number(match[1]);
+  const end = match[2] === "" ? bytes - 1 : Number(match[2]);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end >= bytes) {
+    throw new RangeError("Invalid video byte range.");
+  }
+  return { start, end };
+}
+
+async function pipeVideo(
+  response: ServerResponse,
+  file: EffectToolVideoFile,
+  range: { start: number; end: number } | undefined,
+  disposition: "inline" | "attachment"
+): Promise<void> {
+  const length = range === undefined ? file.bytes : range.end - range.start + 1;
+  response.statusCode = range === undefined ? 200 : 206;
+  response.setHeader("content-type", "video/mp4");
+  response.setHeader("content-length", String(length));
+  response.setHeader("accept-ranges", "bytes");
+  response.setHeader("cache-control", "private, no-store");
+  response.setHeader("x-content-type-options", "nosniff");
+  response.setHeader("content-disposition", `${disposition}; filename="${file.name}"`);
+  if (range !== undefined) response.setHeader("content-range", `bytes ${range.start}-${range.end}/${file.bytes}`);
+  try {
+    await new Promise<void>((resolvePipe, rejectPipe) => {
+      const done = (): void => { cleanup(); resolvePipe(); };
+      const failed = (error: Error): void => { cleanup(); rejectPipe(error); };
+      const cleanup = (): void => {
+        file.stream.off("error", failed);
+        response.off("finish", done);
+        response.off("close", done);
+      };
+      file.stream.once("error", failed);
+      response.once("finish", done);
+      response.once("close", done);
+      file.stream.pipe(response);
+    });
+  } finally {
+    await file.close();
+  }
+}
+
 export function createEffectToolApi(
   service: EffectToolService,
-  auth?: Pick<AuthSessionService, "authorize">
+  auth?: Pick<AuthSessionService, "authorize"> & Partial<Pick<AuthSessionService, "verifySameOriginDownload">>
 ) {
   return async (request: IncomingMessage, response: ServerResponse, next: () => void): Promise<void> => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -816,9 +894,11 @@ export function createEffectToolApi(
     const nativeTool = url.pathname === "/api/effect-tools/v2";
     const nativeTurns = url.pathname === "/api/effect-tools/v2/turns";
     const execution = /^\/api\/effect-tools\/v1\/executions\/([^/]+)$/u.exec(url.pathname);
-    const nativeFrame = /^\/api\/effect-tools\/v2\/executions\/([^/]+)\/frame$/u.exec(url.pathname);
+    const nativeExecution = /^\/api\/effect-tools\/v2\/executions\/([^/]+)$/u.exec(url.pathname);
+    const nativeVideo = /^\/api\/effect-tools\/v2\/executions\/([^/]+)\/video$/u.exec(url.pathname);
+    const nativeDownload = /^\/api\/effect-tools\/v2\/executions\/([^/]+)\/download$/u.exec(url.pathname);
     const matched = request.method === "GET" && (collection || nativeTool || execution !== null)
-      || request.method === "GET" && nativeFrame !== null
+      || request.method === "GET" && (nativeExecution !== null || nativeVideo !== null || nativeDownload !== null)
       || request.method === "POST" && (parameters || executions || nativeTurns);
     if (!matched) return next();
     try {
@@ -831,16 +911,28 @@ export function createEffectToolApi(
         await auth.authorize(request, response, "ai:plan", false);
         return sendJson(response, 200, { tool: service.nativeTool() });
       }
-      if (request.method === "GET" && nativeFrame) {
+      if (request.method === "GET" && nativeExecution) {
         const principal = await auth.authorize(request, response, "project:preview", false);
-        const frame = service.frame(principal, decodeURIComponent(nativeFrame[1]!));
-        response.statusCode = 200;
-        response.setHeader("content-type", "application/octet-stream");
-        response.setHeader("cache-control", "no-store");
-        response.setHeader("x-cmfx-frame-width", String(frame.width));
-        response.setHeader("x-cmfx-frame-height", String(frame.height));
-        response.setHeader("content-length", String(frame.data.byteLength));
-        response.end(frame.data);
+        return sendJson(response, 200, {
+          execution: service.videoExecution(principal, decodeURIComponent(nativeExecution[1]!))
+        });
+      }
+      if (request.method === "GET" && (nativeVideo || nativeDownload)) {
+        const download = nativeDownload !== null;
+        const match = nativeDownload ?? nativeVideo!;
+        const principal = await auth.authorize(request, response, download ? "export:read" : "project:preview", false);
+        if (download) {
+          if (auth.verifySameOriginDownload === undefined) throw new AuthHttpError(401, "UNAUTHENTICATED");
+          auth.verifySameOriginDownload(request);
+        }
+        const id = decodeURIComponent(match[1]!);
+        const view = service.videoExecution(principal, id);
+        if (view.status !== "completed" || view.video.bytes === undefined) {
+          throw new RangeError("Video is not available.");
+        }
+        const range = download ? undefined : videoRange(request.headers.range, view.video.bytes);
+        const file = await service.openVideo(principal, id, range);
+        await pipeVideo(response, file, range, download ? "attachment" : "inline");
         return;
       }
       if (request.method === "GET" && execution) {
@@ -858,11 +950,10 @@ export function createEffectToolApi(
         const principal = await auth.authorize(request, response, "project:preview", true);
         if (!principal.scopes.includes("ai:plan")) throw new AuthHttpError(403, "FORBIDDEN");
         const body = exactObject(await jsonBody(request), "request body");
-        exactKeys(body, ["prompt", "inputIds", "render"], "request body");
+        exactKeys(body, ["prompt", "inputIds"], "request body");
         const turn = await service.turn(principal, {
           prompt: body.prompt as string,
-          inputIds: body.inputIds as EffectToolInputIds,
-          ...(body.render === undefined ? {} : { render: body.render })
+          inputIds: body.inputIds as EffectToolInputIds
         });
         return sendJson(response, 200, { turn });
       }
@@ -879,7 +970,9 @@ export function createEffectToolApi(
       return sendJson(response, 201, { execution: view });
     } catch (error) {
       const safe = safeError(error);
-      sendJson(response, safe.status, { error: { code: safe.code, retryable: safe.status >= 500 } });
+      if (!response.headersSent && !response.destroyed) {
+        sendJson(response, safe.status, { error: { code: safe.code, retryable: safe.status >= 500 } });
+      }
     }
   };
 }

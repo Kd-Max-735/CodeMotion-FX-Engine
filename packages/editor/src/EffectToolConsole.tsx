@@ -1,25 +1,18 @@
 import {
-  Check, ChevronDown, Clock3, Copy, FileImage, LoaderCircle, Menu, Paperclip,
-  Plus, Search, Send, Settings, Square, Wrench, X
+  Check, ChevronDown, Clock3, Copy, Download, LoaderCircle, Menu, Paperclip,
+  Plus, Search, Send, Settings, Square, Video, Wrench, X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { nativeEffectToolApi, type NativeEffectTurn, type NativeEffectToolView } from "./effect-tool-client.js";
-import { BrowserApiError, mediaAssetApi, sessionApi, type BrowserAssetSummaryV1, type BrowserSessionV1 } from "./media-asset-client.js";
+import { BrowserApiError, mediaAssetApi, sessionApi, type BrowserAssetSummaryV1 } from "./media-asset-client.js";
 
 type ConversationEntry = Readonly<{ id: string; role: "user"; content: string; asset?: BrowserAssetSummaryV1 }> |
   Readonly<{ id: string; role: "assistant"; turn: NativeEffectTurn; elapsedMs: number }>;
 
-function renderSize(asset: BrowserAssetSummaryV1 | undefined): { width: number; height: number } {
-  const sourceWidth = asset?.width ?? 960;
-  const sourceHeight = asset?.height ?? 540;
-  const scale = Math.min(1, 960 / sourceWidth, 540 / sourceHeight);
-  return { width: Math.max(1, Math.round(sourceWidth * scale)), height: Math.max(1, Math.round(sourceHeight * scale)) };
-}
-
 function errorMessage(error: unknown): string {
   if (error instanceof BrowserApiError) {
     if (error.code === "ARK_PROVIDER_UNAVAILABLE") return "Ark 尚未配置，请检查服务器 ARK_API_KEY。";
-    if (error.code === "EFFECT_TOOL_REQUEST_INVALID") return "执行工具前需要选择一张已授权的图片或视频素材。";
+    if (error.code === "EFFECT_TOOL_REQUEST_INVALID") return "执行工具前需要选择一个已授权的视频素材。";
     return `${error.message} (${error.code})`;
   }
   return error instanceof Error ? error.message : "请求失败。";
@@ -29,22 +22,49 @@ function formatElapsed(milliseconds: number): string {
   return milliseconds < 1_000 ? `${milliseconds} 毫秒` : `${(milliseconds / 1_000).toFixed(1)} 秒`;
 }
 
-function FramePreview({ executionId }: { executionId: string }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const [error, setError] = useState<string>();
+function VideoResult({ initial }: { initial: Extract<NativeEffectTurn, { kind: "tool_call" }>["execution"] }) {
+  const [execution, setExecution] = useState(initial);
   useEffect(() => {
+    if (execution.status !== "queued" && execution.status !== "running") return;
     const controller = new AbortController();
-    void nativeEffectToolApi.frame(executionId, controller.signal).then((frame) => {
-      if (controller.signal.aborted || canvas.current === null) return;
-      canvas.current.width = frame.width;
-      canvas.current.height = frame.height;
-      const context = canvas.current.getContext("2d");
-      if (context === null) throw new Error("Canvas 2D context is unavailable.");
-      context.putImageData(new ImageData(frame.data, frame.width, frame.height), 0, 0);
-    }).catch((cause) => { if (!controller.signal.aborted) setError(errorMessage(cause)); });
-    return () => controller.abort();
-  }, [executionId]);
-  return error ? <div className="artifact-error">{error}</div> : <canvas ref={canvas} className="artifact-preview" aria-label="胶片颗粒执行预览" />;
+    const poll = async (): Promise<void> => {
+      try {
+        const next = await nativeEffectToolApi.execution(initial.id, controller.signal);
+        if (controller.signal.aborted) return;
+        setExecution(next);
+        if (next.status === "queued" || next.status === "running") window.setTimeout(() => void poll(), 750);
+      } catch (cause) {
+        if (!controller.signal.aborted) setExecution((current) => ({
+          ...current,
+          status: "failed",
+          failure: { code: "VIDEO_RENDER_FAILED", message: errorMessage(cause) }
+        }));
+      }
+    };
+    const timer = window.setTimeout(() => void poll(), 350);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [execution.status, initial.id]);
+
+  if (execution.status === "failed") {
+    return <div className="artifact-error">{execution.failure?.message ?? "视频渲染失败。"}</div>;
+  }
+  if (execution.status !== "completed") {
+    return (
+      <div className="video-progress">
+        <div><i style={{ width: `${Math.round(execution.video.progress * 100)}%` }} /></div>
+        <span>{execution.status === "queued" ? "等待视频渲染" : "正在逐帧渲染"}</span>
+        <b>{execution.video.completedFrames} / {execution.video.frameCount}</b>
+      </div>
+    );
+  }
+  return (
+    <div className="video-result">
+      <video controls preload="metadata" src={nativeEffectToolApi.videoUrl(execution.id)} aria-label="胶片颗粒视频预览" />
+      <a className="video-download" href={nativeEffectToolApi.downloadUrl(execution.id)} download={execution.video.downloadName}>
+        <Download size={14} />下载 MP4
+      </a>
+    </div>
+  );
 }
 
 function ToolResult({ turn }: { turn: Extract<NativeEffectTurn, { kind: "tool_call" }> }) {
@@ -61,12 +81,12 @@ function ToolResult({ turn }: { turn: Extract<NativeEffectTurn, { kind: "tool_ca
         <div className="tool-detail">
           <span>Tool Call · {turn.toolCall.id}</span>
           <pre>{JSON.stringify(envelope, null, 2)}</pre>
-          <div className="execution-line"><b>{turn.execution.result.backendId}</b><em>{turn.execution.result.degraded ? "降级执行" : "标准执行"}</em></div>
+          <div className="execution-line"><b>H.264 MP4 · {turn.execution.video.width} × {turn.execution.video.height}</b><em>{turn.execution.video.audio ? "保留音轨" : "无音轨"}</em></div>
         </div>
       </details>
       <section className="artifact-card">
-        <div className="artifact-head"><div><strong>生成结果</strong><small>film_grain · 服务器渲染</small></div><span><Check size={12} />已完成</span></div>
-        <FramePreview executionId={turn.execution.id} />
+        <div className="artifact-head"><div><strong>视频产物</strong><small>film_grain · 服务器逐帧渲染 · MP4</small></div><span><Video size={12} />视频任务</span></div>
+        <VideoResult initial={turn.execution} />
       </section>
     </div>
   );
@@ -75,7 +95,6 @@ function ToolResult({ turn }: { turn: Extract<NativeEffectTurn, { kind: "tool_ca
 export function EffectToolConsole() {
   const fileInput = useRef<HTMLInputElement>(null);
   const end = useRef<HTMLDivElement>(null);
-  const [session, setSession] = useState<BrowserSessionV1>();
   const [tool, setTool] = useState<NativeEffectToolView>();
   const [assets, setAssets] = useState<BrowserAssetSummaryV1[]>([]);
   const [selectedAssetId, setSelectedAssetId] = useState<string>();
@@ -87,23 +106,22 @@ export function EffectToolConsole() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string>();
-  const visualAssets = useMemo(() => assets.filter((asset) => asset.kind === "image" || asset.kind === "svg" || asset.kind === "video"), [assets]);
-  const selectedAsset = visualAssets.find((asset) => asset.assetId === selectedAssetId);
+  const videoAssets = useMemo(() => assets.filter((asset) => asset.kind === "video"), [assets]);
+  const selectedAsset = videoAssets.find((asset) => asset.assetId === selectedAssetId);
   const artifactTotal = entries.filter((entry) => entry.role === "assistant" && entry.turn.kind === "tool_call").length;
 
   useEffect(() => {
     document.title = "AE Agent";
     const controller = new AbortController();
     void (async () => {
-      const nextSession = await sessionApi.readWithDevelopmentFallback(controller.signal);
+      await sessionApi.readWithDevelopmentFallback(controller.signal);
       const [nextTool, page] = await Promise.all([nativeEffectToolApi.describe(controller.signal), mediaAssetApi.list({ limit: 50 }, controller.signal)]);
-      return [nextSession, nextTool, page] as const;
-    })().then(([nextSession, nextTool, page]) => {
+      return [nextTool, page] as const;
+    })().then(([nextTool, page]) => {
       if (controller.signal.aborted) return;
-      setSession(nextSession);
       setTool(nextTool);
       setAssets(page.items);
-      setSelectedAssetId(page.items.find((asset) => asset.kind === "image" || asset.kind === "svg" || asset.kind === "video")?.assetId);
+      setSelectedAssetId(page.items.find((asset) => asset.kind === "video")?.assetId);
     }).catch((cause) => { if (!controller.signal.aborted) setError(errorMessage(cause)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -118,7 +136,7 @@ export function EffectToolConsole() {
     setUploading(true);
     setError(undefined);
     try {
-      const asset = await mediaAssetApi.upload(file, file.type.startsWith("video/") ? "reference-video" : "reference-image");
+      const asset = await mediaAssetApi.upload(file, "reference-video");
       setAssets((current) => [asset, ...current.filter((item) => item.assetId !== asset.assetId)]);
       setSelectedAssetId(asset.assetId);
     } catch (cause) { setError(errorMessage(cause)); }
@@ -136,8 +154,7 @@ export function EffectToolConsole() {
     setToolMenuOpen(false);
     setEntries((current) => [...current, { id: crypto.randomUUID(), role: "user", content: value, ...(selectedAsset === undefined ? {} : { asset: selectedAsset }) }]);
     try {
-      const size = renderSize(selectedAsset);
-      const turn = await nativeEffectToolApi.turn({ prompt: value, ...(selectedAssetId === undefined ? {} : { sourceFrameId: selectedAssetId }), ...size });
+      const turn = await nativeEffectToolApi.turn({ prompt: value, ...(selectedAssetId === undefined ? {} : { sourceVideoId: selectedAssetId }) });
       setEntries((current) => [...current, { id: crypto.randomUUID(), role: "assistant", turn, elapsedMs: Math.max(1, Math.round(performance.now() - startedAt)) }]);
     } catch (cause) { setError(errorMessage(cause)); }
     finally { setBusy(false); }
@@ -168,10 +185,10 @@ export function EffectToolConsole() {
         </header>
         <section className="messages">
           {error && <div className="agent-error" role="alert"><X size={15} />{error}</div>}
-          {entries.length === 0 && !loading && <div className="empty-state"><div className="empty-mark"><span>›</span><i>_</i></div><h1>想要创作什么特效？</h1><p>上传图片或直接描述需求。Doubao 会理解请求，并决定回答问题或调用已加载的胶片颗粒工具。</p><div className="starter-prompts"><button type="button" onClick={() => setPrompt("给画面添加粗粝的16mm胶片颗粒，暗部明显一些")}>16mm 胶片颗粒</button><button type="button" onClick={() => setPrompt("temporal 参数有什么作用？")}>询问参数</button></div></div>}
+          {entries.length === 0 && !loading && <div className="empty-state"><div className="empty-mark"><span>›</span><i>_</i></div><h1>想要制作什么视频特效？</h1><p>上传视频并描述效果。Doubao 会理解请求；需要执行时，服务器会逐帧调用已加载的胶片颗粒工具并导出 MP4。</p><div className="starter-prompts"><button type="button" onClick={() => setPrompt("给视频添加粗粝的16mm胶片颗粒，暗部明显一些")}>16mm 胶片颗粒</button><button type="button" onClick={() => setPrompt("temporal 参数有什么作用？")}>询问参数</button></div></div>}
           {loading && <div className="empty-state compact"><LoaderCircle className="spin" size={23} /><p>正在连接服务器</p></div>}
           {entries.map((entry) => entry.role === "user" ? (
-            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>胶片颗粒 · film_grain</span></div>{entry.asset && <div className="user-assets"><span className="user-file"><FileImage size={13} />{entry.asset.displayName}</span></div>}</div></article>
+            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>胶片颗粒 · film_grain</span></div>{entry.asset && <div className="user-assets"><span className="user-file"><Video size={13} />{entry.asset.displayName}</span></div>}</div></article>
           ) : (
             <article key={entry.id} className="message agent-message"><div className="agent-avatar">AE</div><div className="agent-content"><div className="turn-duration"><Clock3 size={13} /><span>已思考 <b>{formatElapsed(entry.elapsedMs)}</b></span></div>{thinking && entry.turn.reasoningContent && <details className="process-section" open><summary><span className="section-icon thinking-icon" /><strong>深度思考</strong><span className="process-summary">理解需求并判断是否调用工具</span><ChevronDown className="process-chevron" size={13} /></summary><div className="process-timeline"><div className="thinking-row completed"><span className="thinking-dot" /><p>{entry.turn.reasoningContent}</p><small>完成</small></div></div></details>}{entry.turn.content && <div className="assistant-text markdown-body"><p>{entry.turn.content}</p></div>}{entry.turn.kind === "tool_call" && <ToolResult turn={entry.turn} />}</div></article>
           ))}
@@ -180,12 +197,12 @@ export function EffectToolConsole() {
         </section>
         <footer className="composer-wrap">
           <form className="composer-shell" onSubmit={(event) => void submit(event)}>
-            <div className="selected-tool-tray"><span><Wrench size={12} /><b>胶片颗粒</b><code>film_grain</code></span>{selectedAsset && <button type="button" title="切换服务器素材" onClick={() => fileInput.current?.click()}><FileImage size={12} />{selectedAsset.displayName}</button>}</div>
-            <textarea rows={1} maxLength={4_000} placeholder="输入特效创作需求" value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={onComposerKeyDown} />
+            <div className="selected-tool-tray"><span><Wrench size={12} /><b>胶片颗粒</b><code>film_grain</code></span>{selectedAsset && <button type="button" title="切换服务器视频" onClick={() => fileInput.current?.click()}><Video size={12} />{selectedAsset.displayName}</button>}</div>
+            <textarea rows={1} maxLength={4_000} placeholder="描述视频特效需求" value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={onComposerKeyDown} />
             <div className="composer-toolbar">
-              <label className="attach-button" title="上传文件或图片"><input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,video/mp4,video/webm" aria-label="上传文件或图片" onChange={(event) => void upload(event)} />{uploading ? <LoaderCircle className="spin" size={16} /> : <Paperclip size={17} />}</label>
+              <label className="attach-button" title="上传视频"><input ref={fileInput} type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska" aria-label="上传视频" onChange={(event) => void upload(event)} />{uploading ? <LoaderCircle className="spin" size={16} /> : <Paperclip size={17} />}</label>
               <label className="thinking-toggle"><input type="checkbox" checked={thinking} onChange={(event) => setThinking(event.target.checked)} /><span>深度思考</span></label>
-              <div className="composer-actions-right"><span className="model-label">Doubao 2.0 Lite</span><div className="tool-picker"><button className="tool-picker-button" type="button" aria-label="添加工具" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((current) => !current)}><Plus size={15} /><b>工具</b><i>1</i></button>{toolMenuOpen && <div className="tool-menu" role="dialog" aria-label="添加工具"><div className="tool-menu-head"><div><strong>已加载工具</strong><small>当前仅开放 1 个工具</small></div><button type="button" title="关闭" onClick={() => setToolMenuOpen(false)}><X size={15} /></button></div><button className="tool-option is-selected" type="button" aria-pressed="true"><span className="tool-option-copy"><span className="tool-option-heading"><strong>胶片颗粒</strong><b>图像特效</b></span><small>film_grain</small><em>为服务器素材添加可控的动态胶片颗粒。</em></span><span className="tool-option-action selected"><Check size={13} />已加载</span></button></div>}</div><button className="send-button" type="submit" title="发送" disabled={busy || prompt.trim().length === 0}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}</button></div>
+              <div className="composer-actions-right"><span className="model-label">Doubao 2.0 Lite</span><div className="tool-picker"><button className="tool-picker-button" type="button" aria-label="添加工具" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((current) => !current)}><Plus size={15} /><b>工具</b><i>1</i></button>{toolMenuOpen && <div className="tool-menu" role="dialog" aria-label="添加工具"><div className="tool-menu-head"><div><strong>已加载工具</strong><small>当前仅开放 1 个工具</small></div><button type="button" title="关闭" onClick={() => setToolMenuOpen(false)}><X size={15} /></button></div><button className="tool-option is-selected" type="button" aria-pressed="true"><span className="tool-option-copy"><span className="tool-option-heading"><strong>胶片颗粒</strong><b>视频特效</b></span><small>film_grain</small><em>为服务器视频添加可控的动态胶片颗粒。</em></span><span className="tool-option-action selected"><Check size={13} />已加载</span></button></div>}</div><button className="send-button" type="submit" title="发送" disabled={busy || prompt.trim().length === 0}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}</button></div>
             </div>
           </form>
           <small className="composer-note">AI 生成内容可能不准确，请检查重要结果。</small>

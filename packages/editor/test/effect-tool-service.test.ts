@@ -1,5 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   EFFECT_TOOL_REGISTRY,
@@ -14,6 +17,7 @@ import type {
   SelectedToolParameterRequest
 } from "@codemotion/ai-planner";
 import type { ApplicationScope } from "@codemotion/schema";
+import type { ExportOptions, VerifiedStoredMedia } from "@codemotion/exporter";
 import {
   AuthHttpError,
   type AuthenticatedSessionPrincipal
@@ -27,6 +31,7 @@ import {
   type EffectToolPrincipal,
   type EffectToolRenderSettings
 } from "../src/effect-tool-service.js";
+import { EffectToolVideoService } from "../src/effect-tool-video-service.js";
 
 const principal: EffectToolPrincipal = {
   tenantId: "tenant-effect-tools",
@@ -88,6 +93,42 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
   throw new Error("Condition was not reached within the deterministic turn budget.");
+}
+
+async function testVideoService() {
+  const outputRoot = await mkdtemp(join(tmpdir(), "cmfx-effect-video-"));
+  const media: VerifiedStoredMedia = {
+    asset: {
+      id: "asset_videoabcdefgh",
+      type: "video",
+      uri: "media://video.mp4",
+      hash: "sha256:test-video",
+      metadata: {
+        mime: "video/mp4", width: 2, height: 2, duration: 1 / 30, fps: 30,
+        audioStreams: 0, codec: "h264"
+      }
+    },
+    descriptor: { id: "asset_videoabcdefgh", type: "media/video", cacheKey: "test-video", metadata: {} },
+    storedPath: join(outputRoot, "source.mp4"),
+    arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: false, reason: "test" },
+    trustedBytes: 128
+  };
+  const exportFrames = vi.fn(async (options: ExportOptions) => {
+    await options.renderFrame({ frame: 0, time: 0, deltaTime: 0, fps: 30, width: 2, height: 2 }, options.signal);
+    await writeFile(options.outputPath, "test-mp4-output");
+    return { outputPath: options.outputPath, frameCount: 1, inspections: [], encoder: "libx264" };
+  });
+  const decodeFrame = vi.fn(async () => new Uint8Array([
+    255, 0, 0, 255, 0, 255, 0, 255,
+    0, 0, 255, 255, 255, 255, 255, 255
+  ]));
+  const service = new EffectToolVideoService({
+    media: { resolve: vi.fn(async () => media) },
+    outputRoot,
+    exportFrames: exportFrames as never,
+    decodeFrame: decodeFrame as never
+  });
+  return { service, exportFrames, decodeFrame };
 }
 
 function rasterBinding() {
@@ -285,7 +326,8 @@ describe("server single effect-tool service", () => {
     const definition = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     const render = vi.fn(definition.render.bind(definition));
     const registry = new EffectToolRegistry([{ ...definition, render }]);
-    const service = new EffectToolService(provider, inputs, registry);
+    const video = await testVideoService();
+    const service = new EffectToolService(provider, inputs, registry, video.service);
 
     await expect(service.turn(principal, {
       prompt: "temporal 参数有什么作用？",
@@ -315,8 +357,7 @@ describe("server single effect-tool service", () => {
     };
     const turn = await service.turn(principal, {
       prompt: "添加粗粝的16mm胶片颗粒",
-      inputIds: { source_frame: "asset_abcdefgh" },
-      render: { width: 2, height: 2 }
+      inputIds: { source_video: "asset_videoabcdefgh" }
     });
     expect(turn).toMatchObject({
       kind: "tool_call",
@@ -328,16 +369,23 @@ describe("server single effect-tool service", () => {
         }
       },
       execution: {
-        status: "completed",
         toolName: "film_grain",
-        result: { kind: "frame", output: { width: 2, height: 2, byteLength: 16 } }
+        source: { kind: "video", assetId: "asset_videoabcdefgh" },
+        video: { format: "mp4", mime: "video/mp4", width: 2, height: 2, frameCount: 1 }
       }
+    });
+    if (turn.kind !== "tool_call") throw new Error("Expected a tool call.");
+    await waitFor(() => service.videoExecution(principal, turn.execution.id).status === "completed");
+    expect(service.videoExecution(principal, turn.execution.id)).toMatchObject({
+      status: "completed",
+      video: { progress: 1, completedFrames: 1, bytes: 15 }
     });
     expect(provider.requests).toHaveLength(2);
     expect(provider.requests.every((request) => request.toolName === "film_grain")).toBe(true);
     expect(provider.requests[0]!.fieldSpec).toContain("# 胶片颗粒（film_grain）");
-    expect(inputs.calls).toBe(1);
+    expect(inputs.calls).toBe(0);
     expect(render).toHaveBeenCalledOnce();
+    expect(video.decodeFrame).toHaveBeenCalledOnce();
   });
 
   it("reference-counts concurrent asset use and aborts parameter generation during close", async () => {
@@ -446,9 +494,11 @@ describe("server single effect-tool service", () => {
 
   it("exposes only film_grain through the native v2 conversation route", async () => {
     const provider = new NativeRecordingProvider();
-    const service = new EffectToolService(provider, new TestInputResolver());
+    const video = await testVideoService();
+    const service = new EffectToolService(provider, new TestInputResolver(), EFFECT_TOOL_REGISTRY, video.service);
     const auth = {
-      authorize: vi.fn(async () => authenticated())
+      authorize: vi.fn(async () => authenticated()),
+      verifySameOriginDownload: vi.fn()
     };
     await withApi(service, auth, async (baseUrl) => {
       const listed = await fetch(`${baseUrl}/api/effect-tools/v2`);
@@ -486,17 +536,30 @@ describe("server single effect-tool service", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           prompt: "添加胶片颗粒",
-          inputIds: { source_frame: "asset_abcdefgh" },
-          render: { width: 2, height: 2 }
+          inputIds: { source_video: "asset_videoabcdefgh" }
         })
       });
+      expect(called.status).toBe(200);
       const calledBody = await called.json() as { turn: { execution: { id: string } } };
-      const frame = await fetch(`${baseUrl}/api/effect-tools/v2/executions/${calledBody.turn.execution.id}/frame`);
-      expect(frame.status).toBe(200);
-      expect(frame.headers.get("content-type")).toBe("application/octet-stream");
-      expect(frame.headers.get("x-cmfx-frame-width")).toBe("2");
-      expect(frame.headers.get("x-cmfx-frame-height")).toBe("2");
-      expect((await frame.arrayBuffer()).byteLength).toBe(16);
+      await waitFor(() => service.videoExecution(principal, calledBody.turn.execution.id).status === "completed");
+      const queried = await fetch(`${baseUrl}/api/effect-tools/v2/executions/${calledBody.turn.execution.id}`);
+      expect(queried.status).toBe(200);
+      await expect(queried.json()).resolves.toMatchObject({
+        execution: { status: "completed", video: { format: "mp4", bytes: 15 } }
+      });
+      const renderedVideo = await fetch(`${baseUrl}/api/effect-tools/v2/executions/${calledBody.turn.execution.id}/video`, {
+        headers: { range: "bytes=0-3" }
+      });
+      expect(renderedVideo.status).toBe(206);
+      expect(renderedVideo.headers.get("content-type")).toBe("video/mp4");
+      expect(renderedVideo.headers.get("content-range")).toBe("bytes 0-3/15");
+      expect((await renderedVideo.arrayBuffer()).byteLength).toBe(4);
+
+      const download = await fetch(`${baseUrl}/api/effect-tools/v2/executions/${calledBody.turn.execution.id}/download`);
+      expect(download.status).toBe(200);
+      expect(download.headers.get("content-disposition")).toContain("attachment");
+      expect((await download.arrayBuffer()).byteLength).toBe(15);
+      expect(auth.verifySameOriginDownload).toHaveBeenCalledOnce();
     });
   });
 });

@@ -106,7 +106,13 @@ export async function createServerRuntime(options: ServerRuntimeOptions): Promis
       env
     );
     effectTools = options.createEffectTools?.(mediaStore)
-      ?? createProductionEffectToolService(mediaStore, env, options.fetch);
+      ?? createProductionEffectToolService(
+        mediaStore,
+        env,
+        options.fetch,
+        undefined,
+        join(exportRoot, "effect-tools")
+      );
     previews = new EditorPreviewService(mediaStore);
     exports = new ExportTaskService({ resolver: mediaStore, outputRoot: exportRoot });
     await exports.initialize();

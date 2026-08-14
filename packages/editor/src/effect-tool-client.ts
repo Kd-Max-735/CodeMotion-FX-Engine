@@ -21,16 +21,26 @@ export interface NativeToolCallView {
 
 export interface NativeExecutionView {
   readonly id: string;
-  readonly status: "completed";
+  readonly status: "queued" | "running" | "completed" | "failed";
   readonly toolName: "film_grain";
   readonly createdAt: string;
-  readonly result: {
-    readonly kind: string;
-    readonly backendId: string;
-    readonly degraded: boolean;
-    readonly warnings: readonly string[];
-    readonly output: unknown;
+  readonly updatedAt: string;
+  readonly source: { readonly kind: "video"; readonly assetId: string };
+  readonly video: {
+    readonly format: "mp4";
+    readonly mime: "video/mp4";
+    readonly width: number;
+    readonly height: number;
+    readonly fps: number;
+    readonly durationSeconds: number;
+    readonly frameCount: number;
+    readonly completedFrames: number;
+    readonly progress: number;
+    readonly audio: boolean;
+    readonly bytes?: number;
+    readonly downloadName?: string;
   };
+  readonly failure?: { readonly code: "VIDEO_RENDER_FAILED"; readonly message: string };
 }
 
 export type NativeEffectTurn = Readonly<{
@@ -87,25 +97,48 @@ function tool(value: unknown): NativeEffectToolView {
 
 function execution(value: unknown): NativeExecutionView {
   const raw = object(value);
-  const result = object(raw.result);
-  if (typeof raw.id !== "string" || raw.status !== "completed" || raw.toolName !== "film_grain"
-    || typeof raw.createdAt !== "string" || typeof result.kind !== "string"
-    || typeof result.backendId !== "string" || typeof result.degraded !== "boolean"
-    || !Array.isArray(result.warnings) || result.warnings.some((item) => typeof item !== "string")) {
+  const source = object(raw.source);
+  const video = object(raw.video);
+  const status = raw.status;
+  if (typeof raw.id !== "string" || !["queued", "running", "completed", "failed"].includes(String(status))
+    || raw.toolName !== "film_grain" || typeof raw.createdAt !== "string" || typeof raw.updatedAt !== "string"
+    || source.kind !== "video" || typeof source.assetId !== "string"
+    || video.format !== "mp4" || video.mime !== "video/mp4"
+    || ![video.width, video.height, video.fps, video.durationSeconds, video.frameCount,
+      video.completedFrames, video.progress].every((item) => typeof item === "number" && Number.isFinite(item))
+    || typeof video.audio !== "boolean"
+    || (video.bytes !== undefined && typeof video.bytes !== "number")
+    || (video.downloadName !== undefined && typeof video.downloadName !== "string")) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  const failure = raw.failure === undefined ? undefined : object(raw.failure);
+  if (failure !== undefined && (failure.code !== "VIDEO_RENDER_FAILED" || typeof failure.message !== "string")) {
     throw new BrowserApiError(500, "INVALID_RESPONSE", false);
   }
   return {
     id: raw.id,
-    status: "completed",
+    status: status as NativeExecutionView["status"],
     toolName: "film_grain",
     createdAt: raw.createdAt,
-    result: {
-      kind: result.kind,
-      backendId: result.backendId,
-      degraded: result.degraded,
-      warnings: [...result.warnings] as string[],
-      output: result.output
-    }
+    updatedAt: raw.updatedAt,
+    source: { kind: "video", assetId: source.assetId as string },
+    video: {
+      format: "mp4",
+      mime: "video/mp4",
+      width: video.width as number,
+      height: video.height as number,
+      fps: video.fps as number,
+      durationSeconds: video.durationSeconds as number,
+      frameCount: video.frameCount as number,
+      completedFrames: video.completedFrames as number,
+      progress: video.progress as number,
+      audio: video.audio as boolean,
+      ...(video.bytes === undefined ? {} : { bytes: video.bytes as number }),
+      ...(video.downloadName === undefined ? {} : { downloadName: video.downloadName as string })
+    },
+    ...(failure === undefined ? {} : {
+      failure: { code: "VIDEO_RENDER_FAILED", message: failure.message as string }
+    })
   };
 }
 
@@ -150,55 +183,26 @@ export const nativeEffectToolApi = {
   },
   turn: async (request: {
     readonly prompt: string;
-    readonly sourceFrameId?: string;
-    readonly width: number;
-    readonly height: number;
+    readonly sourceVideoId?: string;
   }, signal?: AbortSignal): Promise<NativeEffectTurn> => {
     const body = object(await jsonRequest("/api/effect-tools/v2/turns", {
       method: "POST",
       headers: csrfHeaders(),
       body: JSON.stringify({
         prompt: request.prompt,
-        inputIds: request.sourceFrameId === undefined ? {} : { source_frame: request.sourceFrameId },
-        render: {
-          time: 0,
-          fps: 30,
-          width: request.width,
-          height: request.height,
-          seed: 20260814,
-          quality: "preview"
-        }
+        inputIds: request.sourceVideoId === undefined ? {} : { source_video: request.sourceVideoId }
       }),
       ...(signal === undefined ? {} : { signal })
     }));
     return turn(body.turn);
   },
-  frame: async (executionId: string, signal?: AbortSignal) => {
-    let response: Response;
-    try {
-      response = await fetch(`/api/effect-tools/v2/executions/${encodeURIComponent(executionId)}/frame`, {
-        credentials: "same-origin",
-        ...(signal === undefined ? {} : { signal })
-      });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") throw error;
-      throw new BrowserApiError(0, "SERVICE_UNREACHABLE", true);
-    }
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({})) as { error?: { code?: unknown; retryable?: unknown } };
-      throw new BrowserApiError(
-        response.status,
-        typeof body.error?.code === "string" ? body.error.code : `HTTP_${response.status}`,
-        body.error?.retryable === true
-      );
-    }
-    const width = Number(response.headers.get("x-cmfx-frame-width"));
-    const height = Number(response.headers.get("x-cmfx-frame-height"));
-    const data = new Uint8ClampedArray(await response.arrayBuffer());
-    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
-      || data.byteLength !== width * height * 4) {
-      throw new BrowserApiError(500, "INVALID_RESPONSE", false);
-    }
-    return { width, height, data };
-  }
+  execution: async (executionId: string, signal?: AbortSignal): Promise<NativeExecutionView> => {
+    const body = object(await jsonRequest(
+      `/api/effect-tools/v2/executions/${encodeURIComponent(executionId)}`,
+      signal === undefined ? {} : { signal }
+    ));
+    return execution(body.execution);
+  },
+  videoUrl: (executionId: string): string => `/api/effect-tools/v2/executions/${encodeURIComponent(executionId)}/video`,
+  downloadUrl: (executionId: string): string => `/api/effect-tools/v2/executions/${encodeURIComponent(executionId)}/download`
 };
