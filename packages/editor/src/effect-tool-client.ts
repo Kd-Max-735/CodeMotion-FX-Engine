@@ -43,6 +43,16 @@ export interface NativeExecutionView {
   readonly failure?: { readonly code: "VIDEO_RENDER_FAILED"; readonly message: string };
 }
 
+export interface NativeExecutionInputView {
+  readonly source_image: string;
+  readonly effectParams: Readonly<Record<string, unknown>>;
+  readonly output: {
+    readonly durationSeconds: number;
+    readonly fps: number;
+    readonly format: "mp4";
+  };
+}
+
 export type NativeEffectTurn = Readonly<{
   kind: "message";
   reasoningContent: string;
@@ -52,6 +62,7 @@ export type NativeEffectTurn = Readonly<{
   reasoningContent: string;
   content: string;
   toolCall: NativeToolCallView;
+  executionInput: NativeExecutionInputView;
   execution: NativeExecutionView;
 }>;
 
@@ -154,7 +165,15 @@ function turn(value: unknown): NativeEffectTurn {
   const call = object(raw.toolCall);
   const fn = object(call.function);
   const args = object(fn.arguments);
+  const executionInput = object(raw.executionInput);
+  const effectParams = object(executionInput.effectParams);
+  const output = object(executionInput.output);
   if (typeof call.id !== "string" || call.type !== "function" || fn.name !== "film_grain") {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  if (typeof executionInput.source_image !== "string" || output.format !== "mp4"
+    || typeof output.durationSeconds !== "number" || !Number.isFinite(output.durationSeconds)
+    || typeof output.fps !== "number" || !Number.isFinite(output.fps)) {
     throw new BrowserApiError(500, "INVALID_RESPONSE", false);
   }
   return {
@@ -165,6 +184,15 @@ function turn(value: unknown): NativeEffectTurn {
       id: call.id,
       type: "function",
       function: { name: "film_grain", arguments: structuredClone(args) }
+    },
+    executionInput: {
+      source_image: executionInput.source_image,
+      effectParams: structuredClone(effectParams),
+      output: {
+        durationSeconds: output.durationSeconds,
+        fps: output.fps,
+        format: "mp4"
+      }
     },
     execution: execution(raw.execution)
   };

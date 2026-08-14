@@ -950,6 +950,9 @@ h2 { font-size: 18px; }
 .ae-agent .video-result video { display: block; width: 100%; max-height: 520px; background: #101112; }
 .ae-agent .video-download { position: absolute; right: 10px; top: 10px; min-height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 6px; background: rgb(255 255 255 / 92%); color: #303336; font-size: 9px; font-weight: 650; text-decoration: none; box-shadow: 0 2px 10px rgb(0 0 0 / 16%); }
 .ae-agent .video-download:hover { background: #fff; }
+.ae-agent .final-response { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ae-line); }
+.ae-agent .final-response .section-heading { margin-bottom: 8px; }
+.ae-agent .final-icon { color: var(--ae-accent); background: #e8f5ef; }
 .ae-agent .composer-wrap { padding: 0 max(24px, calc((100% - 830px) / 2)) 13px; background: #fff; }
 .ae-agent .composer-shell { position: relative; border: 1px solid #d9dadd; border-radius: 13px; background: #fff; box-shadow: var(--ae-shadow); }
 .ae-agent .composer-shell:focus-within { border-color: #bfc2c5; }

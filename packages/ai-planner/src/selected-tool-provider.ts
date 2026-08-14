@@ -5,6 +5,9 @@ import { fingerprintProviderRequestId, sanitizeUserText } from "./security.js";
 
 const DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
 const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
+export const SELECTED_TOOL_DEFAULT_DURATION_SECONDS = 5;
+export const SELECTED_TOOL_MIN_DURATION_SECONDS = 1;
+export const SELECTED_TOOL_MAX_DURATION_SECONDS = 60;
 
 export interface SelectedToolParameterRequest {
   readonly requestId: string;
@@ -36,6 +39,11 @@ export interface SelectedToolModelTurn {
 
 export interface SelectedToolConversationProvider extends SelectedToolParameterProvider {
   respond(request: SelectedToolParameterRequest): Promise<SelectedToolModelTurn>;
+  finalize(
+    request: SelectedToolParameterRequest,
+    call: SelectedToolNativeCall,
+    result: Readonly<Record<string, unknown>>
+  ): Promise<SelectedToolModelTurn>;
 }
 
 export interface VolcengineArkSelectedToolProviderOptions {
@@ -145,6 +153,56 @@ function ownerFingerprint(tenantId: string, userId: string): string {
     .digest("hex").slice(0, 32)}`;
 }
 
+function conversationParameterSchema(parameterSchema: JsonSchema): JsonSchema {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["effectParams", "output"],
+    properties: {
+      effectParams: parameterSchema,
+      output: {
+        type: "object",
+        additionalProperties: false,
+        required: ["durationSeconds"],
+        properties: {
+          durationSeconds: {
+            type: "number",
+            minimum: SELECTED_TOOL_MIN_DURATION_SECONDS,
+            maximum: SELECTED_TOOL_MAX_DURATION_SECONDS,
+            multipleOf: 0.1,
+            default: SELECTED_TOOL_DEFAULT_DURATION_SECONDS
+          }
+        }
+      }
+    }
+  };
+}
+
+function systemContent(request: SelectedToolParameterRequest): string {
+  return [
+    "你是 CodeMotion FX 的单工具助手。当前唯一可用工具由用户在界面中预先选择。",
+    "当用户要求实际生成或修改效果时调用该工具；当用户只是咨询参数、能力或使用方式时直接用简洁中文回答，不调用工具。",
+    "工具 arguments 顶层必须严格包含 effectParams 与 output：effectParams 遵循当前特效字段；output 只包含 durationSeconds。",
+    `未提及时 durationSeconds=${SELECTED_TOOL_DEFAULT_DURATION_SECONDS}。明确时长优先；“长一点/久一点”在明确时长或默认时长上加 2 秒；“短一点/快一点”减 2 秒。`,
+    "没有明确基准的“长视频/较长视频”使用 8 秒，“短视频/较短视频”使用 3 秒；最终限制在 1–60 秒并保留至多一位小数。",
+    "不得在参数中输出素材、路径、URL、资源 ID、帧率、编码器或除 durationSeconds 之外的导出设置。",
+    "工具结果回传后必须用简洁中文给出最终正文，说明已采用的效果和视频时长，不得再次调用工具。",
+    `当前唯一工具：${request.toolName}`,
+    "当前工具字段说明（其中标准 JSON 的 data 字段仅对应 effectParams）：",
+    request.fieldSpec
+  ].join("\n");
+}
+
+function finalSystemContent(request: SelectedToolParameterRequest): string {
+  return [
+    "你是 CodeMotion FX 的单工具助手。",
+    `当前工具 ${request.toolName} 已由服务器执行并返回了安全结果。`,
+    "必须根据用户原始需求和工具结果输出一段简洁、自然的中文最终正文。",
+    "正文应说明采用的效果和视频时长；任务仍在队列中时应明确说正在生成，不得声称已经完成。",
+    "不要输出 JSON、Markdown 代码块、资源 ID、文件路径或内部实现信息，不得再次调用工具。"
+  ].join("\n");
+}
+
 export class VolcengineArkSelectedToolProvider implements SelectedToolConversationProvider {
   readonly id = "volcengine-ark-selected-tool-v1";
   private readonly baseUrl: string;
@@ -157,7 +215,7 @@ export class VolcengineArkSelectedToolProvider implements SelectedToolConversati
   }
 
   async generate(request: SelectedToolParameterRequest): Promise<unknown> {
-    const turn = await this.complete(request, "required");
+    const turn = await this.complete(request, "required", false);
     if (turn.toolCall === undefined) {
       throw new ProviderError("provider_response", "Ark did not call the required selected tool.", {
         reason: "INVALID_TOOL_RESPONSE"
@@ -167,29 +225,70 @@ export class VolcengineArkSelectedToolProvider implements SelectedToolConversati
   }
 
   async respond(request: SelectedToolParameterRequest): Promise<SelectedToolModelTurn> {
-    return this.complete(request, "auto");
+    return this.complete(request, "auto", true);
+  }
+
+  async finalize(
+    request: SelectedToolParameterRequest,
+    call: SelectedToolNativeCall,
+    result: Readonly<Record<string, unknown>>
+  ): Promise<SelectedToolModelTurn> {
+    if (!TOOL_NAME.test(request.toolName) || call.name !== request.toolName || call.id.length === 0) {
+      throw new ProviderError("invalid_input", "Selected tool result is invalid.");
+    }
+    const prompt = sanitizeUserText(exactNonEmpty(request.prompt, "Prompt", 10_000));
+    exactNonEmpty(request.fieldSpec, "Field specification", 100_000);
+    return this.requestCompletion(request, {
+      model: ARK_V1_MODEL,
+      max_tokens: 2_000,
+      thinking: { type: "enabled" },
+      messages: [
+        { role: "system", content: finalSystemContent(request) },
+        { role: "user", content: prompt },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: call.id,
+            type: "function",
+            function: { name: call.name, arguments: JSON.stringify(call.arguments) }
+          }]
+        },
+        { role: "tool", tool_call_id: call.id, content: JSON.stringify(result) }
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: request.toolName,
+          description: `根据用户需求生成并执行已选择的 ${request.toolName} 特效参数。`,
+          strict: true,
+          parameters: conversationParameterSchema(request.parameterSchema)
+        }
+      }],
+      tool_choice: "none"
+    });
   }
 
   private async complete(
     request: SelectedToolParameterRequest,
-    toolChoice: "auto" | "required"
+    toolChoice: "auto" | "required",
+    conversation: boolean
   ): Promise<SelectedToolModelTurn> {
     if (!TOOL_NAME.test(request.toolName)) {
       throw new ProviderError("invalid_input", "Selected tool name is invalid.");
     }
     const prompt = sanitizeUserText(exactNonEmpty(request.prompt, "Prompt", 10_000));
     const fieldSpec = exactNonEmpty(request.fieldSpec, "Field specification", 100_000);
-    const body = {
+    return this.requestCompletion(request, {
       model: ARK_V1_MODEL,
       max_tokens: 2_000,
       thinking: { type: "enabled" },
       messages: [
         {
           role: "system",
-          content: [
-            "你是 CodeMotion FX 的单工具助手。当前唯一可用工具由用户在界面中预先选择。",
-            "当用户要求实际生成或修改效果时调用该工具；当用户只是咨询参数、能力或使用方式时直接用简洁中文回答，不调用工具。",
-            "不得调用其他工具，不得在参数中输出素材、路径、URL、资源 ID、渲染设置或导出设置。",
+          content: conversation ? systemContent(request) : [
+            "你是 CodeMotion FX 的单工具参数生成器。只能调用当前唯一工具。",
+            "不得在参数中输出素材、路径、URL、资源 ID、渲染设置或导出设置。",
             `当前唯一工具：${request.toolName}`,
             "当前工具字段说明：",
             fieldSpec
@@ -203,14 +302,20 @@ export class VolcengineArkSelectedToolProvider implements SelectedToolConversati
           name: request.toolName,
           description: `根据用户需求生成并执行已选择的 ${request.toolName} 特效参数。`,
           strict: true,
-          parameters: request.parameterSchema
+          parameters: conversation ? conversationParameterSchema(request.parameterSchema) : request.parameterSchema
         }
       }],
       tool_choice: toolChoice === "auto" ? "auto" : {
         type: "function",
         function: { name: request.toolName }
       }
-    };
+    });
+  }
+
+  private async requestCompletion(
+    request: SelectedToolParameterRequest,
+    body: Readonly<Record<string, unknown>>
+  ): Promise<SelectedToolModelTurn> {
     const started = Date.now();
     let response: Response;
     try {

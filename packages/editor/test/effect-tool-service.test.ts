@@ -13,6 +13,7 @@ import {
 import type {
   SelectedToolConversationProvider,
   SelectedToolModelTurn,
+  SelectedToolNativeCall,
   SelectedToolParameterProvider,
   SelectedToolParameterRequest
 } from "@codemotion/ai-planner";
@@ -54,6 +55,11 @@ class RecordingProvider implements SelectedToolParameterProvider {
 }
 
 class NativeRecordingProvider extends RecordingProvider implements SelectedToolConversationProvider {
+  readonly finalizations: Array<{
+    request: SelectedToolParameterRequest;
+    call: SelectedToolNativeCall;
+    result: Readonly<Record<string, unknown>>;
+  }> = [];
   turn: SelectedToolModelTurn = {
     reasoningContent: "用户只询问参数含义，不需要执行。",
     content: "temporal 控制颗粒随帧变化的活跃程度。"
@@ -62,6 +68,18 @@ class NativeRecordingProvider extends RecordingProvider implements SelectedToolC
   respond(request: SelectedToolParameterRequest): Promise<SelectedToolModelTurn> {
     this.requests.push(request);
     return Promise.resolve(this.turn);
+  }
+
+  finalize(
+    request: SelectedToolParameterRequest,
+    call: SelectedToolNativeCall,
+    result: Readonly<Record<string, unknown>>
+  ): Promise<SelectedToolModelTurn> {
+    this.finalizations.push({ request, call, result });
+    return Promise.resolve({
+      reasoningContent: "工具任务已创建，可以给出最终回复。",
+      content: "已开始生成 1 秒的动态胶片颗粒视频。"
+    });
   }
 }
 
@@ -348,11 +366,14 @@ describe("server single effect-tool service", () => {
         id: "call-film-grain-1",
         name: "film_grain",
         arguments: {
-          amount: 0.32,
-          size: 4,
-          monochrome: true,
-          response: "shadows",
-          temporal: 0.8
+          effectParams: {
+            amount: 0.32,
+            size: 4,
+            monochrome: true,
+            response: "shadows",
+            temporal: 0.8
+          },
+          output: { durationSeconds: 1 }
         }
       }
     };
@@ -366,20 +387,29 @@ describe("server single effect-tool service", () => {
         type: "function",
         function: {
           name: "film_grain",
-          arguments: { amount: 0.32, size: 4, response: "shadows" }
+          arguments: {
+            effectParams: { amount: 0.32, size: 4, response: "shadows" },
+            output: { durationSeconds: 1 }
+          }
         }
+      },
+      content: "已开始生成 1 秒的动态胶片颗粒视频。",
+      executionInput: {
+        source_image: "asset_imageabcdefgh",
+        effectParams: { amount: 0.32, size: 4, response: "shadows" },
+        output: { durationSeconds: 1, fps: 30, format: "mp4" }
       },
       execution: {
         toolName: "film_grain",
         source: { kind: "image", assetId: "asset_imageabcdefgh" },
-        video: { format: "mp4", mime: "video/mp4", width: 2, height: 2, frameCount: 1 }
+        video: { format: "mp4", mime: "video/mp4", width: 2, height: 2, frameCount: 30 }
       }
     });
     if (turn.kind !== "tool_call") throw new Error("Expected a tool call.");
     await waitFor(() => service.videoExecution(principal, turn.execution.id).status === "completed");
     expect(service.videoExecution(principal, turn.execution.id)).toMatchObject({
       status: "completed",
-      video: { progress: 1, completedFrames: 1, bytes: 15 }
+      video: { progress: 1, completedFrames: 30, bytes: 15 }
     });
     expect(provider.requests).toHaveLength(2);
     expect(provider.requests.every((request) => request.toolName === "film_grain")).toBe(true);
@@ -387,6 +417,11 @@ describe("server single effect-tool service", () => {
     expect(inputs.calls).toBe(0);
     expect(render).toHaveBeenCalledOnce();
     expect(video.decodeFrame).toHaveBeenCalledOnce();
+    expect(provider.finalizations).toHaveLength(1);
+    expect(provider.finalizations[0]).toMatchObject({
+      call: { name: "film_grain", arguments: { output: { durationSeconds: 1 } } },
+      result: { status: "queued", output: { durationSeconds: 1, format: "mp4" } }
+    });
   });
 
   it("reference-counts concurrent asset use and aborts parameter generation during close", async () => {
@@ -529,7 +564,10 @@ describe("server single effect-tool service", () => {
         toolCall: {
           id: "call-film-grain-api",
           name: "film_grain",
-          arguments: { amount: 0.2, size: 2, monochrome: true, response: "uniform", temporal: 0.5 }
+          arguments: {
+            effectParams: { amount: 0.2, size: 2, monochrome: true, response: "uniform", temporal: 0.5 },
+            output: { durationSeconds: 1 }
+          }
         }
       };
       const called = await fetch(`${baseUrl}/api/effect-tools/v2/turns`, {

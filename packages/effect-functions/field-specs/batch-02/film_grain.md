@@ -8,6 +8,8 @@
 
 仅输出 JSON，不输出解释、注释或 Markdown。顶层只能包含 `type` 与 `data`，`type` 必须为 `film_grain`。不得在参数中包含素材、路径、URL、纹理或资源 ID。
 
+这里的 `data` 只描述 `film_grain` 自身参数。原生对话 Tool Call 由服务器统一增加 `output.durationSeconds`，并在模型调用后绑定授权图片；公共时长和图片资源不属于本特效的参数 Schema。
+
 ```json
 {"type":"film_grain","data":{"amount":0.32,"size":4,"monochrome":true,"response":"shadows","temporal":0.8}}
 ```

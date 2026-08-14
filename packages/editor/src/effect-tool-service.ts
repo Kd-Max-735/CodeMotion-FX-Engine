@@ -18,6 +18,8 @@ import {
 } from "@codemotion/effect-functions";
 import {
   ProviderError,
+  SELECTED_TOOL_MAX_DURATION_SECONDS,
+  SELECTED_TOOL_MIN_DURATION_SECONDS,
   VolcengineArkSelectedToolProvider,
   type SelectedToolConversationProvider,
   type SelectedToolModelTurn,
@@ -119,6 +121,16 @@ export interface EffectToolNativeCallView {
   };
 }
 
+export interface EffectToolExecutionInputView {
+  readonly source_image: string;
+  readonly effectParams: Readonly<Record<string, unknown>>;
+  readonly output: {
+    readonly durationSeconds: number;
+    readonly fps: number;
+    readonly format: "mp4";
+  };
+}
+
 export type EffectToolTurnView = Readonly<{
   kind: "message";
   reasoningContent: string;
@@ -128,6 +140,7 @@ export type EffectToolTurnView = Readonly<{
   reasoningContent: string;
   content: string;
   toolCall: EffectToolNativeCallView;
+  executionInput: EffectToolExecutionInputView;
   execution: EffectToolVideoExecutionView;
 }>;
 
@@ -157,6 +170,25 @@ function exactKeys(value: Record<string, unknown>, allowed: readonly string[], l
   if (Object.keys(value).some((key) => !accepted.has(key))) {
     throw new TypeError(`${label} contains an unknown field.`);
   }
+}
+
+function nativeConversationArguments(value: unknown): {
+  readonly effectParams: Readonly<Record<string, unknown>>;
+  readonly durationSeconds: number;
+} {
+  const argumentsObject = exactObject(value, "tool arguments");
+  exactKeys(argumentsObject, ["effectParams", "output"], "tool arguments");
+  const effectParams = exactObject(argumentsObject.effectParams, "effectParams");
+  const output = exactObject(argumentsObject.output, "output");
+  exactKeys(output, ["durationSeconds"], "output");
+  const durationSeconds = output.durationSeconds;
+  if (typeof durationSeconds !== "number" || !Number.isFinite(durationSeconds)
+    || durationSeconds < SELECTED_TOOL_MIN_DURATION_SECONDS
+    || durationSeconds > SELECTED_TOOL_MAX_DURATION_SECONDS
+    || Math.abs(durationSeconds * 10 - Math.round(durationSeconds * 10)) > 1e-8) {
+    throw new RangeError("Tool output duration is outside the server limits.");
+  }
+  return { effectParams, durationSeconds };
 }
 
 function renderSettings(value: unknown): EffectToolRenderSettings {
@@ -210,7 +242,9 @@ function safeResult(result: EffectRenderResult): SafeRenderResult {
 function conversationProvider(
   provider: SelectedToolParameterProvider | undefined
 ): SelectedToolConversationProvider {
-  if (provider === undefined || typeof (provider as Partial<SelectedToolConversationProvider>).respond !== "function") {
+  if (provider === undefined
+    || typeof (provider as Partial<SelectedToolConversationProvider>).respond !== "function"
+    || typeof (provider as Partial<SelectedToolConversationProvider>).finalize !== "function") {
     throw new ProviderError("provider_unavailable", "Native Ark Tool Call is not configured.");
   }
   return provider as SelectedToolConversationProvider;
@@ -587,7 +621,8 @@ export class EffectToolService {
     this.controllers.add(controller);
     try {
       const fieldSpec = await loadEffectFieldSpec(definition.toolName);
-      const modelTurn: SelectedToolModelTurn = await conversationProvider(this.provider).respond({
+      const provider = conversationProvider(this.provider);
+      const providerRequest = {
         requestId: randomUUID(),
         tenantId: principal.tenantId,
         userId: principal.userId,
@@ -596,7 +631,8 @@ export class EffectToolService {
         fieldSpec,
         parameterSchema: definition.parameterSchema,
         signal: controller.signal
-      });
+      } as const;
+      const modelTurn: SelectedToolModelTurn = await provider.respond(providerRequest);
       if (modelTurn.toolCall === undefined) {
         return Object.freeze({
           kind: "message",
@@ -604,9 +640,10 @@ export class EffectToolService {
           content: modelTurn.content
         });
       }
+      const nativeArguments = nativeConversationArguments(modelTurn.toolCall.arguments);
       const envelope = validateAndNormalizeEffectEnvelope(definition, definition.toolName, {
         type: definition.toolName,
-        data: modelTurn.toolCall.arguments
+        data: nativeArguments.effectParams
       });
       const sourceImage = rawInputIds.source_image;
       if (typeof sourceImage !== "string" || !RESOURCE_ID.test(sourceImage)) {
@@ -618,18 +655,52 @@ export class EffectToolService {
         sourceImage,
         definition,
         envelope,
-        20260814
+        20260814,
+        nativeArguments.durationSeconds
       );
+      const normalizedArguments = Object.freeze({
+        effectParams: structuredClone(envelope.data),
+        output: Object.freeze({ durationSeconds: nativeArguments.durationSeconds })
+      });
+      const normalizedCall = Object.freeze({
+        id: modelTurn.toolCall.id,
+        name: NATIVE_EFFECT_TOOL_NAME,
+        arguments: normalizedArguments
+      });
+      const finalTurn = await provider.finalize(providerRequest, normalizedCall, Object.freeze({
+        status: execution.status,
+        output: Object.freeze({
+          format: execution.video.format,
+          mime: execution.video.mime,
+          durationSeconds: execution.video.durationSeconds,
+          fps: execution.video.fps,
+          width: execution.video.width,
+          height: execution.video.height
+        })
+      }));
+      if (finalTurn.toolCall !== undefined) {
+        throw new ProviderError("security", "Ark attempted another tool call after execution.");
+      }
       return Object.freeze({
         kind: "tool_call",
-        reasoningContent: modelTurn.reasoningContent,
-        content: modelTurn.content,
+        reasoningContent: [modelTurn.reasoningContent, finalTurn.reasoningContent]
+          .filter((value) => value.trim().length > 0).join("\n\n"),
+        content: finalTurn.content,
         toolCall: Object.freeze({
           id: modelTurn.toolCall.id,
           type: "function",
           function: Object.freeze({
             name: NATIVE_EFFECT_TOOL_NAME,
-            arguments: structuredClone(envelope.data)
+            arguments: structuredClone(normalizedArguments)
+          })
+        }),
+        executionInput: Object.freeze({
+          source_image: sourceImage,
+          effectParams: structuredClone(envelope.data),
+          output: Object.freeze({
+            durationSeconds: execution.video.durationSeconds,
+            fps: execution.video.fps,
+            format: "mp4" as const
           })
         }),
         execution

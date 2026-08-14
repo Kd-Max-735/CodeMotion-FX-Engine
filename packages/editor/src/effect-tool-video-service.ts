@@ -169,11 +169,16 @@ export class EffectToolVideoService {
     sourceAssetId: string,
     definition: EffectToolDefinition,
     envelope: EffectParameterEnvelope,
-    seed: number
+    seed: number,
+    durationSeconds = this.durationSeconds
   ): Promise<EffectToolVideoExecutionView> {
     if (this.closing) throw new Error("Effect video service is closing.");
+    safeNumber(durationSeconds, "Video duration");
+    if (durationSeconds > MAX_VIDEO_DURATION_SECONDS) {
+      throw new RangeError("Video duration exceeds the effect render limit.");
+    }
     const media = await this.options.media.resolve(owner, sourceAssetId);
-    const metadata = outputMetadata(media, this.durationSeconds, this.fps);
+    const metadata = outputMetadata(media, durationSeconds, this.fps);
     const id = randomUUID();
     const directory = join(this.outputRoot, id);
     const outputPath = join(directory, "output.mp4");
@@ -268,7 +273,7 @@ export class EffectToolVideoService {
       if (media.asset.hash !== initialMedia.asset.hash || media.trustedBytes !== initialMedia.trustedBytes) {
         throw new Error("The source image changed before rendering.");
       }
-      const metadata = outputMetadata(media, this.durationSeconds, this.fps);
+      const metadata = outputMetadata(media, task.view.video.durationSeconds, task.view.video.fps);
       const sourcePixels = await this.decodeFrame(media, {
         frame: 0,
         time: 0,
