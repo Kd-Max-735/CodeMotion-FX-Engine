@@ -1,0 +1,230 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import type {
+  AuthorizedEffectInput,
+  AuthorizedEffectInputs,
+  EffectToolDefinition,
+  ServerEffectRenderContext
+} from "../../../src/types.js";
+import {
+  assertEffectToolDefinition,
+  executeSelectedEffectTool,
+  validateAndNormalizeEffectEnvelope
+} from "../../../src/validation.js";
+import { BATCH_01_DEFINITIONS } from "../../../src/batches/batch-01/index.js";
+
+const pathBinding = {
+  points: [{ x: 12, y: 70 }, { x: 45, y: 22 }, { x: 86, y: 82 }, { x: 145, y: 30 }],
+  closed: false
+};
+
+const shapeA = {
+  points: [{ x: 18, y: 18 }, { x: 92, y: 18 }, { x: 92, y: 92 }, { x: 18, y: 92 }],
+  closed: true
+};
+
+const shapeB = {
+  points: [{ x: 62, y: 38 }, { x: 142, y: 38 }, { x: 142, y: 110 }, { x: 62, y: 110 }],
+  closed: true
+};
+
+function slotBinding(name: string): unknown {
+  if (name === "shape_a") return shapeA;
+  if (name === "shape_b" || name === "source_shape") return shapeB;
+  if (name === "occlusion_mask") {
+    return {
+      width: 8,
+      height: 6,
+      values: Array.from({ length: 48 }, (_, index) => index % 9 === 0 ? 1 : 0.12)
+    };
+  }
+  if (name === "stroke_plan") {
+    return {
+      strokes: [
+        { points: [{ x: 10, y: 20 }, { x: 70, y: 30 }, { x: 130, y: 22 }] },
+        { points: [{ x: 130, y: 55 }, { x: 70, y: 80 }, { x: 15, y: 60 }] }
+      ]
+    };
+  }
+  if (name === "source_image") return { width: 160, height: 120, decoded: true };
+  if (name === "terminals") {
+    return { points: [{ x: 15, y: 18 }, { x: 80, y: 96 }, { x: 148, y: 24 }], closed: false };
+  }
+  return pathBinding;
+}
+
+function contextFor(definition: EffectToolDefinition, seed = 173): ServerEffectRenderContext {
+  const inputs: Record<string, unknown> = {};
+  for (const slot of definition.inputSlots) {
+    inputs[slot.name] = {
+      slot: slot.name,
+      kind: slot.kind,
+      tenantId: "tenant-batch-01",
+      userId: "user-batch-01",
+      locked: true,
+      binding: slotBinding(slot.name)
+    };
+  }
+  return {
+    environment: "server",
+    requestId: "batch-01-request",
+    tenantId: "tenant-batch-01",
+    userId: "user-batch-01",
+    time: 1.25,
+    deltaTime: 1 / 30,
+    frame: 38,
+    fps: 30,
+    width: 160,
+    height: 120,
+    seed,
+    quality: "final",
+    backend: definition.primaryBackend,
+    inputs: inputs as AuthorizedEffectInputs
+  };
+}
+
+function assertFiniteJson(value: unknown, path = "$"): void {
+  if (typeof value === "number") {
+    expect(Number.isFinite(value), `${path} must be finite`).toBe(true);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertFiniteJson(entry, `${path}[${index}]`));
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    Object.entries(value).forEach(([key, entry]) => assertFiniteJson(entry, `${path}.${key}`));
+  }
+}
+
+const invalidData: Readonly<Record<string, Record<string, unknown>>> = {
+  wave_path: { amplitude: 501 },
+  dash_flow: { direction: "sideways" },
+  blob_morph: { vertexCount: 7 },
+  shape_boolean_animate: { operation: "overlay" },
+  marker_stroke: { opacity: 2 },
+  neon_trace: { hue: 361 },
+  lightning_trace: { branchCount: 33 },
+  paint_on: { brushShape: "textured" },
+  volumetric_ray: { sampleCount: 7 },
+  electric_arc: { intensity: 11 }
+};
+
+const fieldSpecNames: Readonly<Record<string, string>> = {
+  wave_path: "wave-path-tool-field-spec.zh-CN.md",
+  dash_flow: "dash-flow-tool-field-spec.zh-CN.md",
+  blob_morph: "blob-morph-tool-field-spec.zh-CN.md",
+  shape_boolean_animate: "shape-boolean-animate-tool-field-spec.zh-CN.md",
+  marker_stroke: "marker-stroke-tool-field-spec.zh-CN.md",
+  neon_trace: "neon-trace-tool-field-spec.zh-CN.md",
+  lightning_trace: "lightning-trace-tool-field-spec.zh-CN.md",
+  paint_on: "paint-on-tool-field-spec.zh-CN.md",
+  volumetric_ray: "volumetric-ray-tool-field-spec.zh-CN.md",
+  electric_arc: "electric-arc-tool-field-spec.zh-CN.md"
+};
+
+describe("batch-01 effect definitions", () => {
+  it("exports exactly the ten assigned definitions with unique identities", () => {
+    expect(BATCH_01_DEFINITIONS).toHaveLength(10);
+    expect(new Set(BATCH_01_DEFINITIONS.map((definition) => definition.effectId)).size).toBe(10);
+    expect(new Set(BATCH_01_DEFINITIONS.map((definition) => definition.toolName)).size).toBe(10);
+    BATCH_01_DEFINITIONS.forEach(assertEffectToolDefinition);
+  });
+
+  it.each(BATCH_01_DEFINITIONS)("executes $toolName defaults and returns finite output", async (definition) => {
+    const result = await executeSelectedEffectTool(
+      definition,
+      definition.toolName,
+      { type: definition.toolName, data: {} },
+      contextFor(definition)
+    );
+    expect(result.backendId).toBe(definition.primaryBackend.backendId);
+    expect(result.degraded).toBe(false);
+    expect(["frame", "metadata"]).toContain(result.kind);
+    expect(() => JSON.stringify(result.output)).not.toThrow();
+    assertFiniteJson(result.output);
+  });
+
+  it.each(BATCH_01_DEFINITIONS)("reproduces $toolName output with the same server seed", async (definition) => {
+    const envelope = { type: definition.toolName, data: {} };
+    const first = await executeSelectedEffectTool(definition, definition.toolName, envelope, contextFor(definition, 91));
+    const second = await executeSelectedEffectTool(definition, definition.toolName, envelope, contextFor(definition, 91));
+    expect(second).toEqual(first);
+  });
+
+  it.each(["blob_morph", "marker_stroke", "lightning_trace", "electric_arc"])(
+    "uses the server seed for deterministic variation in %s",
+    async (toolName) => {
+      const definition = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === toolName)!;
+      const envelope = { type: toolName, data: {} };
+      const first = await executeSelectedEffectTool(definition, toolName, envelope, contextFor(definition, 10));
+      const second = await executeSelectedEffectTool(definition, toolName, envelope, contextFor(definition, 11));
+      expect(second.output).not.toEqual(first.output);
+    }
+  );
+
+  it.each(BATCH_01_DEFINITIONS)("rejects unknown and invalid $toolName parameters", (definition) => {
+    expect(() => validateAndNormalizeEffectEnvelope(
+      definition,
+      definition.toolName,
+      { type: definition.toolName, data: { unknownParameter: true } }
+    )).toThrow(expect.objectContaining({ code: "PARAMETER_INVALID" }));
+    expect(() => validateAndNormalizeEffectEnvelope(
+      definition,
+      definition.toolName,
+      { type: definition.toolName, data: invalidData[definition.toolName] }
+    )).toThrow(expect.objectContaining({ code: "PARAMETER_INVALID" }));
+  });
+
+  it.each(BATCH_01_DEFINITIONS)("requires server-authorized inputs for $toolName", async (definition) => {
+    const context = { ...contextFor(definition), inputs: {} };
+    await expect(executeSelectedEffectTool(
+      definition,
+      definition.toolName,
+      { type: definition.toolName, data: {} },
+      context
+    )).rejects.toMatchObject({ code: "INPUT_AUTHORIZATION_INVALID" });
+  });
+
+  it("rejects degenerate server path geometry instead of producing non-finite dash output", async () => {
+    const definition = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === "dash_flow")!;
+    const context = contextFor(definition);
+    const source = context.inputs.source_path as AuthorizedEffectInput;
+    const inputs = {
+      ...context.inputs,
+      source_path: { ...source, binding: { points: [{ x: 4, y: 4 }, { x: 4, y: 4 }] } }
+    } as AuthorizedEffectInputs;
+    await expect(executeSelectedEffectTool(
+      definition,
+      definition.toolName,
+      { type: definition.toolName, data: {} },
+      { ...context, inputs }
+    )).rejects.toThrow("zero-length path");
+  });
+
+  it.each(BATCH_01_DEFINITIONS)("keeps the $toolName Markdown JSON example Schema-valid", (definition) => {
+    const filename = fieldSpecNames[definition.toolName]!;
+    const markdown = readFileSync(new URL(`../../../field-specs/batch-01/${filename}`, import.meta.url), "utf8");
+    expect(markdown).toContain(`\`${definition.toolName}\``);
+    const match = /```json\s*([\s\S]*?)```/u.exec(markdown);
+    expect(match, `${filename} needs one JSON example`).not.toBeNull();
+    const example = JSON.parse(match![1]!) as unknown;
+    const normalized = validateAndNormalizeEffectEnvelope(definition, definition.toolName, example);
+    expect(normalized.type).toBe(definition.toolName);
+    expect(normalized.data).toEqual(definition.defaults);
+  });
+
+  it("implements ten distinct output algorithms", async () => {
+    const algorithms = await Promise.all(BATCH_01_DEFINITIONS.map(async (definition) => {
+      const result = await executeSelectedEffectTool(
+        definition,
+        definition.toolName,
+        { type: definition.toolName, data: {} },
+        contextFor(definition)
+      );
+      return (result.output as { algorithm?: unknown }).algorithm;
+    }));
+    expect(algorithms.every((algorithm) => typeof algorithm === "string")).toBe(true);
+    expect(new Set(algorithms).size).toBe(10);
+  });
+});
