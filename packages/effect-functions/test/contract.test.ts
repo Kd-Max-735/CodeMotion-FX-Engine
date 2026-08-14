@@ -254,8 +254,8 @@ describe("server single-tool envelope", () => {
     expect(renderCalls).toBe(0);
   });
 
-  it("exports a registry with no references to unimplemented batches", () => {
-    expect(EFFECT_TOOL_REGISTRY.list()).toEqual([]);
+  it("exports the complete integrated registry", () => {
+    expect(EFFECT_TOOL_REGISTRY.list()).toHaveLength(120);
   });
 
   it("uses a server context with no DOM or browser-global fields", () => {

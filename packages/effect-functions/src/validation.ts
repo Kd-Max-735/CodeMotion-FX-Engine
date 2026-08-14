@@ -199,7 +199,12 @@ export function assertEffectToolDefinition(
   if (definition.primaryBackend.kind === "ffmpeg" && definition.primaryBackend.deterministic !== true) {
     fail("DEFINITION_INVALID", "Primary server backend must declare deterministic behavior.");
   }
-  const ajv = new Ajv2020({ allErrors: true, strict: true, strictNumbers: true });
+  const ajv = new Ajv2020({
+    allErrors: true,
+    strict: true,
+    strictNumbers: true,
+    multipleOfPrecision: 12
+  });
   let validate: ValidateFunction;
   try {
     validate = ajv.compile(definition.parameterSchema as object);
