@@ -6,7 +6,6 @@ import {
   assertExactKeys,
   clamp,
   isRecord,
-  optionalSingleBinding,
   round,
   singleBinding,
   unitNumber
@@ -84,7 +83,7 @@ export const HOLOGRAM_DEFINITION: EffectToolDefinition<HologramParams, Authorize
   ],
   inputSlots: [
     { name: "target_layer", kind: "data", required: true, cardinality: "one", description: "Server-resolved material surface." },
-    { name: "depth_map", kind: "depth-map", required: false, cardinality: "one", description: "Optional server-authorized depth sample for parallax." }
+    { name: "depth_map", kind: "depth-map", required: true, cardinality: "one", description: "Required server-authorized depth sample for parallax." }
   ],
   primaryBackend: GPU_BACKEND,
   fallbackStrategy: { kind: "reject", reason: "Emissive scanlines, glitches, and depth parallax require the server GPU material path." },
@@ -93,11 +92,12 @@ export const HOLOGRAM_DEFINITION: EffectToolDefinition<HologramParams, Authorize
   validateParams: () => ({ valid: true }),
   render: (context, params) => {
     const surface = parseMaterialSurface(singleBinding(context, "target_layer"));
-    const depthValue = optionalSingleBinding(context, "depth_map");
-    const sampledDepth = depthValue === undefined ? surface.facing : parseDepth(depthValue);
-    const phase = context.time * 37.1 + context.seed * 0.017;
+    const sampledDepth = parseDepth(singleBinding(context, "depth_map"));
+    const phase = (context.time % 1_000_000) * 37.1
+      + (context.seed % 1_000_000) * 0.017;
     const flickerLevel = clamp(1 - params.flicker * (0.5 + 0.5 * Math.sin(phase * 2.17)));
-    const scanlineLevel = clamp(1 - params.scanline * (0.5 + 0.5 * Math.sin((context.frame + sampledDepth * 41) * 0.73)));
+    const scanlinePhase = ((context.frame % 1_000_000) + sampledDepth * 41) * 0.73;
+    const scanlineLevel = clamp(1 - params.scanline * (0.5 + 0.5 * Math.sin(scanlinePhase)));
     const glitchGate = Math.sin(phase * 9.13) > 1 - params.glitch * 2;
     const glitchOffset = glitchGate ? params.glitch * Math.sin(phase * 23.7) : 0;
     const color = COLORS[params.colorMode];
@@ -120,7 +120,7 @@ export const HOLOGRAM_DEFINITION: EffectToolDefinition<HologramParams, Authorize
         depthParallax: round((sampledDepth - 0.5) * params.depth)
       }),
       degraded: false,
-      warnings: depthValue === undefined ? ["No depth map bound; using surface facing for parallax."] : []
+      warnings: []
     };
   }
 };

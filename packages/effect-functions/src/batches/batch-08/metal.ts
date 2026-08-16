@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { AuthorizedEffectInputs, EffectToolDefinition } from "../../types.js";
-import { GPU_BACKEND, JSON_SCHEMA, clamp, optionalSingleBinding, round, singleBinding } from "./common.js";
+import { GPU_BACKEND, JSON_SCHEMA, clamp, round, singleBinding } from "./common.js";
 import { parseMaterialSurface, parseTextureSample, type Rgba } from "./visual-inputs.js";
 
 export interface MetalParams extends JsonObject {
@@ -62,7 +62,7 @@ export const METAL_DEFINITION: EffectToolDefinition<MetalParams, AuthorizedEffec
   ],
   inputSlots: [
     { name: "target_layer", kind: "data", required: true, cardinality: "one", description: "Server-resolved material surface." },
-    { name: "environment_texture", kind: "texture", required: false, cardinality: "one", description: "Optional server-authorized reflection environment." }
+    { name: "environment_texture", kind: "texture", required: true, cardinality: "one", description: "Required server-authorized reflection environment." }
   ],
   primaryBackend: GPU_BACKEND,
   fallbackStrategy: { kind: "reject", reason: "Conductive PBR shading requires the server GPU material path." },
@@ -71,18 +71,20 @@ export const METAL_DEFINITION: EffectToolDefinition<MetalParams, AuthorizedEffec
   validateParams: () => ({ valid: true }),
   render: (context, params) => {
     const surface = parseMaterialSurface(singleBinding(context, "target_layer"));
-    const environmentValue = optionalSingleBinding(context, "environment_texture");
-    const environment = environmentValue === undefined ? undefined : parseTextureSample(environmentValue);
+    const environment = parseTextureSample(singleBinding(context, "environment_texture"));
     const tone = TONES[params.tone];
     const f0 = Object.freeze([
-      round(tone[0] * params.specular),
-      round(tone[1] * params.specular),
-      round(tone[2] * params.specular),
+      round(tone[0] * params.specular * (0.75 + surface.baseColor[0] * 0.25)),
+      round(tone[1] * params.specular * (0.75 + surface.baseColor[1] * 0.25)),
+      round(tone[2] * params.specular * (0.75 + surface.baseColor[2] * 0.25)),
       1
     ]) as Rgba;
-    const reflected = environment === undefined
-      ? surface.luminance
-      : (environment.sample[0] + environment.sample[1] + environment.sample[2]) / 3;
+    const environmentLuminance = (environment.sample[0] + environment.sample[1]
+      + environment.sample[2]) / 3;
+    const fresnel = (1 - surface.facing) ** 5;
+    const reflected = environmentLuminance
+      * (params.specular + (1 - params.specular) * fresnel)
+      * (0.75 + surface.luminance * 0.25);
     return {
       kind: "texture",
       backendId: GPU_BACKEND.backendId,
@@ -95,7 +97,7 @@ export const METAL_DEFINITION: EffectToolDefinition<MetalParams, AuthorizedEffec
         reflectedLuminance: round(clamp(reflected * params.specular * (1 - params.roughness * 0.55)))
       }),
       degraded: false,
-      warnings: environment === undefined ? ["No environment texture bound; using surface luminance."] : []
+      warnings: []
     };
   }
 };

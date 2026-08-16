@@ -59,12 +59,12 @@ export const FLOW_FIELD_DEFINITION: EffectToolDefinition<FlowFieldParams> = {
     additionalProperties: false,
     properties: {
       particleCount: { type: "integer", minimum: 8, maximum: 128, default: 48 },
-      fieldStrength: { type: "number", minimum: 0.1, maximum: 6, default: 1.8 },
-      fieldScale: { type: "number", minimum: 0.25, maximum: 4, default: 1.2 },
-      turbulence: { type: "number", minimum: 0, maximum: 2, default: 0.35 },
-      drag: { type: "number", minimum: 0, maximum: 5, default: 1.1 },
-      advectionSpeed: { type: "number", minimum: 0.1, maximum: 3, default: 1 },
-      spawnRadius: { type: "number", minimum: 0.1, maximum: 1, default: 0.8 }
+      fieldStrength: { type: "number", minimum: 0.1, maximum: 6, multipleOf: 0.01, default: 1.8 },
+      fieldScale: { type: "number", minimum: 0.25, maximum: 4, multipleOf: 0.01, default: 1.2 },
+      turbulence: { type: "number", minimum: 0, maximum: 2, multipleOf: 0.01, default: 0.35 },
+      drag: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 1.1 },
+      advectionSpeed: { type: "number", minimum: 0.1, maximum: 3, multipleOf: 0.01, default: 1 },
+      spawnRadius: { type: "number", minimum: 0.1, maximum: 1, multipleOf: 0.01, default: 0.8 }
     }
   },
   defaults: FLOW_FIELD_DEFAULTS,

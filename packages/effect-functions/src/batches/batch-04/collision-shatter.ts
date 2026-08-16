@@ -60,13 +60,13 @@ export const COLLISION_SHATTER_DEFINITION: EffectToolDefinition<CollisionShatter
     additionalProperties: false,
     properties: {
       fragmentCount: { type: "integer", minimum: 4, maximum: 64, default: 24 },
-      impactStrength: { type: "number", minimum: 0.1, maximum: 12, default: 4.5 },
-      spreadAngle: { type: "number", minimum: 10, maximum: 360, default: 220 },
-      gravity: { type: "number", minimum: 0, maximum: 20, default: 8 },
-      drag: { type: "number", minimum: 0, maximum: 5, default: 0.5 },
-      spin: { type: "number", minimum: 0, maximum: 12, default: 4 },
-      restitution: { type: "number", minimum: 0, maximum: 1, default: 0.35 },
-      randomness: { type: "number", minimum: 0, maximum: 1, default: 0.45 }
+      impactStrength: { type: "number", minimum: 0.1, maximum: 12, multipleOf: 0.01, default: 4.5 },
+      spreadAngle: { type: "number", minimum: 10, maximum: 360, multipleOf: 0.1, default: 220 },
+      gravity: { type: "number", minimum: 0, maximum: 20, multipleOf: 0.01, default: 8 },
+      drag: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 0.5 },
+      spin: { type: "number", minimum: 0, maximum: 12, multipleOf: 0.01, default: 4 },
+      restitution: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 0.35 },
+      randomness: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 0.45 }
     }
   },
   defaults: COLLISION_SHATTER_DEFAULTS,

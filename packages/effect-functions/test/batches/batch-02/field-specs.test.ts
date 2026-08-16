@@ -7,6 +7,10 @@ import { validateAndNormalizeEffectEnvelope } from "../../../src/validation.js";
 
 const specDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../../../field-specs/batch-02");
 const expectedFiles = BATCH_02_DEFINITIONS.map((definition) => `${definition.toolName}.md`).sort();
+const assignedToolNames = new Set([
+  "aura_field", "chromatic_aberration", "color_grade", "datamosh", "depth_of_field",
+  "glitch_slice", "gradient_flow", "pixel_sort", "rgb_split"
+]);
 
 describe("batch-02 Chinese field specifications", () => {
   it("provides exactly one specification for every tool", () => {
@@ -24,11 +28,18 @@ describe("batch-02 Chinese field specifications", () => {
       const jsonBlocks = [...markdown.matchAll(/```json\s*([\s\S]*?)```/gu)];
       expect(jsonBlocks).toHaveLength(1);
       const envelope = JSON.parse(jsonBlocks[0]![1]!) as unknown;
-      expect(() => validateAndNormalizeEffectEnvelope(
+      const normalized = validateAndNormalizeEffectEnvelope(
         definition,
         definition.toolName,
         envelope
-      )).not.toThrow();
+      );
+      const schema = definition.parameterSchema as { properties: Record<string, unknown> };
+      const documentedData = (envelope as { data: Record<string, unknown> }).data;
+      expect(Object.keys(documentedData).sort()).toEqual(Object.keys(schema.properties).sort());
+      expect(Object.keys(documentedData).sort()).toEqual(Object.keys(definition.defaults).sort());
+      if (assignedToolNames.has(definition.toolName)) {
+        expect(normalized.data).toEqual(definition.defaults);
+      }
 
       const examples = markdown.match(/## 自然语言示例([\s\S]*?)## 推荐档位/u)?.[1] ?? "";
       const exampleCount = [...examples.matchAll(/^\d+\. /gmu)].length;

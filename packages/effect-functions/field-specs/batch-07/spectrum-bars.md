@@ -26,7 +26,7 @@
 | `barColor` | `#RRGGBB` | 六位十六进制 | `#00F5D4` | 柱体颜色 |
 | `backgroundColor` | `#RRGGBB` | 六位十六进制 | `#001219` | 背景颜色 |
 
-服务端另行绑定必需的 `audio_analysis` 数据槽，其中包含 1–8192 个 `frequencyBins`，可选上一帧 bins。该槽不属于模型参数。
+服务端另行绑定必需的 `audio_analysis` 音频输入槽（`kind: audio`）。绑定必须是 owner-scoped、已锁定的精确 `audio-analysis-v1` 对象，其中包含 1–8192 个有限且位于 0–1 的 `frequencyBins`，并可选同约束的 `previousFrequencyBins`。该槽不属于模型参数；没有真实授权分析时直接拒绝，不生成替代频谱。
 
 ## 5. 表达映射
 

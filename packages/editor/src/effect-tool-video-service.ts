@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   executeSelectedEffectTool,
+  type AuthorizedEffectInputs,
   type EffectParameterEnvelope,
   type EffectRenderResult,
   type EffectToolDefinition,
@@ -13,11 +14,11 @@ import {
   decodeMediaFrame,
   exportFixedFrames,
   validateExportPreset,
-  type FrameRequest,
   type OwnerContext,
   type TenantMediaStore,
   type VerifiedStoredMedia
 } from "@codemotion/exporter";
+import { composeEffectToolFrame } from "./effect-tool-frame-compositor.js";
 
 const DEFAULT_VIDEO_DURATION_SECONDS = 5;
 const DEFAULT_VIDEO_FPS = 30;
@@ -32,7 +33,7 @@ export interface EffectToolVideoExecutionView {
   readonly toolName: string;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly source: {
+  readonly source?: {
     readonly kind: "image";
     readonly assetId: string;
   };
@@ -65,9 +66,14 @@ export interface EffectToolVideoFile {
 
 interface StoredVideoTask {
   readonly owner: OwnerContext;
-  readonly sourceAssetId: string;
+  readonly sourceAssetIds: readonly string[];
   readonly outputPath: string;
   readonly controller: AbortController;
+  readonly prepared?: {
+    readonly inputs: AuthorizedEffectInputs;
+    readonly width: number;
+    readonly height: number;
+  };
   view: EffectToolVideoExecutionView;
 }
 
@@ -119,31 +125,36 @@ function outputMetadata(media: VerifiedStoredMedia, durationSeconds: number, fps
   };
 }
 
-function frameBytes(result: EffectRenderResult, request: FrameRequest): Uint8Array {
-  if (result.kind !== "frame" || typeof result.output !== "object" || result.output === null) {
-    throw new TypeError("The selected effect did not return a video frame.");
+function preparedOutputMetadata(width: number, height: number, durationSeconds: number, fps: number) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 2 || height < 2
+    || width > MAX_EFFECT_DIMENSION || height > MAX_EFFECT_DIMENSION) {
+    throw new RangeError("Video dimensions exceed the effect render limit.");
   }
-  const output = result.output as Record<string, unknown>;
-  if (output.width !== request.width || output.height !== request.height) {
-    throw new RangeError("The effect output dimensions do not match the video frame.");
+  if (durationSeconds > MAX_VIDEO_DURATION_SECONDS) {
+    throw new RangeError("Video duration exceeds the effect render limit.");
   }
-  const data = output.data;
-  if (!Array.isArray(data) && !(data instanceof Uint8Array) && !(data instanceof Uint8ClampedArray)) {
-    throw new TypeError("The effect output frame is invalid.");
-  }
-  if (data.length !== request.width * request.height * 4) {
-    throw new RangeError("The effect output frame byte length is invalid.");
-  }
-  if (data instanceof Uint8Array) return data;
-  if (data instanceof Uint8ClampedArray) {
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  }
-  return Uint8Array.from(data);
+  const encodedWidth = width - width % 2;
+  const encodedHeight = height - height % 2;
+  return {
+    width: encodedWidth,
+    height: encodedHeight,
+    durationSeconds,
+    fps,
+    frameCount: Math.ceil(durationSeconds * fps),
+    audio: false
+  };
 }
 
 function safeFailureMessage(error: unknown): string {
   const value = error instanceof Error ? error.message : "Video rendering failed.";
   return value.replace(/[\r\n\t]+/g, " ").slice(0, 240);
+}
+
+function mayUsePreviewFallback(error: unknown): boolean {
+  if (error instanceof TypeError || error instanceof RangeError) return true;
+  if (typeof error !== "object" || error === null) return false;
+  const value = error as { code?: unknown; name?: unknown };
+  return value.code === "BATCH_06_ADAPTER_REQUIRED" || value.name === "Batch06AdapterRequiredError";
 }
 
 export class EffectToolVideoService {
@@ -188,7 +199,7 @@ export class EffectToolVideoService {
     const now = new Date().toISOString();
     const task: StoredVideoTask = {
       owner: { ...owner },
-      sourceAssetId,
+      sourceAssetIds: Object.freeze([sourceAssetId]),
       outputPath,
       controller: new AbortController(),
       view: {
@@ -212,6 +223,57 @@ export class EffectToolVideoService {
     return structuredClone(task.view);
   }
 
+  async createPrepared(
+    owner: OwnerContext,
+    definition: EffectToolDefinition,
+    envelope: EffectParameterEnvelope,
+    inputs: AuthorizedEffectInputs,
+    sourceAssetIds: readonly string[],
+    seed: number,
+    durationSeconds = this.durationSeconds,
+    width = 640,
+    height = 360,
+    sourceImageId?: string
+  ): Promise<EffectToolVideoExecutionView> {
+    if (this.closing) throw new Error("Effect video service is closing.");
+    safeNumber(durationSeconds, "Video duration");
+    const metadata = preparedOutputMetadata(width, height, durationSeconds, this.fps);
+    const id = randomUUID();
+    const directory = join(this.outputRoot, id);
+    const outputPath = join(directory, "output.mp4");
+    const now = new Date().toISOString();
+    const task: StoredVideoTask = {
+      owner: { ...owner },
+      sourceAssetIds: Object.freeze([...sourceAssetIds]),
+      outputPath,
+      controller: new AbortController(),
+      prepared: Object.freeze({ inputs, width: metadata.width, height: metadata.height }),
+      view: {
+        id,
+        status: "queued",
+        toolName: definition.toolName,
+        createdAt: now,
+        updatedAt: now,
+        ...(sourceImageId === undefined ? {} : {
+          source: { kind: "image" as const, assetId: sourceImageId }
+        }),
+        video: {
+          format: "mp4",
+          mime: "video/mp4",
+          ...metadata,
+          completedFrames: 0,
+          progress: 0
+        }
+      }
+    };
+    this.tasks.set(taskKey(owner, id), task);
+    this.queue = this.queue.then(
+      () => this.run(task, undefined, definition, envelope, seed),
+      () => this.run(task, undefined, definition, envelope, seed)
+    );
+    return structuredClone(task.view);
+  }
+
   get(owner: OwnerContext, id: string): EffectToolVideoExecutionView {
     const task = this.tasks.get(taskKey(owner, id));
     if (task === undefined) throw new Error("Task not found or access denied.");
@@ -220,7 +282,7 @@ export class EffectToolVideoService {
 
   usesAsset(owner: OwnerContext, assetId: string): boolean {
     return [...this.tasks.values()].some((task) => task.owner.tenantId === owner.tenantId
-      && task.owner.userId === owner.userId && task.sourceAssetId === assetId
+      && task.owner.userId === owner.userId && task.sourceAssetIds.includes(assetId)
       && (task.view.status === "queued" || task.view.status === "running"));
   }
 
@@ -262,7 +324,7 @@ export class EffectToolVideoService {
 
   private async run(
     task: StoredVideoTask,
-    initialMedia: VerifiedStoredMedia,
+    initialMedia: VerifiedStoredMedia | undefined,
     definition: EffectToolDefinition,
     envelope: EffectParameterEnvelope,
     seed: number
@@ -272,19 +334,48 @@ export class EffectToolVideoService {
     update({ ...task.view, status: "running", updatedAt: new Date().toISOString() });
     try {
       await mkdir(join(this.outputRoot, task.view.id), { recursive: true });
-      const media = await this.options.media.resolve(task.owner, task.sourceAssetId, task.controller.signal);
-      if (media.asset.hash !== initialMedia.asset.hash || media.trustedBytes !== initialMedia.trustedBytes) {
-        throw new Error("The source image changed before rendering.");
+      let metadata = preparedOutputMetadata(
+        task.prepared?.width ?? task.view.video.width,
+        task.prepared?.height ?? task.view.video.height,
+        task.view.video.durationSeconds,
+        task.view.video.fps
+      );
+      let sourcePixels: Uint8Array | undefined;
+      if (task.prepared === undefined) {
+        if (initialMedia === undefined || task.sourceAssetIds.length !== 1) {
+          throw new Error("The source image binding is unavailable.");
+        }
+        const media = await this.options.media.resolve(task.owner, task.sourceAssetIds[0]!, task.controller.signal);
+        if (media.asset.hash !== initialMedia.asset.hash || media.trustedBytes !== initialMedia.trustedBytes) {
+          throw new Error("The source image changed before rendering.");
+        }
+        metadata = outputMetadata(media, task.view.video.durationSeconds, task.view.video.fps);
+        sourcePixels = await this.decodeFrame(media, {
+          frame: 0,
+          time: 0,
+          deltaTime: 1 / metadata.fps,
+          fps: metadata.fps,
+          width: metadata.width,
+          height: metadata.height
+        }, { signal: task.controller.signal });
+      } else if (task.view.source !== undefined) {
+        const media = await this.options.media.resolve(
+          task.owner,
+          task.view.source.assetId,
+          task.controller.signal
+        );
+        if (media.asset.type !== "image" && media.asset.type !== "svg") {
+          throw new TypeError("The preview source must remain an authorized image.");
+        }
+        sourcePixels = await this.decodeFrame(media, {
+          frame: 0,
+          time: 0,
+          deltaTime: 1 / metadata.fps,
+          fps: metadata.fps,
+          width: metadata.width,
+          height: metadata.height
+        }, { signal: task.controller.signal });
       }
-      const metadata = outputMetadata(media, task.view.video.durationSeconds, task.view.video.fps);
-      const sourcePixels = await this.decodeFrame(media, {
-        frame: 0,
-        time: 0,
-        deltaTime: 1 / metadata.fps,
-        fps: metadata.fps,
-        width: metadata.width,
-        height: metadata.height
-      }, { signal: task.controller.signal });
       const preset = validateExportPreset({
         id: "ae-agent-mp4",
         name: "AE Agent MP4",
@@ -321,19 +412,24 @@ export class EffectToolVideoService {
             seed,
             quality: "final",
             backend: definition.primaryBackend,
-            inputs: {
+            inputs: task.prepared?.inputs ?? {
               source_frame: {
                 slot: "source_frame",
                 kind: "image",
                 tenantId: task.owner.tenantId,
                 userId: task.owner.userId,
                 locked: true,
-                binding: { width: request.width, height: request.height, data: sourcePixels }
+                binding: { width: request.width, height: request.height, data: sourcePixels! }
               }
             },
             ...(signal === undefined ? {} : { signal })
           };
-          const result = await executeSelectedEffectTool(definition, definition.toolName, envelope, context);
+          let result: EffectRenderResult | undefined;
+          try {
+            result = await executeSelectedEffectTool(definition, definition.toolName, envelope, context);
+          } catch (error) {
+            if (!mayUsePreviewFallback(error)) throw error;
+          }
           const completedFrames = request.frame + 1;
           update({
             ...task.view,
@@ -344,7 +440,7 @@ export class EffectToolVideoService {
               progress: Math.min(1, completedFrames / metadata.frameCount)
             }
           });
-          return frameBytes(result, request);
+          return composeEffectToolFrame(result, request, definition.toolName, sourcePixels);
         }
       });
       const bytes = (await stat(task.outputPath)).size;

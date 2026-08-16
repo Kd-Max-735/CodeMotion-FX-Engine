@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { TRANSITION_BACKEND, effectProgress, round, valid, type MotionEasing } from "./helpers.js";
+import { TRANSITION_BACKEND, assertDistinctInputBindings, effectProgress, frameOutput, round, valid, type MotionEasing } from "./helpers.js";
 
 export interface PageTurnParams extends JsonObject {
   direction: "left" | "right";
@@ -12,26 +12,22 @@ export interface PageTurnParams extends JsonObject {
 }
 
 export function renderPageTurn(context: ServerEffectRenderContext, params: Readonly<PageTurnParams>) {
+  assertDistinctInputBindings(context, "from_video", "to_video");
   const progress = effectProgress(context, params.duration, params.easing);
   const sign = params.direction === "left" ? -1 : 1;
-  return {
-    kind: "metadata" as const,
-    backendId: TRANSITION_BACKEND.backendId,
-    output: {
-      algorithm: "page-turn-mesh",
-      progress,
-      sourceWeights: { from: round(1 - progress), to: progress },
-      sheet: {
-        rotationYDegrees: round(sign * 180 * progress),
-        curlDegrees: round(sign * Math.sin(Math.PI * progress) * 75),
-        curlRadius: params.curlRadius,
-        perspective: params.perspective,
-        shadowOpacity: round(params.shadowStrength * Math.sin(Math.PI * progress))
-      }
-    },
-    degraded: false,
-    warnings: []
-  };
+  return frameOutput(context, "page_turn_mesh", {
+    algorithm: "page-turn-mesh",
+    inputSlots: { from: "from_video", to: "to_video" },
+    progress,
+    sourceWeights: { from: round(1 - progress), to: progress },
+    sheet: {
+      rotationYDegrees: round(sign * 180 * progress),
+      curlDegrees: round(sign * Math.sin(Math.PI * progress) * 75),
+      curlRadius: params.curlRadius,
+      perspective: params.perspective,
+      shadowOpacity: round(params.shadowStrength * Math.sin(Math.PI * progress))
+    }
+  });
 }
 
 export const PAGE_TURN_DEFINITION: EffectToolDefinition<PageTurnParams> = {

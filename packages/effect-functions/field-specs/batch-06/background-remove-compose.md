@@ -4,6 +4,11 @@
 
 使用服务端绑定并对齐的前景视频、matte 和背景图片完成边缘处理、溢色抑制与前后景合成。三类素材均由服务端授权，不是模型参数。
 
+## 服务器资源要求与接入状态
+
+- 必需输入槽：`foreground_video`（owner-authorized、locked `video`）、独立且逐帧对齐的 `foreground_matte`（`mask`）以及独立的 `background_image`（`image`）。禁止用前景画面同时冒充 matte 或背景。
+- 接入状态：**BLOCKED**。等待窗口 12 提供视频/matte/背景解码、边缘处理与真实复合帧适配器；当前安全失败，不返回合成步骤元数据假帧。
+
 ## JSON 示例
 
 ```json

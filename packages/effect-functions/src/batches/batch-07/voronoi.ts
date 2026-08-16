@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, hashSeed, metadataResult,
+import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, hashSeed, invalid, metadataResult,
   normalizeColor, round, schema, seededRandom, valid } from "./shared.js";
 
 export interface VoronoiParams extends JsonObject {
@@ -47,7 +47,9 @@ export const voronoiDefinition: EffectToolDefinition<VoronoiParams> = {
   normalizeParams: (params) => ({ ...params, jitter: round(params.jitter), speed: round(params.speed),
     edgeWidth: round(params.edgeWidth, 4), cellColor: normalizeColor(params.cellColor),
     edgeColor: normalizeColor(params.edgeColor) }),
-  validateParams: () => valid(),
+  validateParams: (params) => params.gridSize ** 2 * params.pointCount <= 524_288
+    ? valid()
+    : invalid("$", "gridSize squared times pointCount must not exceed 524,288"),
   render: (context, params) => {
     const seed = hashSeed(context.seed, params.seed);
     const random = seededRandom(seed);

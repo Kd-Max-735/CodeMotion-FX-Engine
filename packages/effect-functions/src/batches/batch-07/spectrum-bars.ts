@@ -46,7 +46,7 @@ export const spectrumBarsDefinition: EffectToolDefinition<SpectrumBarsParams> = 
     { presetId: "batch07.spectrum.club", displayName: "俱乐部", params: { ...defaults, barCount: 72, gain: 1.7, smoothing: 0.3, falloff: 0.75, barColor: "#FF006E" } },
     { presetId: "batch07.spectrum.calm", displayName: "柔和监听", params: { ...defaults, barCount: 32, gain: 0.75, smoothing: 0.82, falloff: 1.5, logarithmic: false, barColor: "#90E0EF" } }
   ],
-  inputSlots: [{ name: "audio_analysis", kind: "data", required: true, cardinality: "one",
+  inputSlots: [{ name: "audio_analysis", kind: "audio", required: true, cardinality: "one",
     description: "Server-authorized normalized frequency analysis; never model-visible." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,

@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { CAMERA_BACKEND, cameraOutput, effectProgress, invalid, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
+import { CAMERA_BACKEND, cameraOutput, effectProgress, frameOutput, hasInput, invalid, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
 
 export interface ParallaxLayersParams extends JsonObject {
   travelX: number;
@@ -34,17 +34,14 @@ export function renderParallaxLayers(context: ServerEffectRenderContext, params:
       scale: round(1 + position.z * disparity * 0.01)
     };
   });
-  return {
-    kind: "metadata" as const,
-    backendId: CAMERA_BACKEND.backendId,
-    output: {
-      ...cameraOutput("depth-map-parallax-layers", position, rotation, 50, progress),
-      depthBindingMode: "server-depth-map",
-      layers
-    },
-    degraded: false,
-    warnings: []
-  };
+  return frameOutput(context, "depth_map_parallax_layers", {
+    sourceSlot: "source_video",
+    depthSlot: "depth_map",
+    targetSlot: hasInput(context, "camera_target") ? "camera_target" : null,
+    ...cameraOutput("depth-map-parallax-layers", position, rotation, 50, progress),
+    depthBindingMode: "server-depth-map",
+    layers
+  });
 }
 
 export const PARALLAX_LAYERS_DEFINITION: EffectToolDefinition<ParallaxLayersParams> = {

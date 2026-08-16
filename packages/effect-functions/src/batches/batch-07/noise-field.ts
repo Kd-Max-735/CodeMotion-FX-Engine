@@ -87,7 +87,12 @@ export const noiseFieldDefinition: EffectToolDefinition<NoiseFieldParams> = {
     lowColor: normalizeColor(params.lowColor),
     highColor: normalizeColor(params.highColor)
   }),
-  validateParams: () => valid(),
+  validateParams: (params) => params.gridSize ** 2 * params.octaves <= 24_576
+    ? valid()
+    : {
+        valid: false,
+        issues: [{ path: "$", message: "gridSize squared times octaves must not exceed 24,576" }]
+      },
   render: (context, params) => {
     const seed = hashSeed(context.seed, params.seed);
     const phase = context.time * params.speed;

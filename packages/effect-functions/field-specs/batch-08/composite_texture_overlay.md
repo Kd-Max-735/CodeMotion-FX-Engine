@@ -36,6 +36,13 @@
 | `motionAngle` | 否 | -180–180 度 | 0 | 移动方向角 |
 | `premultipliedAlpha` | 否 | 布尔值 | `true` | 是否输出预乘 Alpha |
 
+## 服务器输入
+
+| inputSlot | kind | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `base_layer` | `data` | 是 | 服务端解析并锁定的基础图层采样 |
+| `overlay_texture` | `texture` | 是 | 服务端授权、解码并锁定的叠加纹理 |
+
 ## 选择策略
 
 “更透明”降低 `opacity`；“更明显”提高 `opacity`；“更亮”选 `screen`，增加对比选 `overlay`，压暗选 `multiply`，柔和融合选 `soft_light`；“更快”提高 `motion` 绝对值；纹理更细密可提高 `scale`。

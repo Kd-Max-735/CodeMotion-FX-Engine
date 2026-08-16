@@ -958,6 +958,8 @@ h2 { font-size: 18px; }
 .ae-agent .composer-shell:focus-within { border-color: #bfc2c5; }
 .ae-agent .selected-tool-tray { min-height: 34px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 9px 11px 0; }
 .ae-agent .selected-tool-tray > span, .ae-agent .selected-tool-tray > button { max-width: 100%; min-height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid #d5e5de; border-radius: 12px; background: #f5faf8; color: #28705a; font-size: 9px; }
+.ae-agent .selected-tool-tray > span { min-width: 0; }
+.ae-agent .selected-tool-tray > span b, .ae-agent .selected-tool-tray > span code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ae-agent .selected-tool-tray > span code { color: #679080; font-size: 8px; }
 .ae-agent .selected-tool-tray > button { overflow: hidden; border-color: var(--ae-line); background: #fafafa; color: var(--ae-muted); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .ae-agent .composer-shell textarea { width: 100%; min-height: 50px; max-height: 140px; padding: 13px 16px 8px; resize: none; overflow-y: auto; border: 0; outline: 0; background: transparent; color: var(--ae-ink); font-size: 13px; line-height: 1.55; }
@@ -980,15 +982,22 @@ h2 { font-size: 18px; }
 .ae-agent .tool-menu-head strong { font-size: 12px; }
 .ae-agent .tool-menu-head small { color: var(--ae-faint); font-size: 9px; }
 .ae-agent .tool-menu-head button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.ae-agent .tool-search { height: 48px; margin: 0 12px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 7px; border-bottom: 1px solid var(--ae-line); color: var(--ae-faint); }
+.ae-agent .tool-search input { width: 100%; min-width: 0; height: 38px; border: 0; outline: 0; background: transparent; color: var(--ae-ink); font-size: 11px; }
+.ae-agent .tool-search input::placeholder { color: #a0a3a7; }
+.ae-agent .tool-options { max-height: min(420px, calc(100vh - 250px)); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 5px 0; }
 .ae-agent .tool-option { width: 100%; min-height: 74px; padding: 11px 12px; border: 0; background: #fff; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; text-align: left; }
 .ae-agent .tool-option.is-selected { background: #fbfdfc; }
+.ae-agent .tool-option.is-active, .ae-agent .tool-option:hover { background: #f4f7f5; }
+.ae-agent .tool-option:focus-visible { position: relative; z-index: 1; outline: 2px solid #4a8a75; outline-offset: -2px; }
 .ae-agent .tool-option-copy { min-width: 0; display: grid; gap: 4px; }
-.ae-agent .tool-option-heading { display: flex; align-items: center; gap: 7px; }
-.ae-agent .tool-option-heading strong { font-size: 11px; }
+.ae-agent .tool-option-heading { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.ae-agent .tool-option-heading strong { min-width: 0; overflow-wrap: anywhere; font-size: 11px; }
 .ae-agent .tool-option-heading b { padding: 2px 5px; border-radius: 4px; background: #f0f1f2; color: var(--ae-muted); font-size: 8px; }
-.ae-agent .tool-option-copy small { color: #6f8d81; font: 9px ui-monospace, monospace; }
-.ae-agent .tool-option-copy em { color: var(--ae-muted); font-size: 9px; font-style: normal; }
+.ae-agent .tool-option-copy small { overflow-wrap: anywhere; color: #6f8d81; font: 9px ui-monospace, monospace; }
+.ae-agent .tool-option-copy em { overflow-wrap: anywhere; color: var(--ae-muted); font-size: 9px; font-style: normal; }
 .ae-agent .tool-option-action { display: flex; align-items: center; gap: 5px; color: var(--ae-accent); font-size: 9px; white-space: nowrap; }
+.ae-agent .tool-empty { min-height: 90px; display: grid; place-items: center; color: var(--ae-faint); font-size: 10px; }
 .ae-agent .send-button { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: #202124; color: #fff; cursor: pointer; }
 .ae-agent .send-button:disabled { opacity: .35; cursor: default; }
 .ae-agent .composer-note { display: block; margin-top: 8px; color: var(--ae-faint); font-size: 8px; text-align: center; }
@@ -1006,6 +1015,7 @@ h2 { font-size: 18px; }
   .ae-agent .user-message { max-width: 90%; }
   .ae-agent .model-label { display: none; }
   .ae-agent .tool-menu { position: fixed; right: 10px; bottom: 82px; }
+  .ae-agent .tool-options { max-height: min(390px, calc(100vh - 230px)); }
 }
 
 @media (max-width: 430px) {
@@ -1021,4 +1031,7 @@ h2 { font-size: 18px; }
   .ae-agent .tool-head { grid-template-columns: 25px minmax(0, 1fr); }
   .ae-agent .tool-state { display: none; }
   .ae-agent .tool-detail { padding-left: 9px; }
+  .ae-agent .tool-menu { right: 8px; bottom: 76px; width: calc(100vw - 16px); }
+  .ae-agent .tool-option { min-height: 70px; grid-template-columns: minmax(0, 1fr) 62px; gap: 7px; padding-inline: 10px; }
+  .ae-agent .tool-option-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
 }

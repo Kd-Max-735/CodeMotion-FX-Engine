@@ -59,11 +59,11 @@ export const SPRING_DEFINITION: EffectToolDefinition<SpringParams> = {
     additionalProperties: false,
     properties: {
       nodeCount: { type: "integer", minimum: 3, maximum: 32, default: 12 },
-      stiffness: { type: "number", minimum: 5, maximum: 120, default: 38 },
-      damping: { type: "number", minimum: 0.1, maximum: 10, default: 2.4 },
-      gravity: { type: "number", minimum: 0, maximum: 20, default: 4 },
-      restLength: { type: "number", minimum: 0.03, maximum: 0.3, default: 0.12 },
-      impulseStrength: { type: "number", minimum: 0, maximum: 12, default: 1.5 },
+      stiffness: { type: "number", minimum: 5, maximum: 120, multipleOf: 0.1, default: 38 },
+      damping: { type: "number", minimum: 0.1, maximum: 10, multipleOf: 0.01, default: 2.4 },
+      gravity: { type: "number", minimum: 0, maximum: 20, multipleOf: 0.01, default: 4 },
+      restLength: { type: "number", minimum: 0.03, maximum: 0.3, multipleOf: 0.001, default: 0.12 },
+      impulseStrength: { type: "number", minimum: 0, maximum: 12, multipleOf: 0.01, default: 1.5 },
       substeps: { type: "integer", minimum: 1, maximum: 4, default: 2 },
       anchorMode: { type: "string", enum: ["first", "both", "none"], default: "first" }
     }

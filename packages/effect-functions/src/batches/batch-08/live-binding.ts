@@ -58,6 +58,7 @@ function parseSnapshot(value: unknown): LiveBindingSnapshot {
   const maximum = finiteNumber(value.maximum, "live binding maximum");
   if (maximum <= minimum) throw new RangeError("live binding maximum must exceed minimum.");
   if (typeof value.targetHandle !== "string" || value.targetHandle.length === 0
+    || value.targetHandle.length > 256
     || typeof value.targetProperty !== "string"
     || !SAFE_PROPERTIES.has(value.targetProperty as SafeTargetProperty)) {
     throw new TypeError("live binding target must use an approved property.");
@@ -73,7 +74,13 @@ function parseSnapshot(value: unknown): LiveBindingSnapshot {
 }
 
 function mapValue(value: number, previous: number, snapshot: LiveBindingSnapshot, params: LiveBindingParams): number {
-  if (params.mapping === "normalized") return clamp((value - snapshot.minimum) / (snapshot.maximum - snapshot.minimum));
+  if (params.mapping === "normalized") {
+    const scale = Math.max(Math.abs(value), Math.abs(snapshot.minimum), Math.abs(snapshot.maximum), 1);
+    return clamp(
+      (value / scale - snapshot.minimum / scale)
+      / (snapshot.maximum / scale - snapshot.minimum / scale)
+    );
+  }
   if (params.mapping === "threshold") return value >= params.threshold ? 1 : 0;
   if (params.mapping === "pulse") return Math.abs(value - previous);
   return value;

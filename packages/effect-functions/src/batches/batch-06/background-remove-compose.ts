@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { REJECT_FALLBACK, SERVER_GPU_BACKEND, frameResult, valid } from "./common.js";
+import { REJECT_FALLBACK, SERVER_GPU_BACKEND, blockedRender, valid } from "./common.js";
 
 export interface BackgroundRemoveComposeParams extends JsonObject {
   edgeFeather: number;
@@ -55,20 +55,8 @@ export const BACKGROUND_REMOVE_COMPOSE_DEFINITION: EffectToolDefinition<Backgrou
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: (_context, params) => frameResult(SERVER_GPU_BACKEND.backendId, {
-    operation: "matte_foreground_over_background",
-    foregroundSlot: "foreground_video",
-    matteSlot: "foreground_matte",
-    backgroundSlot: "background_image",
-    matteProcessing: {
-      featherPixels: params.edgeFeather,
-      contractPixels: params.edgeContract,
-      spillSuppression: params.spillSuppression
-    },
-    composite: {
-      lightWrap: params.lightWrap,
-      backgroundScale: params.backgroundScale,
-      backgroundBlurPixels: params.backgroundBlur
-    }
-  })
+  render: () => blockedRender(
+    "background_remove_compose",
+    "an aligned foreground-video/matte/background decoder and server frame compositor adapter"
+  )
 };

@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, metadataResult,
+import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, invalid, metadataResult,
   normalizeColor, round, schema, valid } from "./shared.js";
 
 type WaveMode = "cross" | "radial" | "diagonal";
@@ -67,7 +67,9 @@ export const waveSurfaceDefinition: EffectToolDefinition<WaveSurfaceParams> = {
     frequencyX: round(params.frequencyX), frequencyY: round(params.frequencyY),
     damping: round(params.damping), speed: round(params.speed),
     crestColor: normalizeColor(params.crestColor), troughColor: normalizeColor(params.troughColor) }),
-  validateParams: () => valid(),
+  validateParams: (params) => params.gridSize ** 2 <= 4_096
+    ? valid()
+    : invalid("$.gridSize", "wave surface sample count must not exceed 4,096"),
   render: (context, params) => {
     const phase = context.time * params.speed * Math.PI * 2;
     const heights: number[] = [];

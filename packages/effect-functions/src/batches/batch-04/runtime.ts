@@ -74,6 +74,26 @@ export function validParams(): EffectParameterValidationResult {
   return { valid: true };
 }
 
+function assertFiniteSimulationValue(value: unknown, path: string): void {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new RangeError(`Simulation output contains a non-finite number at ${path}.`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      assertFiniteSimulationValue(value[index], `${path}[${index}]`);
+    }
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      assertFiniteSimulationValue(entry, `${path}.${key}`);
+    }
+  }
+}
+
 export function simulationResult(
   effectId: string,
   stepCount: number,
@@ -82,6 +102,8 @@ export function simulationResult(
   metrics: JsonObject,
   capped: boolean
 ): EffectRenderResult<SimulationOutput> {
+  assertFiniteSimulationValue(state, "$.state");
+  assertFiniteSimulationValue(metrics, "$.metrics");
   return {
     kind: "metadata",
     backendId: BATCH_04_BACKEND.backendId,

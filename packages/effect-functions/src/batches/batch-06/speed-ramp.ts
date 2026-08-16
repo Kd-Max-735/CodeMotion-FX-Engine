@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { FFMPEG_BACKEND, REJECT_FALLBACK, clamp, frameResult, round, valid, type Easing } from "./common.js";
+import { FFMPEG_BACKEND, REJECT_FALLBACK, blockedRender, clamp, valid, type Easing } from "./common.js";
 
 export interface SpeedRampParams extends JsonObject {
   rampStart: number;
@@ -74,11 +74,8 @@ export const SPEED_RAMP_DEFINITION: EffectToolDefinition<SpeedRampParams> = {
   performanceGrade: "medium",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: (context, params) => frameResult(FFMPEG_BACKEND.backendId, {
-    operation: "decode_video_frame_at_time",
-    sourceSlot: "source_video",
-    outputTime: round(Math.max(0, context.time)),
-    sampleTime: round(speedRampSampleTime(context.time, params)),
-    interpolation: "motion_compensated"
-  })
+  render: () => blockedRender(
+    "speed_ramp",
+    "a random-access server video decoder and motion-compensated frame sampler adapter"
+  )
 };

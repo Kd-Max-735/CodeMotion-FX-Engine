@@ -4,6 +4,11 @@
 
 在服务端绑定的静态图片上执行连续裁切中心移动与缩放，形成纪录片常用的平移推拉效果。图片身份不属于 `data`。
 
+## 服务器资源要求与接入状态
+
+- 必需输入槽：`source_image`，一张 owner-authorized、locked 的 `image`；其 binding 必须是 `rgba8-frame-v1` 解码帧，不能用路径、ID 或其他槽资源代替。
+- 接入状态：**PASS**。当前确定性 `server-cpu` `render` 会按服务器 `context.time` 对 RGBA 像素执行连续裁切和平移缩放，输出同尺寸 `rgba8-frame-v1` 视频帧；逐像素双线性采样诚实标记为 `heavy`。
+
 ## JSON 示例
 
 ```json

@@ -9,7 +9,7 @@
 只输出 JSON 对象，不添加解释、注释或其他工具。顶层必须且只能包含 `type` 和 `data`，`type` 必须为 `rgb_split`。素材与资源信息不得进入参数。
 
 ```json
-{"type":"rgb_split","data":{"distance":10,"angle":45,"redScale":1.2,"blueScale":0.8,"mode":"symmetric","mix":0.9}}
+{"type":"rgb_split","data":{"distance":6,"angle":0,"redScale":1,"blueScale":1,"mode":"symmetric","mix":0.9}}
 ```
 
 ## 模型参数字段

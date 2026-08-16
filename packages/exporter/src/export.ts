@@ -143,7 +143,7 @@ function supportsNvenc(ffmpegPath: string): Promise<boolean> {
   const existing = nvencAvailability.get(ffmpegPath);
   if (existing !== undefined) return existing;
   const probe = runProcess(ffmpegPath, [
-    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=0.04",
+    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.04",
     "-frames:v", "1", "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr",
     "-cq", "18", "-b:v", "0", "-pix_fmt", "yuv420p", "-f", "null", "-"
   ]).then(() => true, () => false);
@@ -152,7 +152,8 @@ function supportsNvenc(ffmpegPath: string): Promise<boolean> {
 }
 
 async function selectVideoEncoder(preset: ExportPreset, ffmpegPath: string): Promise<string> {
-  if (preset.format === "mp4" && preset.id === "ae-agent-mp4" && await supportsNvenc(ffmpegPath)) {
+  if (preset.format === "mp4" && preset.id === "ae-agent-mp4"
+    && preset.settings.width >= 256 && preset.settings.height >= 256 && await supportsNvenc(ffmpegPath)) {
     return "h264_nvenc";
   }
   return preset.settings.videoCodec ?? (preset.format === "png-sequence" ? "png" : preset.format === "gif" ? "gif" : "libx264");

@@ -32,6 +32,13 @@
 | `retriggerMode` | 否 | `rising_edge` / `strongest_in_window` | `rising_edge` | 越阈触发或窗口强峰触发 |
 | `strength` | 否 | 0–2 | 1 | 传给目标效果的触发强度 |
 
+## 服务器输入
+
+| inputSlot | kind | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `audio_analysis` | `audio` | 是 | 服务端从已授权真实音频生成并锁定的起音分析 |
+| `target_effect` | `data` | 是 | 服务端解析并锁定的目标特效句柄 |
+
 ## 选择策略
 
 “更敏感”降低 `threshold`；“减少连发”提高 `cooldown`；“更快触发”降低 `cooldown`；“只要强起音”提高 `threshold` 并选 `strongest_in_window`；“冲击更强”提高 `strength`。

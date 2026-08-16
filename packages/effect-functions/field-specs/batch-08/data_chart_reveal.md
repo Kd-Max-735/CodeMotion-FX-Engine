@@ -34,6 +34,12 @@
 | `easing` | 否 | `linear` / `smooth` | `smooth` | 绘制节奏 |
 | `direction` | 否 | `forward` / `reverse` | `forward` | 数据项揭示顺序 |
 
+## 服务器输入
+
+| inputSlot | kind | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `chart_data` | `data` | 是 | 服务端校验并锁定的真实图表标签与有限数值 |
+
 ## 选择策略
 
 “更快”降低 `duration` 和 `stagger`；“更平滑”选 `smooth`；“逐个出现更明显”提高 `stagger`；趋势用 `line` 或 `area`，类别比较用 `bar`，占比用 `pie`；“反向绘制”选 `reverse`。

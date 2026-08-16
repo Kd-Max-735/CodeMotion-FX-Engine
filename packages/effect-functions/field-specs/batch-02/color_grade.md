@@ -9,7 +9,7 @@
 只输出 JSON 对象，不要输出说明或其他工具。顶层必须且只能包含 `type` 和 `data`，`type` 必须为 `color_grade`。LUT、素材 ID、文件路径和 URL 由服务器管理，不能出现在 `data` 中。
 
 ```json
-{"type":"color_grade","data":{"exposure":0.18,"contrast":1.08,"saturation":1.1,"temperature":0.3,"tint":0.04,"lift":0,"gamma":1,"gain":1.06,"mix":1}}
+{"type":"color_grade","data":{"exposure":0,"contrast":1,"saturation":1,"temperature":0,"tint":0,"lift":0,"gamma":1,"gain":1,"mix":1}}
 ```
 
 ## 模型参数字段

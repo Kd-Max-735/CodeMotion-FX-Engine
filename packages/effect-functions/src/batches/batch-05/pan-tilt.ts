@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { CAMERA_BACKEND, cameraOutput, effectProgress, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
+import { CAMERA_BACKEND, cameraOutput, effectProgress, frameOutput, hasInput, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
 
 export interface PanTiltParams extends JsonObject {
   panDegrees: number;
@@ -14,13 +14,11 @@ export function renderPanTilt(context: ServerEffectRenderContext, params: Readon
   const progress = effectProgress(context, params.duration, params.easing);
   const position: Vector3 = { x: 0, y: 0, z: 0 };
   const rotation: Vector3 = { x: round(params.tiltDegrees * progress), y: round(params.panDegrees * progress), z: 0 };
-  return {
-    kind: "metadata" as const,
-    backendId: CAMERA_BACKEND.backendId,
-    output: cameraOutput("camera-pan-tilt", position, rotation, params.verticalFovDegrees, progress),
-    degraded: false,
-    warnings: []
-  };
+  return frameOutput(context, "camera_pan_tilt", {
+    sourceSlot: "source_video",
+    targetSlot: hasInput(context, "camera_target") ? "camera_target" : null,
+    ...cameraOutput("camera-pan-tilt", position, rotation, params.verticalFovDegrees, progress)
+  });
 }
 
 export const PAN_TILT_DEFINITION: EffectToolDefinition<PanTiltParams> = {

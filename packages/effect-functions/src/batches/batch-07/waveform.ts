@@ -47,7 +47,7 @@ export const waveformDefinition: EffectToolDefinition<WaveformParams> = {
     { presetId: "batch07.waveform.voice", displayName: "语音轨", params: { ...defaults, sampleCount: 384, gain: 1.5, smoothing: 0.65, thickness: 1.5, horizontalScale: 1.5 } },
     { presetId: "batch07.waveform.mirrored", displayName: "镜像脉冲", params: { ...defaults, sampleCount: 192, gain: 1.8, smoothing: 0.15, thickness: 3, mirror: true, lineColor: "#F15BB5" } }
   ],
-  inputSlots: [{ name: "audio_analysis", kind: "data", required: true, cardinality: "one",
+  inputSlots: [{ name: "audio_analysis", kind: "audio", required: true, cardinality: "one",
     description: "Server-authorized normalized time-domain analysis; never model-visible." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,

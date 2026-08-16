@@ -36,6 +36,13 @@
 | `border` | 否 | 0–10 | 1.5 | 边缘高光强度 |
 | `opacity` | 否 | 0–1 | 0.72 | 玻璃本体不透明度 |
 
+## 服务器输入
+
+| inputSlot | kind | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `target_layer` | `data` | 是 | 服务端解析并锁定的目标材质表面 |
+| `backdrop_layer` | `data` | 是 | 服务端解析并锁定的玻璃后方图层采样 |
+
 ## 选择策略
 
 “更透明”降低 `opacity` 和 `tintStrength`；“更磨砂”提高 `blur`；“更清晰”降低 `blur`；“折射更明显”提高 `refraction`；“更亮”提高 `border`；冷色科技感选 `cool`，温润选 `warm`。

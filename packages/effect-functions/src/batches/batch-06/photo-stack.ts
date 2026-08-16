@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { REJECT_FALLBACK, SERVER_GPU_BACKEND, frameResult, round, seededUnit, valid } from "./common.js";
+import { REJECT_FALLBACK, SERVER_GPU_BACKEND, blockedRender, valid } from "./common.js";
 
 export interface PhotoStackParams extends JsonObject {
   visibleCount: number;
@@ -54,31 +54,8 @@ export const PHOTO_STACK_DEFINITION: EffectToolDefinition<PhotoStackParams> = {
   performanceGrade: "medium",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: (context, params) => {
-    const boundImages = context.inputs.source_images;
-    if (!Array.isArray(boundImages) || boundImages.length === 0) {
-      throw new TypeError("photo_stack requires at least one server-bound image.");
-    }
-    const availableCount = Math.min(params.visibleCount, boundImages.length);
-    const elapsed = Math.max(0, context.time - params.startTime);
-    const revealed = params.revealInterval === 0 ? availableCount
-      : Math.min(availableCount, Math.floor(elapsed / params.revealInterval) + 1);
-    const layers = Array.from({ length: revealed }, (_, index) => ({
-      inputIndex: index,
-      translate: [
-        round((seededUnit(context.seed, index, 0) * 2 - 1) * params.spreadX),
-        round((seededUnit(context.seed, index, 1) * 2 - 1) * params.spreadY),
-        round(index * params.depthGap)
-      ],
-      rotation: round((seededUnit(context.seed, index, 2) * 2 - 1) * params.maxRotation)
-    }));
-    return frameResult(SERVER_GPU_BACKEND.backendId, {
-      operation: "composite_photo_stack",
-      sourceSlot: "source_images",
-      revealed,
-      layers
-    }, boundImages.length < params.visibleCount
-      ? ["visibleCount was limited by the number of authorized source images."]
-      : []);
-  }
+  render: () => blockedRender(
+    "photo_stack",
+    "an owner-authorized multi-image decoder and layered frame compositor adapter"
+  )
 };

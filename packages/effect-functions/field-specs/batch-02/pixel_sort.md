@@ -9,7 +9,7 @@
 只输出 JSON，不添加解释或第二个工具。顶层只能有 `type` 和 `data`，`type` 必须精确为 `pixel_sort`。不得包含素材 ID、路径、URL、遮罩或任何资源字段。
 
 ```json
-{"type":"pixel_sort","data":{"direction":"horizontal","lowThreshold":0.25,"highThreshold":0.75,"minimumRun":6,"order":"ascending","mix":0.8}}
+{"type":"pixel_sort","data":{"direction":"horizontal","lowThreshold":0.2,"highThreshold":0.85,"minimumRun":4,"order":"ascending","mix":1}}
 ```
 
 ## 模型参数字段

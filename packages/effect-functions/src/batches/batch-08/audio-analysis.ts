@@ -29,6 +29,8 @@ const FRAME_KEYS = Object.freeze([
   "onsetStrength"
 ]);
 
+export const MAX_AUDIO_ANALYSIS_FRAMES = 7_201;
+
 export function parseAudioAnalysis(value: unknown): AudioAnalysisBinding {
   if (!isRecord(value)) throw new TypeError("audio analysis must be an object.");
   assertExactKeys(value, ["version", "duration", "frames"], "audio analysis");
@@ -37,8 +39,11 @@ export function parseAudioAnalysis(value: unknown): AudioAnalysisBinding {
   }
   const duration = finiteNumber(value.duration, "audio analysis duration");
   if (duration <= 0) throw new RangeError("audio analysis duration must be positive.");
-  if (!Array.isArray(value.frames) || value.frames.length === 0) {
-    throw new TypeError("audio analysis requires at least one frame.");
+  if (!Array.isArray(value.frames) || value.frames.length === 0
+    || value.frames.length > MAX_AUDIO_ANALYSIS_FRAMES) {
+    throw new TypeError(
+      `audio analysis requires between 1 and ${MAX_AUDIO_ANALYSIS_FRAMES} frames.`
+    );
   }
   let previousTime = -1;
   const frames = value.frames.map((candidate, index): AudioAnalysisFrame => {

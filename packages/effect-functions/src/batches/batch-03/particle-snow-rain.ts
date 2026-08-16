@@ -1,6 +1,16 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { BATCH_03_CPU_FALLBACK, BATCH_03_GPU_BACKEND, CLOSED_SCHEMA, VALID_PARAMS, metadataResult, round, seededSigned, seededUnit } from "./shared.js";
+import {
+  BATCH_03_BACKEND,
+  BATCH_03_REJECT_FALLBACK,
+  CLOSED_SCHEMA,
+  VALID_PARAMS,
+  createParticleBuffer,
+  particleTextureResult,
+  seededSigned,
+  seededUnit,
+  setParticle
+} from "./shared.js";
 
 export interface ParticleSnowRainParams extends JsonObject {
   mode: "snow" | "rain";
@@ -41,18 +51,38 @@ export const PARTICLE_SNOW_RAIN_DEFINITION: EffectToolDefinition<ParticleSnowRai
     { presetId: "weather.rain", displayName: "急雨", params: { ...defaults, mode: "rain", density: 0.78, fallSpeed: 1100, wind: 85, turbulence: 0.08, size: 2, depth: 0.85, opacity: 0.68 } }
   ],
   inputSlots: [],
-  primaryBackend: BATCH_03_GPU_BACKEND,
-  fallbackStrategy: { kind: "server-backend", backend: BATCH_03_CPU_FALLBACK, fidelity: "degraded", requiresFinalApproval: true },
+  primaryBackend: BATCH_03_BACKEND,
+  fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
-    const count = Math.ceil((context.width * context.height / 20_000) * params.density * (params.mode === "rain" ? 1.4 : 1));
-    const layers = Array.from({ length: 6 }, (_, index) => {
+    const count = Math.ceil((context.width * context.height / 5_000) * params.density
+      * (params.mode === "rain" ? 1.4 : 1));
+    const buffer = createParticleBuffer(context, count, params.mode === "rain" ? "streak" : "disc");
+    const wrap = (value: number, size: number) => ((value % size) + size) % size;
+    for (let index = 0; index < count; index += 1) {
       const z = seededUnit(context.seed, index) * params.depth;
       const speedScale = 0.45 + z * 0.9;
-      return { x: round(seededUnit(context.seed, index + 20)), z: round(z), vx: round(params.wind * speedScale + seededSigned(context.seed, index + 40) * params.turbulence * 60), vy: round(params.fallSpeed * speedScale) };
-    });
-    return metadataResult(context, { algorithm: params.mode === "snow" ? "layered_fluttering_flakes" : "layered_motion_streaks", seed: context.seed, particleCount: count, layers });
+      const vx = params.wind * speedScale + seededSigned(context.seed, index + 40)
+        * params.turbulence * (params.mode === "snow" ? 60 : 20);
+      const vy = params.fallSpeed * speedScale;
+      const initialX = seededUnit(context.seed, index + 20) * context.width;
+      const initialY = seededUnit(context.seed, index + 30) * context.height;
+      const flutter = params.mode === "snow"
+        ? Math.sin(context.time * (1.5 + z) + seededUnit(context.seed, index + 50) * Math.PI * 2)
+          * params.turbulence * params.size * 3
+        : 0;
+      setParticle(buffer, index, {
+        x: wrap(initialX + vx * context.time + flutter, context.width),
+        y: wrap(initialY + vy * context.time, context.height),
+        vx,
+        vy,
+        size: params.size * (0.55 + z * 0.9) * (params.mode === "rain" ? 0.65 : 1),
+        opacity: params.opacity * (0.5 + z * 0.5),
+        color: params.mode === "rain" ? [165, 205, 255, 255] : [255, 255, 255, 255]
+      });
+    }
+    return particleTextureResult(context, buffer);
   }
 };

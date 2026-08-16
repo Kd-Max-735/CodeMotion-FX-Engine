@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { TRANSITION_BACKEND, effectProgress, invalid, round, valid, type MotionEasing } from "./helpers.js";
+import { TRANSITION_BACKEND, assertDistinctInputBindings, effectProgress, frameOutput, invalid, round, valid, type MotionEasing } from "./helpers.js";
 
 export interface ObjectMatchCutParams extends JsonObject {
   duration: number;
@@ -18,32 +18,35 @@ function smoothstep(value: number): number {
 }
 
 export function renderObjectMatchCut(context: ServerEffectRenderContext, params: Readonly<ObjectMatchCutParams>) {
+  assertDistinctInputBindings(context, "from_video", "to_video");
+  assertDistinctInputBindings(context, "from_match_mask", "to_match_mask");
   const progress = effectProgress(context, params.duration, params.easing);
   const halfWindow = params.blendWindow / (2 * params.duration);
-  const blend = smoothstep((progress - (params.cutPoint - halfWindow)) / (halfWindow * 2));
+  const blendStart = Math.max(0, params.cutPoint - halfWindow);
+  const blendEnd = Math.min(1, params.cutPoint + halfWindow);
+  const blend = smoothstep((progress - blendStart) / (blendEnd - blendStart));
   const alignment = params.alignmentStrength * Math.sin(Math.PI * blend);
-  return {
-    kind: "metadata" as const,
-    backendId: TRANSITION_BACKEND.backendId,
-    output: {
-      algorithm: "masked-object-match-cut",
-      progress,
-      blend: round(blend),
-      maskBindingMode: "paired-server-masks",
-      outgoing: {
-        opacity: round(1 - blend),
-        scaleCorrection: round(1 + params.scaleCompensation * alignment),
-        rotationCorrectionDegrees: round(params.rotationCompensation * alignment)
-      },
-      incoming: {
-        opacity: round(blend),
-        scaleCorrection: round(1 - params.scaleCompensation * alignment),
-        rotationCorrectionDegrees: round(-params.rotationCompensation * alignment)
-      }
+  return frameOutput(context, "masked_object_match_cut", {
+    algorithm: "masked-object-match-cut",
+    inputSlots: {
+      from: "from_video",
+      to: "to_video",
+      fromMask: "from_match_mask",
+      toMask: "to_match_mask"
     },
-    degraded: false,
-    warnings: []
-  };
+    progress,
+    blend: round(blend),
+    outgoing: {
+      opacity: round(1 - blend),
+      scaleCorrection: round(1 + params.scaleCompensation * alignment),
+      rotationCorrectionDegrees: round(params.rotationCompensation * alignment)
+    },
+    incoming: {
+      opacity: round(blend),
+      scaleCorrection: round(1 - params.scaleCompensation * alignment),
+      rotationCorrectionDegrees: round(-params.rotationCompensation * alignment)
+    }
+  });
 }
 
 export const OBJECT_MATCH_CUT_DEFINITION: EffectToolDefinition<ObjectMatchCutParams> = {

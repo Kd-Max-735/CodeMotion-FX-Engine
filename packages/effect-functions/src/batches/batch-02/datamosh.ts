@@ -1,9 +1,21 @@
 import type { JsonObject } from "@codemotion/core";
+import type { AuthorizedEffectInput } from "../../types.js";
 import { CPU_BACKEND, REJECT_FALLBACK, SOURCE_FRAME_SLOT, VALID_PARAMS, assertMatchingDimensions, byte, frameInput, frameResult, hash, pixelAt, round, sampleNearest, type Batch02Definition } from "./common.js";
 
 export interface DatamoshParams extends JsonObject { blockSize: number; carry: number; motionX: number; motionY: number; corruption: number; smear: number; seedOffset: number; }
 const defaults: DatamoshParams = { blockSize: 12, carry: 0.72, motionX: 8, motionY: 2, corruption: 0.45, smear: 0.35, seedOffset: 0 };
 const previousSlot = Object.freeze({ name: "previous_frame", kind: "image" as const, required: true, cardinality: "one" as const, description: "Owner-authorized previous RGBA frame bound by the server." });
+
+function assertIndependentFrames(source: unknown, previous: unknown): void {
+  if (source === undefined || previous === undefined || Array.isArray(source) || Array.isArray(previous)) {
+    throw new TypeError("Datamosh requires one current frame and one independent previous frame.");
+  }
+  const sourceInput = source as AuthorizedEffectInput;
+  const previousInput = previous as AuthorizedEffectInput;
+  if (sourceInput === previousInput || sourceInput.binding === previousInput.binding) {
+    throw new TypeError("Datamosh previous_frame must be independent from source_frame.");
+  }
+}
 
 export const DATAMOSH_DEFINITION: Batch02Definition<DatamoshParams> = {
   effectId: "fx.distort.datamosh", toolName: "datamosh", displayName: "数据错帧", version: "1.0.0", category: "distort",
@@ -20,6 +32,7 @@ export const DATAMOSH_DEFINITION: Batch02Definition<DatamoshParams> = {
   inputSlots: [SOURCE_FRAME_SLOT, previousSlot], primaryBackend: CPU_BACKEND, fallbackStrategy: REJECT_FALLBACK, performanceGrade: "heavy",
   normalizeParams: (params) => ({ blockSize: Math.round(params.blockSize), carry: round(params.carry), motionX: Math.round(params.motionX), motionY: Math.round(params.motionY), corruption: round(params.corruption), smear: round(params.smear), seedOffset: Math.round(params.seedOffset) }), validateParams: () => VALID_PARAMS,
   render(context, params) {
+    assertIndependentFrames(context.inputs.source_frame, context.inputs.previous_frame);
     const frame = frameInput(context); const previous = frameInput(context, "previous_frame"); assertMatchingDimensions(frame, previous); const output: number[] = []; const seed = context.seed + params.seedOffset + context.frame * 65537;
     for (let y = 0; y < frame.height; y += 1) for (let x = 0; x < frame.width; x += 1) {
       const blockX = Math.floor(x / params.blockSize); const blockY = Math.floor(y / params.blockSize); const active = hash(seed, blockX, blockY) < params.corruption; const current = pixelAt(frame, x, y);

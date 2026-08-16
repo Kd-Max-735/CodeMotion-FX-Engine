@@ -9,7 +9,7 @@
 只输出一个 JSON 对象，不要输出 Markdown、解释、注释或第二个工具。顶层必须且只能包含 `type` 和 `data`，`type` 必须精确为 `gradient_flow`。不得在 `data` 中输出素材 ID、路径、URL 或其他资源信息。
 
 ```json
-{"type":"gradient_flow","data":{"intensity":0.62,"scale":1.2,"speed":0.55,"angle":-35,"phase":0.15,"palette":"sunset"}}
+{"type":"gradient_flow","data":{"intensity":0.45,"scale":1.5,"speed":0.35,"angle":25,"phase":0,"palette":"aurora"}}
 ```
 
 ## 模型参数字段

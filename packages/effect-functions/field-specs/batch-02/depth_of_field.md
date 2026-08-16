@@ -9,7 +9,7 @@
 只输出合法 JSON，不输出解释、代码围栏之外的文本或其他工具。顶层只能包含 `type` 和 `data`，`type` 必须精确为 `depth_of_field`。深度信息、素材 ID、路径和 URL 由服务器绑定，绝不能写入 `data`。
 
 ```json
-{"type":"depth_of_field","data":{"focusDepth":0.42,"focusRange":0.08,"blurRadius":12,"bokehBoost":0.35,"edgePreservation":0.7}}
+{"type":"depth_of_field","data":{"focusDepth":0.5,"focusRange":0.12,"blurRadius":8,"bokehBoost":0.25,"edgePreservation":0.6}}
 ```
 
 ## 模型参数字段

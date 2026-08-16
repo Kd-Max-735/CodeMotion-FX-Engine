@@ -34,6 +34,14 @@
 | `amount` | 否 | 0–3 | 0.4 | 响应幅度 |
 | `baseline` | 否 | -2–2 | 1 | 无声音量时的基准值 |
 
+## 服务器输入
+
+| inputSlot | kind | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `audio_analysis` | `audio` | 是 | 服务端从已授权真实音频生成并锁定的频段分析 |
+| `text_layer` | `data` | 是 | 服务端解析并锁定的文字图层 |
+| `text_font` | `font` | 是 | 服务端授权并锁定的字体 |
+
 ## 选择策略
 
 “突出人声”选 `vocal`；“跟低音”选 `bass`；“更敏感”提高 `amount` 或降低 `smoothing`；“更平滑”提高 `smoothing`；“更快”降低 `smoothing`；“更亮/更明显”对 `opacity` 提高 `amount`，但注意基准值。

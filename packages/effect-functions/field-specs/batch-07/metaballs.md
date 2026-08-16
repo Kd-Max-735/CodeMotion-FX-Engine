@@ -27,6 +27,8 @@
 | `fillColor` | `#RRGGBB` | 六位十六进制 | `#FF006E` | 融球颜色 |
 | `backgroundColor` | `#RRGGBB` | 六位十六进制 | `#03071E` | 背景颜色 |
 
+复杂度预算为 `gridSize² × ballCount ≤ 131072`，最大字段输出为 4096 个有限数值；不得通过增加隐式采样绕过预算。
+
 ## 5. 表达映射
 
 “更多、更复杂”提高 `ballCount`；“更大、更容易粘连”提高 `radius` 或降低 `threshold`；“分离、更紧致”提高 `threshold`；“更流畅精细”提高 `gridSize`；“更快/静止”调整 `speed`。颜色直接设置，不引用调色板文件。

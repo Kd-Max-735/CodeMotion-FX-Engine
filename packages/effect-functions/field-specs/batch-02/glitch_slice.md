@@ -9,7 +9,7 @@
 只输出 JSON，不附加解释。顶层只能包含 `type` 和 `data`，`type` 必须精确为 `glitch_slice`。不得输出素材、路径、URL、纹理或资源 ID。
 
 ```json
-{"type":"glitch_slice","data":{"sliceSize":10,"displacement":32,"density":0.48,"direction":"horizontal","channelJitter":5,"seedOffset":120,"mix":0.85}}
+{"type":"glitch_slice","data":{"sliceSize":8,"displacement":18,"density":0.35,"direction":"horizontal","channelJitter":3,"seedOffset":0,"mix":0.85}}
 ```
 
 ## 模型参数字段

@@ -35,7 +35,8 @@ function parseHandle(value: unknown, version: string, field: string): string {
   }
   const record = value as Record<string, unknown>;
   if (record.version !== version || typeof record[field] !== "string"
-    || (record[field] as string).length === 0 || Object.keys(record).length !== 2) {
+    || (record[field] as string).length === 0 || (record[field] as string).length > 256
+    || Object.keys(record).length !== 2) {
     throw new TypeError(`${field} binding is invalid.`);
   }
   return record[field] as string;

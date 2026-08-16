@@ -3,13 +3,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  assertEffectToolDefinition,
-  executeSelectedEffectTool,
   type AuthorizedEffectInputs,
   type EffectInputKind,
   type EffectToolDefinition,
   type ServerEffectRenderContext
-} from "../../../src/index.js";
+} from "../../../src/types.js";
+import {
+  assertEffectToolDefinition,
+  executeSelectedEffectTool,
+  validateAndNormalizeEffectEnvelope
+} from "../../../src/validation.js";
 import {
   BATCH_08_DEFINITIONS,
   BEAT_PULSE_DEFINITION,
@@ -23,6 +26,20 @@ import {
   TEXTURE_OVERLAY_DEFINITION,
   VOCAL_REACTIVE_TEXT_DEFINITION
 } from "../../../src/batches/batch-08/index.js";
+import { MAX_AUDIO_ANALYSIS_FRAMES } from "../../../src/batches/batch-08/audio-analysis.js";
+
+const EXPECTED_IDENTITIES = Object.freeze([
+  ["fx.audio.beatPulse", "beat_pulse"],
+  ["fx.audio.onsetTrigger", "onset_trigger"],
+  ["fx.audio.vocalReactiveText", "vocal_reactive_text"],
+  ["fx.data.numberCounter", "number_counter"],
+  ["fx.data.chartReveal", "chart_reveal"],
+  ["fx.data.liveBinding", "live_binding"],
+  ["fx.composite.textureOverlay", "texture_overlay"],
+  ["fx.material.glass", "glass"],
+  ["fx.material.metal", "metal"],
+  ["fx.material.hologram", "hologram"]
+] as const);
 
 const audioAnalysis = Object.freeze({
   version: "audio-analysis-v1",
@@ -88,15 +105,171 @@ const targetSurface = Object.freeze({
   luminance: 0.62
 });
 
+function validInputs(definition: EffectToolDefinition): AuthorizedEffectInputs {
+  switch (definition.toolName) {
+    case "beat_pulse":
+      return { audio_analysis: authorized("audio_analysis", "audio", audioAnalysis) };
+    case "onset_trigger":
+      return {
+        audio_analysis: authorized("audio_analysis", "audio", audioAnalysis),
+        target_effect: authorized("target_effect", "data", { version: "effect-target-v1", handle: "server-effect-4" })
+      };
+    case "vocal_reactive_text":
+      return {
+        audio_analysis: authorized("audio_analysis", "audio", audioAnalysis),
+        text_layer: authorized("text_layer", "data", { version: "text-layer-v1", layerHandle: "layer-text-7" }),
+        text_font: authorized("text_font", "font", { version: "font-binding-v1", fontHandle: "font-server-2" })
+      };
+    case "number_counter":
+      return { number_range: authorized("number_range", "data", { version: "validated-number-v1", from: 10, to: 110 }) };
+    case "chart_reveal":
+      return {
+        chart_data: authorized("chart_data", "data", {
+          version: "validated-chart-v1",
+          series: [{ label: "A", value: 4 }, { label: "B", value: 9 }]
+        })
+      };
+    case "live_binding":
+      return {
+        validated_binding: authorized("validated_binding", "data", {
+          version: "validated-live-binding-v1",
+          value: 75,
+          previousValue: 50,
+          minimum: 0,
+          maximum: 100,
+          targetHandle: "layer-safe-3",
+          targetProperty: "opacity"
+        })
+      };
+    case "texture_overlay":
+      return {
+        base_layer: authorized("base_layer", "data", { version: "pixel-layer-v1", sample: [0.2, 0.4, 0.6, 0.5] }),
+        overlay_texture: authorized("overlay_texture", "texture", { version: "texture-sample-v1", sample: [0.8, 0.5, 0.25, 0.5], width: 512, height: 256 })
+      };
+    case "glass":
+      return {
+        target_layer: authorized("target_layer", "data", targetSurface),
+        backdrop_layer: authorized("backdrop_layer", "data", { version: "pixel-layer-v1", sample: [0.2, 0.3, 0.4, 1] })
+      };
+    case "metal":
+      return {
+        target_layer: authorized("target_layer", "data", targetSurface),
+        environment_texture: authorized("environment_texture", "texture", { version: "texture-sample-v1", sample: [0.8, 0.7, 0.6, 1], width: 1024, height: 512 })
+      };
+    case "hologram":
+      return {
+        target_layer: authorized("target_layer", "data", targetSurface),
+        depth_map: authorized("depth_map", "depth-map", { version: "depth-sample-v1", depth: 0.8 })
+      };
+    default:
+      throw new TypeError(`No batch-08 fixture for ${definition.toolName}.`);
+  }
+}
+
+function expectFiniteTree(value: unknown, depth = 0): void {
+  expect(depth).toBeLessThanOrEqual(8);
+  if (typeof value === "number") {
+    expect(Number.isFinite(value)).toBe(true);
+    return;
+  }
+  if (Array.isArray(value)) {
+    expect(value.length).toBeLessThanOrEqual(MAX_AUDIO_ANALYSIS_FRAMES);
+    for (const item of value) expectFiniteTree(item, depth + 1);
+    return;
+  }
+  if (typeof value === "object" && value !== null) {
+    for (const item of Object.values(value)) expectFiniteTree(item, depth + 1);
+  }
+}
+
 describe("batch-08 definitions", () => {
-  it("exports ten independent, contract-valid definitions with about three presets each", () => {
-    expect(BATCH_08_DEFINITIONS).toHaveLength(10);
-    expect(new Set(BATCH_08_DEFINITIONS.map((definition) => definition.effectId)).size).toBe(10);
-    expect(new Set(BATCH_08_DEFINITIONS.map((definition) => definition.toolName)).size).toBe(10);
+  it("exports the ten exact names with closed Schema/default/preset consistency", () => {
+    expect(BATCH_08_DEFINITIONS.map((definition) => [definition.effectId, definition.toolName]))
+      .toEqual(EXPECTED_IDENTITIES);
     for (const definition of BATCH_08_DEFINITIONS) {
       expect(() => assertEffectToolDefinition(definition)).not.toThrow();
       expect(definition.presets).toHaveLength(3);
+      expect(definition.primaryBackend.deterministic).toBe(true);
       expect(definition.parameterSchema).toMatchObject({ type: "object", additionalProperties: false });
+      const schema = definition.parameterSchema as {
+        properties: Record<string, { default: unknown }>;
+      };
+      expect(Object.keys(schema.properties).sort()).toEqual(Object.keys(definition.defaults).sort());
+      for (const [name, property] of Object.entries(schema.properties)) {
+        expect(property.default).toEqual(definition.defaults[name]);
+      }
+      for (const preset of definition.presets) {
+        expect(Object.keys(preset.params).sort()).toEqual(Object.keys(definition.defaults).sort());
+      }
+    }
+  });
+
+  it("requires exact selected names and rejects model-side resource/input fields", () => {
+    for (const definition of BATCH_08_DEFINITIONS) {
+      expect(() => validateAndNormalizeEffectEnvelope(
+        definition,
+        definition.toolName,
+        { type: definition.toolName.toUpperCase(), data: definition.defaults }
+      )).toThrow(expect.objectContaining({ code: "TYPE_MISMATCH" }));
+
+      expect(() => validateAndNormalizeEffectEnvelope(
+        definition,
+        definition.toolName,
+        { type: definition.toolName, data: { ...definition.defaults, asset_id: "asset_0123456789abcdef" } }
+      )).toThrow(expect.objectContaining({ code: "RESOURCE_INJECTION" }));
+
+      for (const slot of definition.inputSlots) {
+        expect(() => validateAndNormalizeEffectEnvelope(
+          definition,
+          definition.toolName,
+          { type: definition.toolName, data: { ...definition.defaults, [slot.name]: "server-forbidden" } }
+        )).toThrow(expect.objectContaining({
+          code: expect.stringMatching(/^(?:PARAMETER_INVALID|RESOURCE_INJECTION)$/u)
+        }));
+      }
+    }
+  });
+
+  it("rejects every missing input and invalid owner, kind, or lock before render", async () => {
+    for (const definition of BATCH_08_DEFINITIONS) {
+      const inputs = validInputs(definition);
+      for (const slot of definition.inputSlots) {
+        const missing = { ...inputs } as Record<string, unknown>;
+        delete missing[slot.name];
+        await expect(run(definition, missing as AuthorizedEffectInputs)).rejects
+          .toMatchObject({ code: "INPUT_AUTHORIZATION_INVALID" });
+      }
+
+      const firstSlot = definition.inputSlots[0]!;
+      const binding = inputs[firstSlot.name];
+      expect(Array.isArray(binding)).toBe(false);
+      for (const mutation of [
+        { tenantId: "other-tenant" },
+        { userId: "other-user" },
+        { locked: false },
+        { kind: firstSlot.kind === "data" ? "audio" : "data" }
+      ]) {
+        await expect(run(definition, {
+          ...inputs,
+          [firstSlot.name]: { ...(binding as object), ...mutation }
+        } as AuthorizedEffectInputs)).rejects.toMatchObject({ code: "INPUT_AUTHORIZATION_INVALID" });
+      }
+    }
+  });
+
+  it("is deterministic, finite, bounded, and returns the declared server output contract", async () => {
+    for (const definition of BATCH_08_DEFINITIONS) {
+      const inputs = validInputs(definition);
+      const first = await run(definition, inputs, 0.75);
+      const second = await run(definition, inputs, 0.75);
+      expect(second).toEqual(first);
+      expect(first.backendId).toBe(definition.primaryBackend.backendId);
+      expect(first.kind).toBe(["composite", "material"].includes(definition.category)
+        ? "texture"
+        : "metadata");
+      expect(first.degraded).toBe(false);
+      expect(Array.isArray(first.warnings)).toBe(true);
+      expectFiniteTree(first.output);
     }
   });
 
@@ -183,6 +356,7 @@ describe("batch-08 definitions", () => {
     }, 2);
     expect(result.output).toMatchObject({
       rgba: [0.2035, 0.2563, 0.3056, 0.6125],
+      uvScale: [1, 1],
       textureSize: [512, 256],
       blendMode: "overlay",
       premultipliedAlpha: true
@@ -206,19 +380,135 @@ describe("batch-08 definitions", () => {
     expect((metal.output as { materialModel: string }).materialModel).toBe("conductive_pbr");
     expect((hologram.output as { materialModel: string }).materialModel).toBe("emissive_hologram");
   });
+
+  it("rejects oversized analysis, chart, texture, handles, and non-finite computed output", async () => {
+    const oversizedFrames = Array.from(
+      { length: MAX_AUDIO_ANALYSIS_FRAMES + 1 },
+      () => audioAnalysis.frames[0]
+    );
+    await expect(run(BEAT_PULSE_DEFINITION, {
+      audio_analysis: authorized("audio_analysis", "audio", {
+        version: "audio-analysis-v1",
+        duration: 2,
+        frames: oversizedFrames
+      })
+    })).rejects.toThrow(`between 1 and ${MAX_AUDIO_ANALYSIS_FRAMES} frames`);
+
+    await expect(run(CHART_REVEAL_DEFINITION, {
+      chart_data: authorized("chart_data", "data", {
+        version: "validated-chart-v1",
+        series: Array.from({ length: 501 }, (_, index) => ({ label: `item-${index}`, value: index }))
+      })
+    })).rejects.toThrow("validated chart data is invalid");
+
+    await expect(run(TEXTURE_OVERLAY_DEFINITION, {
+      base_layer: authorized("base_layer", "data", { version: "pixel-layer-v1", sample: [0, 0, 0, 1] }),
+      overlay_texture: authorized("overlay_texture", "texture", {
+        version: "texture-sample-v1",
+        sample: [1, 1, 1, 1],
+        width: 16_385,
+        height: 1
+      })
+    })).rejects.toThrow("between 1 and 16384");
+
+    await expect(run(ONSET_TRIGGER_DEFINITION, {
+      audio_analysis: authorized("audio_analysis", "audio", audioAnalysis),
+      target_effect: authorized("target_effect", "data", {
+        version: "effect-target-v1",
+        handle: "x".repeat(257)
+      })
+    })).rejects.toThrow("target effect binding is invalid");
+
+    const extremeBinding = {
+      validated_binding: authorized("validated_binding", "data", {
+        version: "validated-live-binding-v1",
+        value: Number.MAX_VALUE,
+        previousValue: Number.MAX_VALUE,
+        minimum: 0,
+        maximum: Number.MAX_VALUE,
+        targetHandle: "layer-safe-3",
+        targetProperty: "number"
+      })
+    };
+    await expect(executeSelectedEffectTool(
+      LIVE_BINDING_DEFINITION,
+      LIVE_BINDING_DEFINITION.toolName,
+      {
+        type: LIVE_BINDING_DEFINITION.toolName,
+        data: { ...LIVE_BINDING_DEFINITION.defaults, mapping: "direct", gain: 10 }
+      },
+      context(LIVE_BINDING_DEFINITION, extremeBinding)
+    )).rejects.toThrow("Rendered numeric output must be finite");
+
+    await expect(executeSelectedEffectTool(
+      NUMBER_COUNTER_DEFINITION,
+      NUMBER_COUNTER_DEFINITION.toolName,
+      {
+        type: NUMBER_COUNTER_DEFINITION.toolName,
+        data: { ...NUMBER_COUNTER_DEFINITION.defaults, format: "percent" }
+      },
+      context(NUMBER_COUNTER_DEFINITION, {
+        number_range: authorized("number_range", "data", {
+          version: "validated-number-v1",
+          from: Number.MAX_VALUE,
+          to: Number.MAX_VALUE
+        })
+      }, 0.6)
+    )).rejects.toThrow("Rendered percentage must be finite");
+  });
+
+  it("normalizes a full finite numeric range without intermediate overflow", async () => {
+    const result = await run(LIVE_BINDING_DEFINITION, {
+      validated_binding: authorized("validated_binding", "data", {
+        version: "validated-live-binding-v1",
+        value: 0,
+        previousValue: 0,
+        minimum: -Number.MAX_VALUE,
+        maximum: Number.MAX_VALUE,
+        targetHandle: "layer-safe-3",
+        targetProperty: "number"
+      })
+    });
+    expect(result.output).toMatchObject({ applied: true, value: 0.5 });
+  });
+
+  it("keeps extreme finite frame/time/seed inputs deterministic and finite", async () => {
+    for (const definition of [TEXTURE_OVERLAY_DEFINITION, HOLOGRAM_DEFINITION]) {
+      const extremeContext = {
+        ...context(definition, validInputs(definition), 1),
+        time: Number.MAX_VALUE,
+        frame: Number.MAX_SAFE_INTEGER,
+        seed: Number.MAX_VALUE
+      };
+      const first = await executeSelectedEffectTool(
+        definition,
+        definition.toolName,
+        modelOutput(definition),
+        extremeContext
+      );
+      const second = await executeSelectedEffectTool(
+        definition,
+        definition.toolName,
+        modelOutput(definition),
+        extremeContext
+      );
+      expect(second).toEqual(first);
+      expectFiniteTree(first.output);
+    }
+  });
 });
 
 describe("batch-08 Chinese field specifications", () => {
   const specDirectory = join(dirname(fileURLToPath(import.meta.url)), "../../../field-specs/batch-08");
 
-  it("provides ten complete specs whose JSON examples parse and contain no binding fields", () => {
+  it("provides ten complete specs exactly aligned with definitions and server input slots", () => {
     const files = readdirSync(specDirectory).filter((name) => name.endsWith(".md"));
     expect(files).toHaveLength(10);
     const forbidden = /"(?:audio|source|dataSource|texture|font|layer|effectRef|resourceId|path|url)"\s*:/u;
     const specTypes: string[] = [];
     for (const file of files) {
       const markdown = readFileSync(join(specDirectory, file), "utf8");
-      for (const heading of ["工具作用", "输出约束", "参数字段", "选择策略", "参数优先级", "自然语言示例", "推荐值、默认值和中性值", "非适用范围"]) {
+      for (const heading of ["工具作用", "输出约束", "参数字段", "服务器输入", "选择策略", "参数优先级", "自然语言示例", "推荐值、默认值和中性值", "非适用范围"]) {
         expect(markdown, `${file} missing ${heading}`).toContain(heading);
       }
       const jsonBlocks = [...markdown.matchAll(/```json\s*([\s\S]*?)```/gu)];
@@ -230,6 +520,25 @@ describe("batch-08 Chinese field specifications", () => {
       specTypes.push(example.type);
       expect(example.data).not.toBeNull();
       expect(forbidden.test(jsonBlocks[0]![1]!)).toBe(false);
+      const definition = BATCH_08_DEFINITIONS.find((candidate) => candidate.toolName === example.type);
+      expect(definition, `${file} unknown toolName`).toBeDefined();
+      expect(example.data).toEqual(definition!.defaults);
+      const parameterSection = markdown.match(/## 参数字段\s*([\s\S]*?)\n## /u)?.[1] ?? "";
+      const documentedParams = [...parameterSection.matchAll(/^\| `([^`]+)` \|/gmu)]
+        .map((match) => match[1]!).sort();
+      expect(documentedParams, `${file} parameter fields`)
+        .toEqual(Object.keys(definition!.defaults).sort());
+      const inputSection = markdown.match(/## 服务器输入\s*([\s\S]*?)\n## /u)?.[1] ?? "";
+      const documentedInputs = [...inputSection.matchAll(
+        /^\| `([^`]+)` \| `([^`]+)` \| (是|否) \|/gmu
+      )].map((match) => ({ name: match[1], kind: match[2], required: match[3] === "是" }));
+      expect(documentedInputs, `${file} input slots`).toEqual(
+        definition!.inputSlots.map((slot) => ({
+          name: slot.name,
+          kind: slot.kind,
+          required: slot.required
+        }))
+      );
       const naturalExamples = markdown.match(/^\d+\. .+$/gmu) ?? [];
       expect(naturalExamples.length, `${file} natural examples`).toBeGreaterThanOrEqual(5);
       expect(naturalExamples.length, `${file} natural examples`).toBeLessThanOrEqual(8);

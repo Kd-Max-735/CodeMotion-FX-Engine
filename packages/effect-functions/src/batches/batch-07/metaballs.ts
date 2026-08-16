@@ -1,7 +1,7 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, clamp, hashSeed, metadataResult,
-  normalizeColor, round, schema, seededRandom, valid } from "./shared.js";
+import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, clamp, hashSeed, invalid,
+  metadataResult, normalizeColor, round, schema, seededRandom, valid } from "./shared.js";
 
 export interface MetaballsParams extends JsonObject {
   seed: number;
@@ -48,7 +48,9 @@ export const metaballsDefinition: EffectToolDefinition<MetaballsParams> = {
   normalizeParams: (params) => ({ ...params, radius: round(params.radius), threshold: round(params.threshold),
     speed: round(params.speed), fillColor: normalizeColor(params.fillColor),
     backgroundColor: normalizeColor(params.backgroundColor) }),
-  validateParams: () => valid(),
+  validateParams: (params) => params.gridSize ** 2 * params.ballCount <= 131_072
+    ? valid()
+    : invalid("$", "gridSize squared times ballCount must not exceed 131,072"),
   render: (context, params) => {
     const seed = hashSeed(context.seed, params.seed);
     const random = seededRandom(seed);

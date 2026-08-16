@@ -1,6 +1,17 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { REJECT_FALLBACK, SERVER_GPU_BACKEND, frameResult, round, timedProgress, valid, type Easing } from "./common.js";
+import {
+  REJECT_FALLBACK,
+  RGBA8_FRAME_VERSION,
+  SERVER_CPU_BACKEND,
+  readRgba8Frame,
+  rgbaFrameResult,
+  round,
+  timedProgress,
+  valid,
+  type Easing,
+  type Rgba8FrameBinding
+} from "./common.js";
 
 export interface KenBurnsParams extends JsonObject {
   startTime: number;
@@ -25,6 +36,27 @@ const defaults: KenBurnsParams = {
   endCenterY: 0.45,
   easing: "ease_in_out"
 };
+
+function sourcePixel(frame: Rgba8FrameBinding, x: number, y: number): readonly number[] {
+  const safeX = Math.max(0, Math.min(frame.width - 1, x));
+  const safeY = Math.max(0, Math.min(frame.height - 1, y));
+  const x0 = Math.floor(safeX);
+  const y0 = Math.floor(safeY);
+  const x1 = Math.min(frame.width - 1, x0 + 1);
+  const y1 = Math.min(frame.height - 1, y0 + 1);
+  const tx = safeX - x0;
+  const ty = safeY - y0;
+  const offset = (pixelX: number, pixelY: number) => (pixelY * frame.width + pixelX) * 4;
+  return Array.from({ length: 4 }, (_, channel) => {
+    const topLeft = frame.data[offset(x0, y0) + channel]!;
+    const topRight = frame.data[offset(x1, y0) + channel]!;
+    const bottomLeft = frame.data[offset(x0, y1) + channel]!;
+    const bottomRight = frame.data[offset(x1, y1) + channel]!;
+    const top = topLeft + (topRight - topLeft) * tx;
+    const bottom = bottomLeft + (bottomRight - bottomLeft) * tx;
+    return top + (bottom - top) * ty;
+  });
+}
 
 export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
   effectId: "fx.media.kenBurns",
@@ -55,20 +87,40 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
     { presetId: "ken_burns.pan", displayName: "横向巡览", params: { ...defaults, duration: 7, startScale: 1.25, endScale: 1.25, startCenterX: 0.3, endCenterX: 0.7 } }
   ],
   inputSlots: [{ name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized still image." }],
-  primaryBackend: SERVER_GPU_BACKEND,
+  primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
-  performanceGrade: "light",
+  performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
   render: (context, params) => {
+    const source = readRgba8Frame(context, "source_image");
     const progress = timedProgress(context.time, params.startTime, params.duration, params.easing);
     const mix = (start: number, end: number) => round(start + (end - start) * progress);
-    return frameResult(SERVER_GPU_BACKEND.backendId, {
-      operation: "sample_image_with_crop_transform",
+    const scale = mix(params.startScale, params.endScale);
+    const centerX = mix(params.startCenterX, params.endCenterX);
+    const centerY = mix(params.startCenterY, params.endCenterY);
+    const coverScale = Math.max(context.width / source.width, context.height / source.height);
+    const pixels = new Uint8ClampedArray(context.width * context.height * 4);
+    for (let y = 0; y < context.height; y += 1) {
+      for (let x = 0; x < context.width; x += 1) {
+        const sourceX = centerX * (source.width - 1)
+          + (x + 0.5 - context.width / 2) / (coverScale * scale);
+        const sourceY = centerY * (source.height - 1)
+          + (y + 0.5 - context.height / 2) / (coverScale * scale);
+        const sample = sourcePixel(source, sourceX, sourceY);
+        const targetOffset = (y * context.width + x) * 4;
+        for (let channel = 0; channel < 4; channel += 1) {
+          pixels[targetOffset + channel] = Math.round(sample[channel]!);
+        }
+      }
+    }
+    return rgbaFrameResult(SERVER_CPU_BACKEND.backendId, {
+      version: RGBA8_FRAME_VERSION,
+      width: context.width,
+      height: context.height,
+      data: pixels,
       sourceSlot: "source_image",
-      progress: round(progress),
-      scale: mix(params.startScale, params.endScale),
-      center: [mix(params.startCenterX, params.endCenterX), mix(params.startCenterY, params.endCenterY)]
+      sampleTime: round(Math.max(0, context.time))
     });
   }
 };

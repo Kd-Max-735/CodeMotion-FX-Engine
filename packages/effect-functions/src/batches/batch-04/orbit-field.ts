@@ -59,11 +59,11 @@ export const ORBIT_FIELD_DEFINITION: EffectToolDefinition<OrbitFieldParams> = {
     additionalProperties: false,
     properties: {
       particleCount: { type: "integer", minimum: 8, maximum: 96, default: 32 },
-      orbitStrength: { type: "number", minimum: 0.1, maximum: 8, default: 2.4 },
-      tangentialSpeed: { type: "number", minimum: 0, maximum: 4, default: 1.2 },
-      radialDamping: { type: "number", minimum: 0, maximum: 5, default: 0.8 },
-      fieldScale: { type: "number", minimum: 0.25, maximum: 4, default: 1 },
-      spread: { type: "number", minimum: 0.1, maximum: 1, default: 0.65 },
+      orbitStrength: { type: "number", minimum: 0.1, maximum: 8, multipleOf: 0.01, default: 2.4 },
+      tangentialSpeed: { type: "number", minimum: 0, maximum: 4, multipleOf: 0.01, default: 1.2 },
+      radialDamping: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 0.8 },
+      fieldScale: { type: "number", minimum: 0.25, maximum: 4, multipleOf: 0.01, default: 1 },
+      spread: { type: "number", minimum: 0.1, maximum: 1, multipleOf: 0.01, default: 0.65 },
       direction: { type: "string", enum: ["clockwise", "counterclockwise"], default: "counterclockwise" }
     }
   },

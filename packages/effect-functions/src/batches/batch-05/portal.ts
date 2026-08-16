@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { TRANSITION_BACKEND, effectProgress, invalid, mix, round, valid, type MotionEasing } from "./helpers.js";
+import { TRANSITION_BACKEND, assertDistinctInputBindings, effectProgress, frameOutput, hasInput, invalid, mix, round, valid, type MotionEasing } from "./helpers.js";
 
 export interface PortalParams extends JsonObject {
   duration: number;
@@ -13,25 +13,25 @@ export interface PortalParams extends JsonObject {
 }
 
 export function renderPortal(context: ServerEffectRenderContext, params: Readonly<PortalParams>) {
+  assertDistinctInputBindings(context, "from_video", "to_video");
   const progress = effectProgress(context, params.duration, params.easing);
   const radius = mix(params.innerRadius, params.outerRadius, progress);
-  return {
-    kind: "metadata" as const,
-    backendId: TRANSITION_BACKEND.backendId,
-    output: {
-      algorithm: "radial-portal-wipe",
-      progress,
-      aperture: {
-        radius: round(radius),
-        featherWidth: round(params.edgeSoftness * Math.max(radius, 0.001)),
-        rotationDegrees: round(params.swirlTurns * 360 * progress),
-        glowStrength: params.glowStrength
-      },
-      composite: { inside: "to_video", outside: "from_video" }
+  return frameOutput(context, "radial_portal_wipe", {
+    algorithm: "radial-portal-wipe",
+    inputSlots: {
+      from: "from_video",
+      to: "to_video",
+      apertureMask: hasInput(context, "portal_mask") ? "portal_mask" : null
     },
-    degraded: false,
-    warnings: []
-  };
+    progress,
+    completionMix: progress,
+    aperture: {
+      radius: round(radius),
+      featherWidth: round(params.edgeSoftness * Math.max(radius, 0.001)),
+      rotationDegrees: round(params.swirlTurns * 360 * progress),
+      glowStrength: params.glowStrength
+    }
+  });
 }
 
 export const PORTAL_DEFINITION: EffectToolDefinition<PortalParams> = {

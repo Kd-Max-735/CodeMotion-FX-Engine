@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { TRANSITION_BACKEND, effectProgress, invalid, mix, round, valid, type MotionEasing } from "./helpers.js";
+import { TRANSITION_BACKEND, assertDistinctInputBindings, effectProgress, frameOutput, invalid, mix, round, valid, type MotionEasing } from "./helpers.js";
 
 export interface ZoomTunnelParams extends JsonObject {
   duration: number;
@@ -13,29 +13,25 @@ export interface ZoomTunnelParams extends JsonObject {
 }
 
 export function renderZoomTunnel(context: ServerEffectRenderContext, params: Readonly<ZoomTunnelParams>) {
+  assertDistinctInputBindings(context, "from_video", "to_video");
   const progress = effectProgress(context, params.duration, params.easing);
-  return {
-    kind: "metadata" as const,
-    backendId: TRANSITION_BACKEND.backendId,
-    output: {
-      algorithm: "perspective-zoom-tunnel",
-      progress,
-      outgoing: {
-        scale: round(mix(1, params.endScale, progress)),
-        depth: round(-params.tunnelDepth * progress),
-        opacity: round(1 - progress)
-      },
-      incoming: {
-        scale: round(mix(params.startScale, 1, progress)),
-        depth: round(params.tunnelDepth * (1 - progress)),
-        opacity: progress
-      },
-      twistDegrees: round(params.twistDegrees * Math.sin(Math.PI * progress)),
-      motionBlur: round(params.motionBlur * Math.sin(Math.PI * progress))
+  return frameOutput(context, "perspective_zoom_tunnel", {
+    algorithm: "perspective-zoom-tunnel",
+    inputSlots: { from: "from_video", to: "to_video" },
+    progress,
+    outgoing: {
+      scale: round(mix(1, params.endScale, progress)),
+      depth: round(-params.tunnelDepth * progress),
+      opacity: round(1 - progress)
     },
-    degraded: false,
-    warnings: []
-  };
+    incoming: {
+      scale: round(mix(params.startScale, 1, progress)),
+      depth: round(params.tunnelDepth * (1 - progress)),
+      opacity: progress
+    },
+    twistDegrees: round(params.twistDegrees * Math.sin(Math.PI * progress)),
+    motionBlur: round(params.motionBlur * Math.sin(Math.PI * progress))
+  });
 }
 
 export const ZOOM_TUNNEL_DEFINITION: EffectToolDefinition<ZoomTunnelParams> = {

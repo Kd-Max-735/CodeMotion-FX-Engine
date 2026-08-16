@@ -57,11 +57,11 @@ export const CLOTH_DEFINITION: EffectToolDefinition<ClothParams> = {
     additionalProperties: false,
     properties: {
       resolution: { type: "integer", minimum: 4, maximum: 14, default: 8 },
-      clothWidth: { type: "number", minimum: 0.5, maximum: 1.8, default: 1.2 },
-      stiffness: { type: "number", minimum: 0.1, maximum: 1, default: 0.82 },
-      damping: { type: "number", minimum: 0, maximum: 0.2, default: 0.025 },
-      gravity: { type: "number", minimum: 0, maximum: 20, default: 5 },
-      windStrength: { type: "number", minimum: 0, maximum: 8, default: 1.1 },
+      clothWidth: { type: "number", minimum: 0.5, maximum: 1.8, multipleOf: 0.01, default: 1.2 },
+      stiffness: { type: "number", minimum: 0.1, maximum: 1, multipleOf: 0.01, default: 0.82 },
+      damping: { type: "number", minimum: 0, maximum: 0.2, multipleOf: 0.001, default: 0.025 },
+      gravity: { type: "number", minimum: 0, maximum: 20, multipleOf: 0.01, default: 5 },
+      windStrength: { type: "number", minimum: 0, maximum: 8, multipleOf: 0.01, default: 1.1 },
       solverIterations: { type: "integer", minimum: 1, maximum: 8, default: 4 }
     }
   },

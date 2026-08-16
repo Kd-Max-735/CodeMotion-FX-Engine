@@ -4,6 +4,11 @@
 
 使用服务端绑定并对齐的图片与深度图建立网格位移，在透视相机下产生真实的近远层运动差。深度图和图片都不是 `data` 参数。
 
+## 服务器资源要求与接入状态
+
+- 必需输入槽：`source_image`（owner-authorized、locked 的 `image`）和独立、对齐的 `source_depth`（`depth-map`）。禁止把源图片再次绑定为深度图。
+- 接入状态：**BLOCKED**。等待窗口 12 提供对齐深度解析与 depth-displaced 真实帧渲染适配器；当前安全失败，不把相机/网格描述作为帧输出。
+
 ## JSON 示例
 
 ```json

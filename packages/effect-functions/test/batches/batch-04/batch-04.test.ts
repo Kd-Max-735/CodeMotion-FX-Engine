@@ -10,6 +10,7 @@ import {
   validateAndNormalizeEffectEnvelope
 } from "../../../src/validation.js";
 import type {
+  AuthorizedEffectInputs,
   EffectRenderResult,
   EffectToolDefinition,
   ServerEffectRenderContext
@@ -28,10 +29,37 @@ const EXPECTED = [
   ["fx.sim.collisionShatter", "sim_collision_shatter", "sim_collision_shatter.md"]
 ] as const;
 
+const INDIVIDUAL_MODULES = [
+  ["sim_boids", "BOIDS_DEFINITION", () => import("../../../src/batches/batch-04/boids.js")],
+  ["sim_cloth", "CLOTH_DEFINITION", () => import("../../../src/batches/batch-04/cloth.js")],
+  ["sim_collision_shatter", "COLLISION_SHATTER_DEFINITION", () => import("../../../src/batches/batch-04/collision-shatter.js")],
+  ["particle_flow_field", "FLOW_FIELD_DEFINITION", () => import("../../../src/batches/batch-04/flow-field.js")],
+  ["sim_fluid_lite", "FLUID_LITE_DEFINITION", () => import("../../../src/batches/batch-04/fluid-lite.js")],
+  ["particle_orbit_field", "ORBIT_FIELD_DEFINITION", () => import("../../../src/batches/batch-04/orbit-field.js")],
+  ["sim_rigid_body_2d", "RIGID_BODY_2D_DEFINITION", () => import("../../../src/batches/batch-04/rigid-body-2d.js")],
+  ["sim_rope", "ROPE_DEFINITION", () => import("../../../src/batches/batch-04/rope.js")],
+  ["sim_soft_body", "SOFT_BODY_DEFINITION", () => import("../../../src/batches/batch-04/soft-body.js")],
+  ["sim_spring", "SPRING_DEFINITION", () => import("../../../src/batches/batch-04/spring.js")]
+] as const;
+
+const STATE_BUDGETS = new Map<string, readonly [string, number]>([
+  ["particle_orbit_field", ["particles", 96]],
+  ["particle_flow_field", ["particles", 128]],
+  ["sim_spring", ["nodes", 32]],
+  ["sim_rigid_body_2d", ["bodies", 48]],
+  ["sim_soft_body", ["nodes", 48]],
+  ["sim_cloth", ["vertices", 196]],
+  ["sim_rope", ["points", 41]],
+  ["sim_fluid_lite", ["cells", 576]],
+  ["sim_boids", ["boids", 96]],
+  ["sim_collision_shatter", ["fragments", 64]]
+]);
+
 function context(
   definition: EffectToolDefinition,
   time = 0.5,
-  seed = 20260814
+  seed = 20260814,
+  inputs: AuthorizedEffectInputs = {}
 ): ServerEffectRenderContext {
   return {
     environment: "server",
@@ -47,7 +75,46 @@ function context(
     seed,
     quality: "final",
     backend: definition.primaryBackend,
-    inputs: {}
+    inputs
+  };
+}
+
+function authorizedInput(
+  slot: EffectToolDefinition["inputSlots"][number]
+): AuthorizedEffectInputs {
+  const binding = slot.name === "vector_field"
+    ? { columns: 2, rows: 2, vectors: [{ x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: -1 }] }
+    : slot.name === "mesh"
+      ? { vertices: [{ x: -0.3, y: -0.4 }, { x: 0.3, y: -0.4 }, { x: 0.3, y: 0.2 }, { x: -0.3, y: 0.2 }] }
+      : slot.name === "pins"
+        ? { indices: [0, 1], points: [{ x: -0.5, y: -0.5 }, { x: 0.5, y: -0.5 }] }
+        : slot.name === "obstacle_mask"
+          ? { blockedIndices: [0, 1, 2] }
+          : { centroids: [{ x: -0.1, y: -0.1 }, { x: 0.1, y: -0.1 }] };
+  return {
+    [slot.name]: {
+      slot: slot.name,
+      kind: slot.kind,
+      tenantId: "tenant-batch-04",
+      userId: "user-batch-04",
+      locked: true,
+      binding
+    }
+  };
+}
+
+function guardedDefinition(
+  definition: EffectToolDefinition,
+  onRender: () => void,
+  inputSlots = definition.inputSlots
+): EffectToolDefinition {
+  return {
+    ...definition,
+    inputSlots,
+    render: (renderContext, params) => {
+      onRender();
+      return definition.render(renderContext, params);
+    }
   };
 }
 
@@ -107,11 +174,43 @@ describe("batch-04 definitions", () => {
     expect(BATCH_04_DEFINITIONS.every((definition) => definition.presets.length === 3)).toBe(true);
   });
 
+  it.each(INDIVIDUAL_MODULES)("loads %s from its exact independent module", async (
+    toolName,
+    exportName,
+    load
+  ) => {
+    const module = await load() as Record<string, unknown>;
+    const definition = module[exportName] as EffectToolDefinition;
+    expect(definition.toolName).toBe(toolName);
+    expect(BATCH_04_DEFINITIONS.filter((entry) => entry.toolName === toolName)).toEqual([definition]);
+  });
+
   it("passes the shared public definition contract", () => {
     for (const definition of BATCH_04_DEFINITIONS) {
       expect(() => assertEffectToolDefinition(definition)).not.toThrow();
       expect(definition.primaryBackend.deterministic).toBe(true);
       expect(definition.toolName).toMatch(/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u);
+    }
+  });
+
+  it("keeps every Schema closed and applies the matching optional defaults", () => {
+    for (const definition of BATCH_04_DEFINITIONS) {
+      const schema = definition.parameterSchema as JsonObject;
+      expect(schema.additionalProperties).toBe(false);
+      expect(schema.required ?? []).toEqual([]);
+      const envelope = validateAndNormalizeEffectEnvelope(
+        definition,
+        definition.toolName,
+        { type: definition.toolName, data: {} }
+      );
+      expect(envelope.data).toEqual(definition.defaults);
+      expect(Object.keys(envelope.data)).toEqual(Object.keys(schemaProperties(definition)));
+      for (const property of Object.values(schemaProperties(definition))) {
+        if (property.type === "number") {
+          expect(property.multipleOf).toEqual(expect.any(Number));
+          expect(property.multipleOf).toBeGreaterThan(0);
+        }
+      }
     }
   });
 
@@ -140,6 +239,22 @@ describe("batch-04 definitions", () => {
       const initial = asRecord((await render(definition, 0)).output);
       const evolved = asRecord(first.output);
       expect(evolved.state).not.toEqual(initial.state);
+      expect(evolved.simulatedTime).toBeLessThanOrEqual(0.75);
+    }
+  });
+
+  it("uses the fixed seed for stochastic initial conditions", async () => {
+    const stochastic = new Set([
+      "particle_orbit_field",
+      "particle_flow_field",
+      "sim_rigid_body_2d",
+      "sim_boids",
+      "sim_collision_shatter"
+    ]);
+    for (const definition of BATCH_04_DEFINITIONS.filter(({ toolName }) => stochastic.has(toolName))) {
+      const first = await definition.render(context(definition, 0.5, 11), definition.defaults);
+      const second = await definition.render(context(definition, 0.5, 12), definition.defaults);
+      expect(asRecord(first.output).state).not.toEqual(asRecord(second.output).state);
     }
   });
 
@@ -157,7 +272,52 @@ describe("batch-04 definitions", () => {
     }
   });
 
-  it("clamps direct finite extremes and caps simulation work", async () => {
+  it("rejects unknown, non-finite and resource-bearing model data without entering render", async () => {
+    for (const definition of BATCH_04_DEFINITIONS) {
+      const numericName = Object.entries(schemaProperties(definition))
+        .find(([, property]) => property.type === "number" || property.type === "integer")?.[0];
+      const stepped = Object.entries(schemaProperties(definition))
+        .find(([, property]) => property.type === "number" && typeof property.multipleOf === "number");
+      expect(numericName).toBeDefined();
+      expect(stepped).toBeDefined();
+      const [steppedName, steppedProperty] = stepped!;
+      for (const [data, code] of [
+        [{ unexpected: true }, "PARAMETER_INVALID"],
+        [{ [numericName!]: Number.NaN }, "PARAMETER_INVALID"],
+        [{ [numericName!]: Number.POSITIVE_INFINITY }, "PARAMETER_INVALID"],
+        [{ [steppedName]: (steppedProperty.minimum as number) + (steppedProperty.multipleOf as number) / 2 }, "PARAMETER_INVALID"],
+        [{ asset_id: "asset_0123456789abcdef01234567" }, "RESOURCE_INJECTION"]
+      ] as const) {
+        let renderCalls = 0;
+        const guarded = guardedDefinition(definition, () => { renderCalls += 1; });
+        await expect(executeSelectedEffectTool(
+          guarded,
+          guarded.toolName,
+          { type: guarded.toolName, data },
+          context(guarded)
+        )).rejects.toMatchObject({ code });
+        expect(renderCalls).toBe(0);
+      }
+
+      let renderCalls = 0;
+      const guarded = guardedDefinition(definition, () => { renderCalls += 1; });
+      await expect(executeSelectedEffectTool(
+        guarded,
+        guarded.toolName,
+        { type: `wrong_${guarded.toolName}`, data: {} },
+        context(guarded)
+      )).rejects.toMatchObject({ code: "TYPE_MISMATCH" });
+      await expect(executeSelectedEffectTool(
+        guarded,
+        guarded.toolName,
+        { type: guarded.toolName, data: {} },
+        { ...context(guarded), time: Number.NaN }
+      )).rejects.toMatchObject({ code: "SERVER_CONTEXT_INVALID" });
+      expect(renderCalls).toBe(0);
+    }
+  });
+
+  it("clamps direct finite extremes and enforces structural simulation budgets", async () => {
     for (const definition of BATCH_04_DEFINITIONS) {
       for (const bound of ["minimum", "maximum"] as const) {
         const extreme: JsonObject = { ...definition.defaults };
@@ -178,17 +338,81 @@ describe("batch-04 definitions", () => {
       expect(output.stepCount).toBeLessThanOrEqual(360);
       expect(result.warnings).toHaveLength(1);
       expectFiniteJson(output);
+      const [collectionName, maximumSize] = STATE_BUDGETS.get(definition.toolName)!;
+      const state = asRecord(output.state);
+      expect(state[collectionName]).toBeInstanceOf(Array);
+      expect((state[collectionName] as unknown[]).length).toBeLessThanOrEqual(maximumSize);
     }
   }, 20_000);
 
   it("keeps mesh, pins, fracture maps and vector fields outside model data", () => {
-    const forbidden = new Set(["mesh", "pins", "fractureMap", "fracture_map", "vectorField", "vector_field"]);
+    const forbidden = new Set([
+      "mesh", "pins", "fractureMap", "fracture_map", "vectorField", "vector_field", "obstacle_mask"
+    ]);
     const slots = new Set<string>();
     for (const definition of BATCH_04_DEFINITIONS) {
       for (const name of Object.keys(schemaProperties(definition))) expect(forbidden.has(name)).toBe(false);
       for (const slot of definition.inputSlots) slots.add(slot.name);
     }
     expect(slots).toEqual(new Set(["vector_field", "mesh", "pins", "obstacle_mask", "fracture_map"]));
+  });
+
+  it("accepts valid owner-locked resources and deterministic omission defaults", async () => {
+    for (const definition of BATCH_04_DEFINITIONS) {
+      const omitted = await executeSelectedEffectTool(
+        definition,
+        definition.toolName,
+        { type: definition.toolName, data: {} },
+        context(definition)
+      );
+      expectFiniteJson(omitted.output);
+      const omittedState = asRecord(omitted.output).state;
+      for (const slot of definition.inputSlots) {
+        const result = await executeSelectedEffectTool(
+          definition,
+          definition.toolName,
+          { type: definition.toolName, data: {} },
+          context(definition, 0.5, 20260814, authorizedInput(slot))
+        );
+        expectFiniteJson(result.output);
+        expect(asRecord(result.output).state).not.toEqual(omittedState);
+      }
+    }
+  });
+
+  it("rejects missing required or invalid owner/kind/lock inputs without entering render", async () => {
+    for (const definition of BATCH_04_DEFINITIONS.filter(({ inputSlots }) => inputSlots.length > 0)) {
+      const slot = definition.inputSlots[0]!;
+      let renderCalls = 0;
+      const required = guardedDefinition(definition, () => { renderCalls += 1; }, [
+        { ...slot, required: true },
+        ...definition.inputSlots.slice(1)
+      ]);
+      await expect(executeSelectedEffectTool(
+        required,
+        required.toolName,
+        { type: required.toolName, data: {} },
+        context(required)
+      )).rejects.toMatchObject({ code: "INPUT_AUTHORIZATION_INVALID" });
+      expect(renderCalls).toBe(0);
+
+      const valid = authorizedInput(slot);
+      const binding = valid[slot.name] as Exclude<(typeof valid)[string], readonly unknown[]>;
+      for (const invalid of [
+        { ...binding, tenantId: "other-tenant" },
+        { ...binding, userId: "other-user" },
+        { ...binding, kind: slot.kind === "data" ? "image" : "data" },
+        { ...binding, locked: false }
+      ]) {
+        await expect(executeSelectedEffectTool(
+          required,
+          required.toolName,
+          { type: required.toolName, data: {} },
+          context(required, 0.5, 20260814, { [slot.name]: invalid } as unknown as AuthorizedEffectInputs)
+        )).rejects.toMatchObject({ code: "INPUT_AUTHORIZATION_INVALID" });
+        expect(renderCalls).toBe(0);
+      }
+    }
   });
 });
 
@@ -204,6 +428,13 @@ describe("batch-04 Chinese model field specifications", () => {
     expect(markdown).toContain("推荐档位");
     expect(markdown).toContain("中性值与默认行为");
     expect(markdown).toContain("不适用范围");
+    const definition = BATCH_04_DEFINITIONS.find((entry) => entry.toolName === toolName)!;
+    for (const parameterName of Object.keys(schemaProperties(definition))) {
+      expect(markdown).toContain(`\`${parameterName}\``);
+    }
+    for (const slot of definition.inputSlots) {
+      expect(markdown).toContain(`\`${slot.name}\``);
+    }
     expect((markdown.match(/^- /gmu) ?? []).length).toBeGreaterThanOrEqual(5);
   });
 });

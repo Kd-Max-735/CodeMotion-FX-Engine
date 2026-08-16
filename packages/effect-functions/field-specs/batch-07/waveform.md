@@ -27,7 +27,7 @@
 | `lineColor` | `#RRGGBB` | 六位十六进制 | `#F8F9FA` | 波形线颜色 |
 | `backgroundColor` | `#RRGGBB` | 六位十六进制 | `#212529` | 背景颜色 |
 
-服务端另行绑定必需的 `audio_analysis` 数据槽，其中包含 1–65536 个 `waveformSamples`，可选上一帧采样。该槽不对模型开放。
+服务端另行绑定必需的 `audio_analysis` 音频输入槽（`kind: audio`）。绑定必须是 owner-scoped、已锁定的精确 `audio-analysis-v1` 对象，其中包含 1–65536 个有限且位于 -1–1 的 `waveformSamples`，并可选同约束的 `previousWaveformSamples`。该槽不对模型开放；没有真实授权分析时直接拒绝，不生成正弦波、静音线或其他伪波形。
 
 ## 5. 表达映射
 

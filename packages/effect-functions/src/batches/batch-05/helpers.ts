@@ -1,7 +1,9 @@
 import type { JsonObject } from "@codemotion/core";
 import type {
+  AuthorizedEffectInput,
   EffectBackendDefinition,
   EffectParameterValidationResult,
+  EffectRenderResult,
   ServerEffectRenderContext
 } from "../../types.js";
 
@@ -33,7 +35,8 @@ export function clamp(value: number, minimum: number, maximum: number): number {
 
 export function round(value: number, digits = 4): number {
   const scale = 10 ** digits;
-  return Math.round(value * scale) / scale;
+  const result = Math.round(value * scale) / scale;
+  return Object.is(result, -0) ? 0 : result;
 }
 
 export function mix(from: number, to: number, progress: number): number {
@@ -60,6 +63,46 @@ export function effectProgress(
   easing: MotionEasing
 ): number {
   return round(ease(clamp(context.time / duration, 0, 1), easing));
+}
+
+function singleInput(context: ServerEffectRenderContext, slot: string): AuthorizedEffectInput | undefined {
+  const value = context.inputs[slot];
+  return Array.isArray(value) ? value[0] : value as AuthorizedEffectInput | undefined;
+}
+
+export function hasInput(context: ServerEffectRenderContext, slot: string): boolean {
+  return singleInput(context, slot) !== undefined;
+}
+
+export function assertDistinctInputBindings(
+  context: ServerEffectRenderContext,
+  firstSlot: string,
+  secondSlot: string
+): void {
+  const first = singleInput(context, firstSlot);
+  const second = singleInput(context, secondSlot);
+  if (first !== undefined && second !== undefined && Object.is(first.binding, second.binding)) {
+    throw new TypeError(`Input slots ${firstSlot} and ${secondSlot} require distinct server bindings.`);
+  }
+}
+
+export function frameOutput(
+  context: ServerEffectRenderContext,
+  operation: string,
+  output: JsonObject
+): EffectRenderResult<JsonObject> {
+  return {
+    kind: "frame",
+    backendId: context.backend.backendId,
+    output: {
+      operation,
+      frame: context.frame,
+      sampleTime: round(context.time, 6),
+      ...output
+    },
+    degraded: false,
+    warnings: []
+  };
 }
 
 export function valid(): EffectParameterValidationResult {

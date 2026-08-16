@@ -1,6 +1,19 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { BATCH_03_GPU_BACKEND, CLOSED_SCHEMA, VALID_PARAMS, metadataResult, round, seededSigned, seededUnit } from "./shared.js";
+import {
+  BATCH_03_BACKEND,
+  BATCH_03_REJECT_FALLBACK,
+  CLOSED_SCHEMA,
+  VALID_PARAMS,
+  createParticleBuffer,
+  opaquePixelIndices,
+  particleTextureResult,
+  pixelAtIndex,
+  rgbaInput,
+  seededSigned,
+  seededUnit,
+  setParticle
+} from "./shared.js";
 
 export interface ParticleDissolveParams extends JsonObject {
   progress: number;
@@ -39,19 +52,44 @@ export const PARTICLE_DISSOLVE_DEFINITION: EffectToolDefinition<ParticleDissolve
     { presetId: "dissolve.blast", displayName: "爆裂消散", params: { ...defaults, particleCount: 2600, force: 950, turbulence: 0.8, lifetime: 0.7, particleSize: 6 } }
   ],
   inputSlots: [{ name: "target_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定的被溶解目标图；不进入模型 data。" }],
-  primaryBackend: BATCH_03_GPU_BACKEND,
-  fallbackStrategy: { kind: "reject", reason: "目标像素采样和粒子合成需要服务器 GPU。" },
+  primaryBackend: BATCH_03_BACKEND,
+  fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "extreme",
   normalizeParams: (params) => ({ ...params, particleCount: Math.round(params.particleCount) }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
+    const target = rgbaInput(context, "target_image", true)!;
+    const targetPixels = opaquePixelIndices(target);
     const direction = params.direction * Math.PI / 180;
-    const samples = Array.from({ length: 6 }, (_, index) => {
-      const activation = seededUnit(context.seed, index);
-      const active = activation <= params.progress;
-      const variance = seededSigned(context.seed, index + 100) * params.turbulence;
-      return { active, activation: round(activation), vx: round(active ? Math.cos(direction + variance) * params.force : 0), vy: round(active ? Math.sin(direction + variance) * params.force : 0) };
+    const active: number[] = [];
+    for (let index = 0; index < params.particleCount; index += 1) {
+      if (seededUnit(context.seed, index * 4) <= params.progress) active.push(index);
+    }
+    const buffer = createParticleBuffer(context, active.length, "disc", {
+      sourceComposite: { slot: "target_image", opacity: 1 - params.progress }
     });
-    return metadataResult(context, { algorithm: "target_pixel_threshold_dissolve", seed: context.seed, sourceOpacity: round(1 - params.progress), samples });
+    const age = Math.min(context.time, params.lifetime);
+    for (let outputIndex = 0; outputIndex < active.length; outputIndex += 1) {
+      const particleIndex = active[outputIndex]!;
+      const pixelIndex = targetPixels[Math.floor(seededUnit(context.seed, particleIndex * 4 + 1)
+        * targetPixels.length)]!;
+      const originX = pixelIndex % target.width;
+      const originY = Math.floor(pixelIndex / target.width);
+      const angle = direction + seededSigned(context.seed, particleIndex * 4 + 2)
+        * params.turbulence * Math.PI;
+      const speed = params.force * (0.65 + seededUnit(context.seed, particleIndex * 4 + 3) * 0.7);
+      const vx = Math.cos(angle) * speed;
+      const vy = Math.sin(angle) * speed;
+      setParticle(buffer, outputIndex, {
+        x: originX + vx * age,
+        y: originY + vy * age,
+        vx,
+        vy,
+        size: params.particleSize,
+        opacity: 1 - age / params.lifetime,
+        color: pixelAtIndex(target, pixelIndex)
+      });
+    }
+    return particleTextureResult(context, buffer);
   }
 };

@@ -15,6 +15,7 @@ export interface TextureOverlayParams extends JsonObject {
 export interface TextureOverlayOutput {
   readonly rgba: Rgba;
   readonly uvOffset: readonly [number, number];
+  readonly uvScale: readonly [number, number];
   readonly textureSize: readonly [number, number];
   readonly blendMode: TextureOverlayParams["blendMode"];
   readonly premultipliedAlpha: boolean;
@@ -98,13 +99,17 @@ export const TEXTURE_OVERLAY_DEFINITION: EffectToolDefinition<TextureOverlayPara
     const base = parsePixelLayer(singleBinding(context, "base_layer"));
     const texture = parseTextureSample(singleBinding(context, "overlay_texture"));
     const radians = params.motionAngle * Math.PI / 180;
-    const distance = context.time * params.motion / params.scale;
+    const distance = params.motion === 0
+      ? 0
+      : (context.time % (params.scale / Math.abs(params.motion))) * params.motion / params.scale;
+    const uvScale = round(1 / params.scale);
     return {
       kind: "texture",
       backendId: GPU_BACKEND.backendId,
       output: Object.freeze({
         rgba: composite(base.sample, texture.sample, params),
         uvOffset: Object.freeze([round(Math.cos(radians) * distance), round(Math.sin(radians) * distance)]) as readonly [number, number],
+        uvScale: Object.freeze([uvScale, uvScale]) as readonly [number, number],
         textureSize: Object.freeze([texture.width, texture.height]) as readonly [number, number],
         blendMode: params.blendMode,
         premultipliedAlpha: params.premultipliedAlpha

@@ -59,11 +59,11 @@ export const ROPE_DEFINITION: EffectToolDefinition<RopeParams> = {
     additionalProperties: false,
     properties: {
       segmentCount: { type: "integer", minimum: 6, maximum: 40, default: 18 },
-      ropeLength: { type: "number", minimum: 0.4, maximum: 1.8, default: 1.25 },
-      gravity: { type: "number", minimum: 0, maximum: 20, default: 7 },
-      damping: { type: "number", minimum: 0, maximum: 0.2, default: 0.025 },
-      stiffness: { type: "number", minimum: 0.1, maximum: 1, default: 0.92 },
-      swingImpulse: { type: "number", minimum: 0, maximum: 8, default: 1.5 },
+      ropeLength: { type: "number", minimum: 0.4, maximum: 1.8, multipleOf: 0.01, default: 1.25 },
+      gravity: { type: "number", minimum: 0, maximum: 20, multipleOf: 0.01, default: 7 },
+      damping: { type: "number", minimum: 0, maximum: 0.2, multipleOf: 0.001, default: 0.025 },
+      stiffness: { type: "number", minimum: 0.1, maximum: 1, multipleOf: 0.01, default: 0.92 },
+      swingImpulse: { type: "number", minimum: 0, maximum: 8, multipleOf: 0.01, default: 1.5 },
       solverIterations: { type: "integer", minimum: 1, maximum: 10, default: 5 },
       anchorMode: { type: "string", enum: ["start", "both"], default: "start" }
     }

@@ -32,6 +32,12 @@
 | `amount` | 否 | 0–2 | 0.35 | 缩放或发光增量 |
 | `targetProperty` | 是 | `scale` / `glow` / `both` | `both` | 固定的响应属性 |
 
+## 服务器输入
+
+| inputSlot | kind | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `audio_analysis` | `audio` | 是 | 服务端从已授权真实音频生成并锁定的分析帧 |
+
 ## 选择策略
 
 “更敏感”降低 `sensitivity`；“更平滑”或“拖尾更长”提高 `decay`；“更快、更利落”降低 `decay`；“更强”提高 `amount`；“更亮”选择 `glow` 或 `both` 并提高 `amount`。未说明属性时用 `both`。

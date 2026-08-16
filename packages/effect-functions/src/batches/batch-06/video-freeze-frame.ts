@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { FFMPEG_BACKEND, REJECT_FALLBACK, frameResult, round, valid } from "./common.js";
+import { FFMPEG_BACKEND, REJECT_FALLBACK, blockedRender, valid } from "./common.js";
 
 export interface VideoFreezeFrameParams extends JsonObject {
   freezeAt: number;
@@ -45,21 +45,8 @@ export const VIDEO_FREEZE_FRAME_DEFINITION: EffectToolDefinition<VideoFreezeFram
   performanceGrade: "medium",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: (context, params) => {
-    const outputTime = Math.max(0, context.time);
-    const freezeEnd = params.freezeAt + params.freezeDuration;
-    const frozen = outputTime >= params.freezeAt && outputTime < freezeEnd;
-    const sampleTime = outputTime < params.freezeAt ? outputTime
-      : frozen ? params.freezeAt
-        : outputTime - params.freezeDuration;
-    return frameResult(FFMPEG_BACKEND.backendId, {
-      operation: "decode_video_frame_at_time",
-      sourceSlot: "source_video",
-      outputTime: round(outputTime),
-      sampleTime: round(sampleTime),
-      frozen,
-      zoomScale: params.zoomScale,
-      vignette: params.vignette
-    });
-  }
+  render: () => blockedRender(
+    "video_freeze_frame",
+    "a random-access server video decoder and freeze-frame compositor adapter"
+  )
 };

@@ -1,6 +1,19 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { BATCH_03_GPU_BACKEND, CLOSED_SCHEMA, VALID_PARAMS, metadataResult, round, seededSigned, seededUnit } from "./shared.js";
+import {
+  BATCH_03_BACKEND,
+  BATCH_03_REJECT_FALLBACK,
+  CLOSED_SCHEMA,
+  VALID_PARAMS,
+  clamp,
+  createParticleBuffer,
+  opaquePixelIndices,
+  particleTextureResult,
+  pixelAtIndex,
+  rgbaInput,
+  seededUnit,
+  setParticle
+} from "./shared.js";
 
 export interface ParticleLogoAssembleParams extends JsonObject {
   particleCount: number;
@@ -39,18 +52,40 @@ export const PARTICLE_LOGO_ASSEMBLE_DEFINITION: EffectToolDefinition<ParticleLog
     { presetId: "logo.vortex", displayName: "旋涡聚合", params: { ...defaults, particleCount: 5200, duration: 1.6, scatterRadius: 1.5, swirl: 1.8, attraction: 1.25, damping: 0.62, particleSize: 2 } }
   ],
   inputSlots: [{ name: "logo_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定的 Logo 目标图；模型参数中不包含其标识。" }],
-  primaryBackend: BATCH_03_GPU_BACKEND,
-  fallbackStrategy: { kind: "reject", reason: "Logo 轮廓采样和大规模吸引场没有等价 CPU 降级。" },
+  primaryBackend: BATCH_03_BACKEND,
+  fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "extreme",
   normalizeParams: (params) => ({ ...params, particleCount: Math.round(params.particleCount) }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
-    const progress = Math.min(1, Math.max(0, context.time / params.duration));
-    const samples = Array.from({ length: 6 }, (_, index) => ({
-      targetSample: round(seededUnit(context.seed, index * 2)),
-      radialOffset: round(seededSigned(context.seed, index * 2 + 1) * params.scatterRadius * (1 - progress)),
-      swirlRadians: round(params.swirl * (1 - progress) * Math.PI * 2)
-    }));
-    return metadataResult(context, { algorithm: "authorized_alpha_target_attraction", seed: context.seed, progress: round(progress), targetSampling: "logo_image_alpha", samples });
+    const logo = rgbaInput(context, "logo_image", true)!;
+    const targets = opaquePixelIndices(logo);
+    const progress = clamp(context.time / params.duration, 0, 1);
+    const attracted = 1 - (1 - progress) ** (1 + params.attraction * 2);
+    const settled = attracted * (0.6 + params.damping * 0.4) + progress * (0.4 - params.damping * 0.4);
+    const buffer = createParticleBuffer(context, params.particleCount, "disc");
+    const scatterPixels = params.scatterRadius * Math.min(context.width, context.height);
+    for (let index = 0; index < params.particleCount; index += 1) {
+      const targetIndex = targets[Math.floor(seededUnit(context.seed, index * 5) * targets.length)]!;
+      const targetX = targetIndex % logo.width;
+      const targetY = Math.floor(targetIndex / logo.width);
+      const angle = seededUnit(context.seed, index * 5 + 1) * Math.PI * 2;
+      const radius = Math.sqrt(seededUnit(context.seed, index * 5 + 2)) * scatterPixels;
+      const swirlAngle = angle + params.swirl * settled * Math.PI * 2;
+      const remaining = 1 - settled;
+      const offsetX = Math.cos(swirlAngle) * radius * remaining;
+      const offsetY = Math.sin(swirlAngle) * radius * remaining;
+      const velocityScale = params.duration > 0 ? params.attraction / params.duration : 0;
+      setParticle(buffer, index, {
+        x: targetX + offsetX,
+        y: targetY + offsetY,
+        vx: -offsetX * velocityScale,
+        vy: -offsetY * velocityScale,
+        size: params.particleSize,
+        opacity: clamp(0.25 + settled, 0, 1),
+        color: pixelAtIndex(logo, targetIndex)
+      });
+    }
+    return particleTextureResult(context, buffer);
   }
 };

@@ -62,11 +62,11 @@ export const FLUID_LITE_DEFINITION: EffectToolDefinition<FluidLiteParams> = {
     additionalProperties: false,
     properties: {
       gridSize: { type: "integer", minimum: 8, maximum: 24, default: 16 },
-      viscosity: { type: "number", minimum: 0, maximum: 0.2, default: 0.025 },
-      densityDiffusion: { type: "number", minimum: 0, maximum: 0.2, default: 0.018 },
-      vorticity: { type: "number", minimum: 0, maximum: 6, default: 1.4 },
-      injectionStrength: { type: "number", minimum: 0, maximum: 10, default: 4.5 },
-      buoyancy: { type: "number", minimum: 0, maximum: 5, default: 1.2 },
+      viscosity: { type: "number", minimum: 0, maximum: 0.2, multipleOf: 0.001, default: 0.025 },
+      densityDiffusion: { type: "number", minimum: 0, maximum: 0.2, multipleOf: 0.001, default: 0.018 },
+      vorticity: { type: "number", minimum: 0, maximum: 6, multipleOf: 0.01, default: 1.4 },
+      injectionStrength: { type: "number", minimum: 0, maximum: 10, multipleOf: 0.01, default: 4.5 },
+      buoyancy: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 1.2 },
       pressureIterations: { type: "integer", minimum: 1, maximum: 8, default: 4 }
     }
   },

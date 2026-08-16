@@ -26,6 +26,9 @@ const systems: Record<LSystemPattern, { axiom: string; rules: Readonly<Record<st
   dragon: { axiom: "FX", rules: { X: "X+YF+", Y: "-FX-Y" } }
 };
 
+const MAX_PROGRAM_LENGTH = 16_384;
+const MAX_SEGMENTS = 8_192;
+
 function expand(pattern: LSystemPattern, iterations: number, limit: number): string {
   const system = systems[pattern];
   let value = system.axiom;
@@ -67,11 +70,18 @@ export const lSystemDefinition: EffectToolDefinition<LSystemParams> = {
   performanceGrade: "medium",
   normalizeParams: (params) => ({ ...params, angle: round(params.angle, 3), step: round(params.step),
     scale: round(params.scale), speed: round(params.speed), strokeColor: normalizeColor(params.strokeColor) }),
-  validateParams: (params) => params.pattern !== "dragon" && params.iterations > 5
-    ? invalid("$.iterations", `${params.pattern} is capped at 5 iterations to keep expansion bounded`)
-    : valid(),
+  validateParams: (params) => {
+    try {
+      const program = expand(params.pattern, params.iterations, MAX_PROGRAM_LENGTH);
+      return [...program].filter((symbol) => symbol === "F").length <= MAX_SEGMENTS
+        ? valid()
+        : invalid("$.iterations", `L-system drawing exceeds ${MAX_SEGMENTS} segments`);
+    } catch {
+      return invalid("$.iterations", `L-system expansion exceeds ${MAX_PROGRAM_LENGTH} symbols`);
+    }
+  },
   render: (context, params) => {
-    const program = expand(params.pattern, params.iterations, 16_384);
+    const program = expand(params.pattern, params.iterations, MAX_PROGRAM_LENGTH);
     const turn = params.angle * Math.PI / 180;
     let heading = -Math.PI / 2 + context.time * params.speed * 0.1;
     let x = 0;
@@ -82,7 +92,7 @@ export const lSystemDefinition: EffectToolDefinition<LSystemParams> = {
       if (symbol === "F") {
         const nextX = x + Math.cos(heading) * params.step * params.scale;
         const nextY = y + Math.sin(heading) * params.step * params.scale;
-        if (segments.length >= 8192) throw new RangeError("L-system segment limit exceeded.");
+        if (segments.length >= MAX_SEGMENTS) throw new RangeError("L-system segment limit exceeded.");
         segments.push({ x1: round(x), y1: round(y), x2: round(nextX), y2: round(nextY) });
         x = nextX;
         y = nextY;

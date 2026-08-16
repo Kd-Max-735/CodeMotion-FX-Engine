@@ -131,7 +131,14 @@ async function testVideoService() {
     trustedBytes: 128
   };
   const exportFrames = vi.fn(async (options: ExportOptions) => {
-    await options.renderFrame({ frame: 0, time: 0, deltaTime: 0, fps: 30, width: 2, height: 2 }, options.signal);
+    await options.renderFrame({
+      frame: 0,
+      time: 0,
+      deltaTime: 0,
+      fps: options.preset.settings.fps,
+      width: options.preset.settings.width,
+      height: options.preset.settings.height
+    }, options.signal);
     await writeFile(options.outputPath, "test-mp4-output");
     return { outputPath: options.outputPath, frameCount: 1, inspections: [], encoder: "libx264" };
   });
@@ -191,13 +198,35 @@ class TestInputResolver implements EffectToolInputResolver {
     owner: EffectToolPrincipal,
     definition: EffectToolDefinition,
     inputIds: EffectToolInputIds,
-    _render: EffectToolRenderSettings
+    render: EffectToolRenderSettings
   ): Promise<AuthorizedEffectInputs> {
     this.calls += 1;
     for (const slot of definition.inputSlots) {
-      if (slot.required && inputIds[slot.name] === undefined) {
+      if (slot.required && inputIds[slot.name] === undefined && Object.keys(inputIds).length === 0) {
         throw new TypeError(`Required input slot ${slot.name} is missing.`);
       }
+    }
+    if (definition.toolName === "depth_of_field") {
+      const pixels = new Uint8Array(render.width * render.height * 4).fill(255);
+      const depth = new Float32Array(render.width * render.height).fill(0.5);
+      return Promise.resolve(Object.freeze({
+        source_frame: Object.freeze({
+          slot: "source_frame",
+          kind: "image" as const,
+          tenantId: owner.tenantId,
+          userId: owner.userId,
+          locked: true as const,
+          binding: { width: render.width, height: render.height, data: pixels }
+        }),
+        depth_field: Object.freeze({
+          slot: "depth_field",
+          kind: "depth-map" as const,
+          tenantId: owner.tenantId,
+          userId: owner.userId,
+          locked: true as const,
+          binding: { width: render.width, height: render.height, data: depth }
+        })
+      }));
     }
     if (definition.toolName === "film_grain") {
       return Promise.resolve(Object.freeze({
@@ -208,12 +237,9 @@ class TestInputResolver implements EffectToolInputResolver {
           userId: owner.userId,
           locked: true as const,
           binding: {
-            width: 2,
-            height: 2,
-            data: [
-              255, 0, 0, 255, 0, 255, 0, 255,
-              0, 0, 255, 255, 255, 255, 255, 255
-            ]
+            width: render.width,
+            height: render.height,
+            data: new Uint8Array(render.width * render.height * 4).fill(255)
           }
         })
       }));
@@ -424,6 +450,70 @@ describe("server single effect-tool service", () => {
     });
   });
 
+  it("runs a Registry-selected native turn and preserves its exact tool identity", async () => {
+    const provider = new NativeRecordingProvider();
+    const inputs = new TestInputResolver();
+    const video = await testVideoService();
+    const service = new EffectToolService(provider, inputs, EFFECT_TOOL_REGISTRY, video.service);
+    await expect(service.selectedTurn(principal, {
+      toolName: "particle_spark",
+      prompt: "这个工具有哪些参数？",
+      inputIds: {}
+    })).resolves.toMatchObject({
+      kind: "message",
+      tool: { toolName: "particle_spark", displayName: "火花粒子" },
+      content: "temporal 控制颗粒随帧变化的活跃程度。"
+    });
+    expect(inputs.calls).toBe(0);
+    expect(provider.requests[0]).toMatchObject({ toolName: "particle_spark" });
+    expect(provider.requests[0]!.fieldSpec).toContain("`particle_spark`");
+    expect(provider.requests[0]!.fieldSpec).not.toContain("film_grain");
+
+    provider.turn = {
+      reasoningContent: "用户要求执行当前选择的胶片颗粒工具。",
+      content: "准备调用当前工具。",
+      toolCall: {
+        id: "call-selected-film-grain",
+        name: "film_grain",
+        arguments: {
+          effectParams: { amount: 0.2, size: 2, monochrome: true, response: "uniform", temporal: 0.5 },
+          output: { durationSeconds: 1 }
+        }
+      }
+    };
+
+    const turn = await service.selectedTurn(principal, {
+      toolName: "film_grain",
+      prompt: "生成一秒胶片颗粒视频",
+      inputIds: { source_frame: "asset_imageabcdefgh" }
+    });
+    expect(turn).toMatchObject({
+      kind: "tool_call",
+      tool: { toolName: "film_grain", displayName: "胶片颗粒", category: "post" },
+      toolCall: { function: { name: "film_grain" } },
+      executionInput: {
+        authorizedInputs: [{ name: "source_frame", kind: "image", count: 1 }]
+      },
+      execution: { toolName: "film_grain", status: "queued" }
+    });
+    if (turn.kind !== "tool_call") throw new Error("Expected a tool call.");
+    await waitFor(() => service.videoExecution(principal, turn.execution.id).status === "completed");
+    expect(provider.requests).toHaveLength(2);
+    expect(provider.requests[1]).toMatchObject({ toolName: "film_grain" });
+    expect(provider.requests[1]!.fieldSpec).toContain("# 胶片颗粒（film_grain）");
+    expect(inputs.calls).toBe(1);
+
+    provider.turn = {
+      ...provider.turn,
+      toolCall: { ...provider.turn.toolCall!, name: "Film_Grain" }
+    };
+    await expect(service.selectedTurn(principal, {
+      toolName: "film_grain",
+      prompt: "再次执行",
+      inputIds: { source_frame: "asset_imageabcdefgh" }
+    })).rejects.toMatchObject({ code: "security" });
+  });
+
   it("reference-counts concurrent asset use and aborts parameter generation during close", async () => {
     const provider = new BlockingProvider();
     const service = new EffectToolService(provider, new TestInputResolver());
@@ -599,6 +689,96 @@ describe("server single effect-tool service", () => {
       expect(download.headers.get("content-disposition")).toContain("attachment");
       expect((await download.arrayBuffer()).byteLength).toBe(15);
       expect(auth.verifySameOriginDownload).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("exposes the strict 120-tool v3 catalog and derives required preview inputs from one image", async () => {
+    const provider = new NativeRecordingProvider();
+    const video = await testVideoService();
+    const service = new EffectToolService(provider, new TestInputResolver(), EFFECT_TOOL_REGISTRY, video.service);
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("depth_of_field")!;
+    const auth = {
+      authorize: vi.fn(async () => authenticated()),
+      verifySameOriginDownload: vi.fn()
+    };
+
+    await withApi(service, auth, async (baseUrl) => {
+      const catalogResponse = await fetch(`${baseUrl}/api/effect-tools/v3`);
+      expect(catalogResponse.status).toBe(200);
+      const catalog = await catalogResponse.json() as {
+        count: number;
+        tools: Array<{ toolName: string; configured: boolean; inputRequirements: unknown[] }>;
+      };
+      expect(catalog.count).toBe(120);
+      expect(catalog.tools).toHaveLength(120);
+      expect(new Set(catalog.tools.map((item) => item.toolName)).size).toBe(120);
+      expect(catalog.tools.find((item) => item.toolName === "depth_of_field")).toMatchObject({
+        configured: true,
+        inputRequirements: [
+          { name: "source_frame", kind: "image", required: true, acceptsUploadedImage: true },
+          { name: "depth_field", kind: "depth-map", required: true, acceptsUploadedImage: true }
+        ]
+      });
+
+      const inquiry = await fetch(`${baseUrl}/api/effect-tools/v3/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolName: "depth_of_field",
+          prompt: "这个工具有哪些参数？",
+          inputIds: {}
+        })
+      });
+      expect(inquiry.status).toBe(200);
+      await expect(inquiry.json()).resolves.toMatchObject({
+        turn: {
+          kind: "message",
+          tool: { toolName: "depth_of_field", displayName: definition.displayName }
+        }
+      });
+      expect(provider.requests.at(-1)).toMatchObject({ toolName: "depth_of_field" });
+      expect(provider.requests.at(-1)!.fieldSpec).toContain("depth_of_field");
+
+      provider.turn = {
+        reasoningContent: "用户要求执行景深工具。",
+        content: "准备调用景深工具。",
+        toolCall: {
+          id: "call-depth-of-field",
+          name: "depth_of_field",
+          arguments: { effectParams: definition.defaults, output: { durationSeconds: 1 } }
+        }
+      };
+
+      const execution = await fetch(`${baseUrl}/api/effect-tools/v3/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolName: "depth_of_field",
+          prompt: "生成景深视频",
+          inputIds: { source_frame: "asset_imageabcdefgh" }
+        })
+      });
+      expect(execution.status).toBe(200);
+      await expect(execution.json()).resolves.toMatchObject({
+        turn: {
+          kind: "tool_call",
+          tool: { toolName: "depth_of_field" },
+          executionInput: {
+            authorizedInputs: [
+              { name: "source_frame", kind: "image", count: 1 },
+              { name: "depth_field", kind: "depth-map", count: 1 }
+            ]
+          }
+        }
+      });
+
+      const extra = await fetch(`${baseUrl}/api/effect-tools/v3/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ toolName: "film_grain", prompt: "执行", inputIds: {}, extra: true })
+      });
+      expect(extra.status).toBe(400);
+      await expect(extra.json()).resolves.toMatchObject({ error: { code: "EFFECT_TOOL_REQUEST_INVALID" } });
     });
   });
 });

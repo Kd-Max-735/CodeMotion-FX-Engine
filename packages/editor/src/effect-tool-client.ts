@@ -10,6 +10,24 @@ export interface NativeEffectToolView {
   readonly configured: boolean;
 }
 
+export interface SelectedEffectInputRequirementView {
+  readonly name: string;
+  readonly kind: "image" | "video" | "audio" | "mask" | "lut" | "depth-map" | "font" | "model" | "texture" | "data";
+  readonly required: boolean;
+  readonly cardinality: "one" | "many";
+  readonly description: string;
+  readonly acceptedMimeTypes: readonly string[];
+  readonly acceptsUploadedImage: boolean;
+}
+
+export interface SelectedEffectToolView {
+  readonly toolName: string;
+  readonly displayName: string;
+  readonly category: string;
+  readonly configured: boolean;
+  readonly inputRequirements: readonly SelectedEffectInputRequirementView[];
+}
+
 export interface NativeToolCallView {
   readonly id: string;
   readonly type: "function";
@@ -53,6 +71,66 @@ export interface NativeExecutionInputView {
   };
 }
 
+export interface SelectedExecutionView {
+  readonly id: string;
+  readonly status: NativeExecutionView["status"];
+  readonly toolName: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly source?: { readonly kind: "image"; readonly assetId: string };
+  readonly video: NativeExecutionView["video"];
+  readonly failure?: NativeExecutionView["failure"];
+}
+
+export interface SelectedExecutionInputView {
+  readonly authorizedInputs: readonly Readonly<{
+    name: string;
+    kind: SelectedEffectInputRequirementView["kind"];
+    count: number;
+  }>[];
+  readonly effectParams: Readonly<Record<string, unknown>>;
+  readonly output: {
+    readonly durationSeconds: number;
+    readonly fps: number;
+    readonly format: "mp4";
+  };
+}
+
+export interface SelectedToolCallView {
+  readonly id: string;
+  readonly type: "function";
+  readonly function: {
+    readonly name: string;
+    readonly arguments: Readonly<Record<string, unknown>>;
+  };
+}
+
+export type SelectedEffectTurn = Readonly<{
+  kind: "message";
+  tool: Pick<SelectedEffectToolView, "toolName" | "displayName" | "category">;
+  reasoningContent: string;
+  content: string;
+}> | Readonly<{
+  kind: "tool_call";
+  tool: Pick<SelectedEffectToolView, "toolName" | "displayName" | "category">;
+  reasoningContent: string;
+  content: string;
+  toolCall: SelectedToolCallView;
+  executionInput: SelectedExecutionInputView;
+  execution: SelectedExecutionView;
+}>;
+
+export class EffectToolApiError extends BrowserApiError {
+  constructor(
+    status: number,
+    code: string,
+    retryable: boolean,
+    readonly requirements: readonly SelectedEffectInputRequirementView[] = []
+  ) {
+    super(status, code, retryable);
+  }
+}
+
 export type NativeEffectTurn = Readonly<{
   kind: "message";
   reasoningContent: string;
@@ -80,13 +158,18 @@ async function jsonRequest(path: string, init: RequestInit = {}): Promise<unknow
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new BrowserApiError(0, "SERVICE_UNREACHABLE", true);
   }
-  const body = await response.json().catch(() => ({})) as { error?: { code?: unknown; retryable?: unknown } };
+  const body = await response.json().catch(() => ({})) as {
+    error?: { code?: unknown; retryable?: unknown; requirements?: unknown };
+  };
   if (!response.ok) {
     if (response.status === 401) window.dispatchEvent(new Event("cmfx:unauthenticated"));
-    throw new BrowserApiError(
+    const requirements = Array.isArray(body.error?.requirements)
+      ? body.error.requirements.map(inputRequirement) : [];
+    throw new EffectToolApiError(
       response.status,
       typeof body.error?.code === "string" ? body.error.code : `HTTP_${response.status}`,
-      body.error?.retryable === true
+      body.error?.retryable === true,
+      requirements
     );
   }
   return body;
@@ -104,6 +187,50 @@ function tool(value: unknown): NativeEffectToolView {
     category: raw.category,
     configured: raw.configured
   };
+}
+
+const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
+const INPUT_KINDS = new Set([
+  "image", "video", "audio", "mask", "lut", "depth-map", "font", "model", "texture", "data"
+]);
+
+function inputRequirement(value: unknown): SelectedEffectInputRequirementView {
+  const item = object(value);
+  if (typeof item.name !== "string" || !TOOL_NAME.test(item.name)
+    || typeof item.kind !== "string" || !INPUT_KINDS.has(item.kind)
+    || typeof item.required !== "boolean" || (item.cardinality !== "one" && item.cardinality !== "many")
+    || typeof item.description !== "string" || !Array.isArray(item.acceptedMimeTypes)
+    || item.acceptedMimeTypes.some((mime) => typeof mime !== "string")
+    || typeof item.acceptsUploadedImage !== "boolean") {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  return Object.freeze({
+    name: item.name,
+    kind: item.kind as SelectedEffectInputRequirementView["kind"],
+    required: item.required,
+    cardinality: item.cardinality,
+    description: item.description,
+    acceptedMimeTypes: Object.freeze([...(item.acceptedMimeTypes as string[])]),
+    acceptsUploadedImage: item.acceptsUploadedImage
+  });
+}
+
+function selectedTool(value: unknown): SelectedEffectToolView {
+  const raw = object(value);
+  if (typeof raw.toolName !== "string" || !TOOL_NAME.test(raw.toolName)
+    || typeof raw.displayName !== "string" || raw.displayName.trim().length === 0
+    || typeof raw.category !== "string" || typeof raw.configured !== "boolean"
+    || !Array.isArray(raw.inputRequirements)) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  const inputRequirements = raw.inputRequirements.map(inputRequirement);
+  return Object.freeze({
+    toolName: raw.toolName,
+    displayName: raw.displayName,
+    category: raw.category,
+    configured: raw.configured,
+    inputRequirements: Object.freeze(inputRequirements)
+  });
 }
 
 function execution(value: unknown): NativeExecutionView {
@@ -153,6 +280,73 @@ function execution(value: unknown): NativeExecutionView {
   };
 }
 
+function selectedExecution(value: unknown, expectedToolName?: string): SelectedExecutionView {
+  const raw = object(value);
+  const video = object(raw.video);
+  const status = raw.status;
+  if (typeof raw.id !== "string" || !["queued", "running", "completed", "failed"].includes(String(status))
+    || typeof raw.toolName !== "string" || !TOOL_NAME.test(raw.toolName)
+    || expectedToolName !== undefined && raw.toolName !== expectedToolName
+    || typeof raw.createdAt !== "string" || typeof raw.updatedAt !== "string"
+    || video.format !== "mp4" || video.mime !== "video/mp4"
+    || ![video.width, video.height, video.fps, video.durationSeconds, video.frameCount,
+      video.completedFrames, video.progress].every((item) => typeof item === "number" && Number.isFinite(item))
+    || typeof video.audio !== "boolean"
+    || (video.bytes !== undefined && typeof video.bytes !== "number")
+    || (video.downloadName !== undefined && typeof video.downloadName !== "string")) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  const source = raw.source === undefined ? undefined : object(raw.source);
+  if (source !== undefined && (source.kind !== "image" || typeof source.assetId !== "string")) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  const failure = raw.failure === undefined ? undefined : object(raw.failure);
+  if (failure !== undefined && (failure.code !== "VIDEO_RENDER_FAILED" || typeof failure.message !== "string")) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  return {
+    id: raw.id,
+    status: status as SelectedExecutionView["status"],
+    toolName: raw.toolName,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    ...(source === undefined ? {} : { source: { kind: "image" as const, assetId: source.assetId as string } }),
+    video: {
+      format: "mp4",
+      mime: "video/mp4",
+      width: video.width as number,
+      height: video.height as number,
+      fps: video.fps as number,
+      durationSeconds: video.durationSeconds as number,
+      frameCount: video.frameCount as number,
+      completedFrames: video.completedFrames as number,
+      progress: video.progress as number,
+      audio: video.audio as boolean,
+      ...(video.bytes === undefined ? {} : { bytes: video.bytes as number }),
+      ...(video.downloadName === undefined ? {} : { downloadName: video.downloadName as string })
+    },
+    ...(failure === undefined ? {} : {
+      failure: { code: "VIDEO_RENDER_FAILED" as const, message: failure.message as string }
+    })
+  };
+}
+
+function selectedIdentity(
+  value: unknown,
+  expectedToolName: string
+): Pick<SelectedEffectToolView, "toolName" | "displayName" | "category"> {
+  const raw = object(value);
+  if (raw.toolName !== expectedToolName || typeof raw.displayName !== "string"
+    || raw.displayName.trim().length === 0 || typeof raw.category !== "string") {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  return Object.freeze({
+    toolName: expectedToolName,
+    displayName: raw.displayName,
+    category: raw.category
+  });
+}
+
 function turn(value: unknown): NativeEffectTurn {
   const raw = object(value);
   if (typeof raw.reasoningContent !== "string" || typeof raw.content !== "string") {
@@ -198,6 +392,55 @@ function turn(value: unknown): NativeEffectTurn {
   };
 }
 
+function selectedTurn(value: unknown, expectedToolName: string): SelectedEffectTurn {
+  const raw = object(value);
+  if (typeof raw.reasoningContent !== "string" || typeof raw.content !== "string") {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  const identity = selectedIdentity(raw.tool, expectedToolName);
+  if (raw.kind === "message") {
+    return { kind: "message", tool: identity, reasoningContent: raw.reasoningContent, content: raw.content };
+  }
+  if (raw.kind !== "tool_call") throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  const call = object(raw.toolCall);
+  const fn = object(call.function);
+  const args = object(fn.arguments);
+  const executionInput = object(raw.executionInput);
+  const effectParams = object(executionInput.effectParams);
+  const output = object(executionInput.output);
+  if (!Array.isArray(executionInput.authorizedInputs)
+    || typeof call.id !== "string" || call.type !== "function" || fn.name !== expectedToolName
+    || output.format !== "mp4" || typeof output.durationSeconds !== "number"
+    || !Number.isFinite(output.durationSeconds) || typeof output.fps !== "number" || !Number.isFinite(output.fps)) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  const authorizedInputs = executionInput.authorizedInputs.map((value) => {
+    const item = object(value);
+    if (typeof item.name !== "string" || typeof item.kind !== "string" || !INPUT_KINDS.has(item.kind)
+      || typeof item.count !== "number" || !Number.isInteger(item.count) || item.count < 1) {
+      throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+    }
+    return { name: item.name, kind: item.kind as SelectedEffectInputRequirementView["kind"], count: item.count };
+  });
+  return {
+    kind: "tool_call",
+    tool: identity,
+    reasoningContent: raw.reasoningContent,
+    content: raw.content,
+    toolCall: {
+      id: call.id,
+      type: "function",
+      function: { name: expectedToolName, arguments: structuredClone(args) }
+    },
+    executionInput: {
+      authorizedInputs: Object.freeze(authorizedInputs),
+      effectParams: structuredClone(effectParams),
+      output: { durationSeconds: output.durationSeconds, fps: output.fps, format: "mp4" }
+    },
+    execution: selectedExecution(raw.execution, expectedToolName)
+  };
+}
+
 function csrfHeaders(): HeadersInit {
   const token = csrfToken();
   if (!token) throw new BrowserApiError(403, "CSRF_MISSING", false);
@@ -233,4 +476,50 @@ export const nativeEffectToolApi = {
   },
   videoUrl: (executionId: string): string => `/api/effect-tools/v2/executions/${encodeURIComponent(executionId)}/video`,
   downloadUrl: (executionId: string): string => `/api/effect-tools/v2/executions/${encodeURIComponent(executionId)}/download`
+};
+
+export const selectedEffectToolApi = {
+  catalog: async (signal?: AbortSignal): Promise<readonly SelectedEffectToolView[]> => {
+    const body = object(await jsonRequest("/api/effect-tools/v3", signal === undefined ? {} : { signal }));
+    if (!Array.isArray(body.tools) || body.tools.length !== 120 || body.count !== 120) {
+      throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+    }
+    const tools = body.tools.map(selectedTool);
+    if (new Set(tools.map((item) => item.toolName)).size !== tools.length) {
+      throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+    }
+    return Object.freeze(tools);
+  },
+  turn: async (request: {
+    readonly toolName: string;
+    readonly prompt: string;
+    readonly inputIds: Readonly<Record<string, string | readonly string[]>>;
+  }, signal?: AbortSignal): Promise<SelectedEffectTurn> => {
+    if (!TOOL_NAME.test(request.toolName)) throw new BrowserApiError(400, "INVALID_TOOL_NAME", false);
+    const body = object(await jsonRequest("/api/effect-tools/v3/turns", {
+      method: "POST",
+      headers: csrfHeaders(),
+      body: JSON.stringify({
+        toolName: request.toolName,
+        prompt: request.prompt,
+        inputIds: request.inputIds
+      }),
+      ...(signal === undefined ? {} : { signal })
+    }));
+    return selectedTurn(body.turn, request.toolName);
+  },
+  execution: async (
+    executionId: string,
+    expectedToolName: string,
+    signal?: AbortSignal
+  ): Promise<SelectedExecutionView> => {
+    if (!TOOL_NAME.test(expectedToolName)) throw new BrowserApiError(400, "INVALID_TOOL_NAME", false);
+    const body = object(await jsonRequest(
+      `/api/effect-tools/v3/executions/${encodeURIComponent(executionId)}`,
+      signal === undefined ? {} : { signal }
+    ));
+    return selectedExecution(body.execution, expectedToolName);
+  },
+  videoUrl: (executionId: string): string => `/api/effect-tools/v3/executions/${encodeURIComponent(executionId)}/video`,
+  downloadUrl: (executionId: string): string => `/api/effect-tools/v3/executions/${encodeURIComponent(executionId)}/download`
 };

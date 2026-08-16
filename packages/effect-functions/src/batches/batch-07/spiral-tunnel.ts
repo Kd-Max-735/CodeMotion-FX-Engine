@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, metadataResult,
+import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, invalid, metadataResult,
   normalizeColor, round, schema, valid } from "./shared.js";
 
 export interface SpiralTunnelParams extends JsonObject {
@@ -47,7 +47,9 @@ export const spiralTunnelDefinition: EffectToolDefinition<SpiralTunnelParams> = 
   normalizeParams: (params) => ({ ...params, radius: round(params.radius), depth: round(params.depth),
     twist: round(params.twist, 3), speed: round(params.speed),
     strokeColor: normalizeColor(params.strokeColor), backgroundColor: normalizeColor(params.backgroundColor) }),
-  validateParams: () => valid(),
+  validateParams: (params) => params.turns * params.pointsPerTurn <= 2_304
+    ? valid()
+    : invalid("$", "turns times pointsPerTurn must not exceed 2,304"),
   render: (context, params) => {
     const count = params.turns * params.pointsPerTurn;
     const phase = context.time * params.speed * Math.PI;

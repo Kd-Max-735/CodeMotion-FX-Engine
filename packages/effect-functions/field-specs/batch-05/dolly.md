@@ -40,4 +40,4 @@
 
 推荐 `distance=2..12`、`duration=2..6`、`heightOffset=-2..3`。中性值为 `distance=0`、`heightOffset=0`、FOV `50`；默认值见示例。大于 30 的距离应有明确远距离语义。
 
-视频和可选 camera target 由服务端绑定。本工具不适用于数字缩放、主体尺寸恒定的 dolly zoom、旋转摇镜、环绕或镜头抖动。
+视频和可选 camera target 由服务端绑定。当前产品若只上传静态图片，必须先由服务器静态帧源适配生成视频帧源；不得把 `image` 直接绑定为 `video`。本工具不适用于数字缩放、主体尺寸恒定的 dolly zoom、旋转摇镜、环绕或镜头抖动。

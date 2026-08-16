@@ -23,7 +23,11 @@ export const GPU_BACKEND: EffectBackendDefinition = Object.freeze({
 export const JSON_SCHEMA = "https://json-schema.org/draft/2020-12/schema";
 
 export function round(value: number, digits = 4): number {
+  if (!Number.isFinite(value)) {
+    throw new RangeError("Rendered numeric output must be finite.");
+  }
   const factor = 10 ** digits;
+  if (Math.abs(value) > Number.MAX_SAFE_INTEGER / factor) return value;
   return Math.round(value * factor) / factor;
 }
 

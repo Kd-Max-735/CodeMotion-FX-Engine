@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { REJECT_FALLBACK, SERVER_THREE_BACKEND, frameResult, round, timedProgress, valid, type Easing } from "./common.js";
+import { REJECT_FALLBACK, SERVER_THREE_BACKEND, blockedRender, valid, type Easing } from "./common.js";
 
 type RevealDirection = "left_to_right" | "right_to_left" | "center_out";
 
@@ -65,28 +65,8 @@ export const TEXT_LOGO_REVEAL_DEFINITION: EffectToolDefinition<TextLogoRevealPar
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: (context, params) => {
-    const globalProgress = timedProgress(context.time, params.startTime, params.duration, params.easing);
-    const segments = Array.from({ length: params.segmentCount }, (_, index) => {
-      const linearPosition = params.segmentCount === 1 ? 0 : index / (params.segmentCount - 1);
-      const order = params.direction === "right_to_left" ? 1 - linearPosition
-        : params.direction === "center_out" ? Math.abs(linearPosition - 0.5) * 2
-          : linearPosition;
-      const localStart = order * params.stagger;
-      const localProgress = Math.max(0, Math.min(1, (globalProgress - localStart) / (1 - params.stagger)));
-      return {
-        segment: index,
-        reveal: round(localProgress),
-        translateZ: round((1 - localProgress) * params.travelDistance),
-        rotateY: round((1 - localProgress) * params.rotationDegrees),
-        extrusionDepth: round(params.extrusionDepth * localProgress)
-      };
-    });
-    return frameResult(SERVER_THREE_BACKEND.backendId, {
-      operation: "reveal_extruded_geometry",
-      geometrySlot: "logo_geometry",
-      globalProgress: round(globalProgress),
-      segments
-    });
-  }
+  render: () => blockedRender(
+    "text_logo_reveal",
+    "an owner-authorized logo geometry/font and server-three frame renderer adapter"
+  )
 };

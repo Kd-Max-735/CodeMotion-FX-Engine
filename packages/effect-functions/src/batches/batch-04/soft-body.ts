@@ -57,11 +57,11 @@ export const SOFT_BODY_DEFINITION: EffectToolDefinition<SoftBodyParams> = {
     additionalProperties: false,
     properties: {
       nodeCount: { type: "integer", minimum: 8, maximum: 48, default: 20 },
-      shapeRadius: { type: "number", minimum: 0.15, maximum: 0.75, default: 0.42 },
-      stiffness: { type: "number", minimum: 5, maximum: 100, default: 42 },
-      pressure: { type: "number", minimum: 0, maximum: 10, default: 3.5 },
-      damping: { type: "number", minimum: 0.1, maximum: 8, default: 2.2 },
-      gravity: { type: "number", minimum: 0, maximum: 20, default: 3 },
+      shapeRadius: { type: "number", minimum: 0.15, maximum: 0.75, multipleOf: 0.01, default: 0.42 },
+      stiffness: { type: "number", minimum: 5, maximum: 100, multipleOf: 0.1, default: 42 },
+      pressure: { type: "number", minimum: 0, maximum: 10, multipleOf: 0.01, default: 3.5 },
+      damping: { type: "number", minimum: 0.1, maximum: 8, multipleOf: 0.01, default: 2.2 },
+      gravity: { type: "number", minimum: 0, maximum: 20, multipleOf: 0.01, default: 3 },
       solverIterations: { type: "integer", minimum: 1, maximum: 6, default: 3 }
     }
   },

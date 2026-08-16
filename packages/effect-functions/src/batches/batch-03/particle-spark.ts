@@ -1,6 +1,15 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { BATCH_03_CPU_FALLBACK, BATCH_03_GPU_BACKEND, CLOSED_SCHEMA, VALID_PARAMS, metadataResult, round, seededUnit } from "./shared.js";
+import {
+  BATCH_03_BACKEND,
+  BATCH_03_REJECT_FALLBACK,
+  CLOSED_SCHEMA,
+  VALID_PARAMS,
+  createParticleBuffer,
+  particleTextureResult,
+  seededUnit,
+  setParticle
+} from "./shared.js";
 
 export interface ParticleSparkParams extends JsonObject {
   count: number;
@@ -39,19 +48,31 @@ export const PARTICLE_SPARK_DEFINITION: EffectToolDefinition<ParticleSparkParams
     { presetId: "spark.grinder", displayName: "砂轮飞溅", params: { ...defaults, count: 680, speed: 1250, spread: 95, lifetime: 0.42, gravity: 900, glow: 2.2, size: 1.5 } }
   ],
   inputSlots: [],
-  primaryBackend: BATCH_03_GPU_BACKEND,
-  fallbackStrategy: { kind: "server-backend", backend: BATCH_03_CPU_FALLBACK, fidelity: "degraded", requiresFinalApproval: true },
+  primaryBackend: BATCH_03_BACKEND,
+  fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params, count: Math.round(params.count) }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
     const age = Math.max(0, context.time);
     const alive = age <= params.lifetime;
-    const sparks = Array.from({ length: 8 }, (_, index) => {
+    const buffer = createParticleBuffer(context, alive ? params.count : 0, "streak");
+    for (let index = 0; index < buffer.count; index += 1) {
       const angle = (seededUnit(context.seed, index * 2) - 0.5) * params.spread * Math.PI / 180;
       const velocity = params.speed * (0.55 + seededUnit(context.seed, index * 2 + 1) * 0.9);
-      return { vx: round(Math.cos(angle) * velocity), vy: round(Math.sin(angle) * velocity + params.gravity * age), brightness: round(alive ? (1 - age / params.lifetime) * params.glow : 0) };
-    });
-    return metadataResult(context, { algorithm: "single_impulse_short_life_burst", seed: context.seed, alive, sparks });
+      const vx = Math.cos(angle) * velocity;
+      const vy = Math.sin(angle) * velocity + params.gravity * age;
+      const glow = Math.min(1, params.glow / 2);
+      setParticle(buffer, index, {
+        x: context.width * 0.5 + vx * age,
+        y: context.height * 0.5 + Math.sin(angle) * velocity * age + params.gravity * age * age * 0.5,
+        vx,
+        vy,
+        size: params.size,
+        opacity: (1 - age / params.lifetime) * glow,
+        color: [255, 190 + seededUnit(context.seed, index + 500) * 65, 72, 255]
+      });
+    }
+    return particleTextureResult(context, buffer);
   }
 };

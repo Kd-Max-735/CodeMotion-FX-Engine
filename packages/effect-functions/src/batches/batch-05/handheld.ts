@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { CAMERA_BACKEND, cameraOutput, effectProgress, round, valid, type Vector3 } from "./helpers.js";
+import { CAMERA_BACKEND, cameraOutput, frameOutput, round, valid, type Vector3 } from "./helpers.js";
 
 export interface HandheldParams extends JsonObject {
   intensity: number;
@@ -27,13 +27,10 @@ export function renderHandheld(context: ServerEffectRenderContext, params: Reado
     y: round(Math.sin(time * 1.53 + phase * 1.2) * rotationAmount),
     z: round(Math.sin(time * 2.43 + phase * 1.9) * rotationAmount * 0.6)
   };
-  return {
-    kind: "metadata" as const,
-    backendId: CAMERA_BACKEND.backendId,
-    output: cameraOutput("deterministic-handheld-camera", position, rotation, 50, effectProgress(context, 1, "linear")),
-    degraded: false,
-    warnings: []
-  };
+  return frameOutput(context, "deterministic_handheld_camera", {
+    sourceSlot: "source_video",
+    ...cameraOutput("deterministic-handheld-camera", position, rotation, 50, 1)
+  });
 }
 
 export const HANDHELD_DEFINITION: EffectToolDefinition<HandheldParams> = {

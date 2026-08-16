@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { CAMERA_BACKEND, cameraOutput, effectProgress, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
+import { CAMERA_BACKEND, cameraOutput, effectProgress, frameOutput, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
 
 export interface OrbitParams extends JsonObject {
   azimuthDegrees: number;
@@ -26,17 +26,13 @@ export function renderOrbit(context: ServerEffectRenderContext, params: Readonly
     y: round(params.azimuthDegrees * progress),
     z: 0
   };
-  return {
-    kind: "metadata" as const,
-    backendId: CAMERA_BACKEND.backendId,
-    output: {
-      ...cameraOutput("camera-target-orbit", position, rotation, params.verticalFovDegrees, progress),
-      orbitRadius: params.radius,
-      targetMode: "bound-camera-target"
-    },
-    degraded: false,
-    warnings: []
-  };
+  return frameOutput(context, "camera_target_orbit", {
+    sourceSlot: "source_video",
+    targetSlot: "camera_target",
+    ...cameraOutput("camera-target-orbit", position, rotation, params.verticalFovDegrees, progress),
+    orbitRadius: params.radius,
+    targetMode: "bound-camera-target"
+  });
 }
 
 export const ORBIT_DEFINITION: EffectToolDefinition<OrbitParams> = {

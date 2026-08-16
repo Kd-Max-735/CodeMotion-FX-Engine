@@ -1,6 +1,16 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { BATCH_03_CPU_FALLBACK, BATCH_03_GPU_BACKEND, CLOSED_SCHEMA, VALID_PARAMS, metadataResult, round, seededSigned } from "./shared.js";
+import {
+  BATCH_03_BACKEND,
+  BATCH_03_REJECT_FALLBACK,
+  CLOSED_SCHEMA,
+  VALID_PARAMS,
+  fractalNoise3d,
+  frameResult,
+  rgbaInput,
+  sampleBilinear,
+  writePixel
+} from "./shared.js";
 
 export interface TurbulentDisplaceParams extends JsonObject {
   amount: number;
@@ -37,25 +47,27 @@ export const TURBULENT_DISPLACE_DEFINITION: EffectToolDefinition<TurbulentDispla
     { presetId: "turbulence.storm", displayName: "强烈风暴", params: { ...defaults, amount: 78, scale: 42, complexity: 5, evolutionSpeed: 1.1, anisotropy: 0.35 } }
   ],
   inputSlots: [{ name: "primary_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定的待置换图像。" }],
-  primaryBackend: BATCH_03_GPU_BACKEND,
-  fallbackStrategy: { kind: "server-backend", backend: BATCH_03_CPU_FALLBACK, fidelity: "degraded", requiresFinalApproval: true },
+  primaryBackend: BATCH_03_BACKEND,
+  fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params, complexity: Math.round(params.complexity) }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
+    const source = rgbaInput(context, "primary_image", true)!;
     const evolution = context.time * params.evolutionSpeed;
-    const fieldSamples = [0, 1, 2, 3].map((stream) => ({
-      dx: round(seededSigned(context.seed, stream * 2) * params.amount * (1 + params.anisotropy)),
-      dy: round(seededSigned(context.seed, stream * 2 + 1) * params.amount * (1 - params.anisotropy))
-    }));
-    return metadataResult(context, {
-      algorithm: "seeded_fractal_vector_field",
-      seed: context.seed,
-      scalePixels: params.scale,
-      octaves: params.complexity,
-      evolution: round(evolution),
-      edgeMode: params.edgeMode,
-      fieldSamples
-    });
+    const output = new Uint8ClampedArray(context.width * context.height * 4);
+    for (let y = 0; y < context.height; y += 1) {
+      for (let x = 0; x < context.width; x += 1) {
+        const fieldX = fractalNoise3d(context.seed, x / params.scale, y / params.scale, evolution,
+          params.complexity, 0);
+        const fieldY = fractalNoise3d(context.seed, x / params.scale, y / params.scale, evolution,
+          params.complexity, 101);
+        const sourceX = x - fieldX * params.amount * (1 + params.anisotropy);
+        const sourceY = y - fieldY * params.amount * (1 - params.anisotropy);
+        writePixel(output, (y * context.width + x) * 4,
+          sampleBilinear(source, sourceX, sourceY, params.edgeMode));
+      }
+    }
+    return frameResult(context, output);
   }
 };

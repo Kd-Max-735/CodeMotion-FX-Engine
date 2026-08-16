@@ -83,11 +83,20 @@ export function metadataResult<Output>(output: Output): EffectRenderResult<Outpu
 }
 
 export interface AudioAnalysisBinding {
+  readonly version: "audio-analysis-v1";
   readonly frequencyBins?: readonly number[];
   readonly previousFrequencyBins?: readonly number[];
   readonly waveformSamples?: readonly number[];
   readonly previousWaveformSamples?: readonly number[];
 }
+
+const AUDIO_ANALYSIS_FIELDS = new Set([
+  "version",
+  "frequencyBins",
+  "previousFrequencyBins",
+  "waveformSamples",
+  "previousWaveformSamples"
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -102,14 +111,18 @@ export function audioSeries(
   required = true
 ): readonly number[] {
   const authorized = context.inputs.audio_analysis;
-  if (authorized === undefined || Array.isArray(authorized)) {
+  if (authorized === undefined || Array.isArray(authorized) || !isRecord(authorized)
+    || authorized.slot !== "audio_analysis" || authorized.kind !== "audio"
+    || authorized.locked !== true || authorized.tenantId !== context.tenantId
+    || authorized.userId !== context.userId) {
     if (!required) return [];
     throw new TypeError("audio_analysis must be a single server-authorized analysis binding.");
   }
-  const binding = (authorized as { readonly binding: unknown }).binding;
-  if (!isRecord(binding)) {
+  const binding = authorized.binding;
+  if (!isRecord(binding) || binding.version !== "audio-analysis-v1"
+    || Object.keys(binding).some((key) => !AUDIO_ANALYSIS_FIELDS.has(key))) {
     if (!required) return [];
-    throw new TypeError("audio_analysis must contain a server-created analysis object.");
+    throw new TypeError("audio_analysis must contain an exact versioned server analysis object.");
   }
   const value = binding[field];
   if (value === undefined && !required) return [];

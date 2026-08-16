@@ -30,6 +30,12 @@
 | `duration` | 是 | 0.1–30 秒 | 1.2 | 完成滚动所需时间 |
 | `easing` | 否 | `linear` / `ease_out` / `smooth` | `ease_out` | 数值推进节奏 |
 
+## 服务器输入
+
+| inputSlot | kind | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `number_range` | `data` | 是 | 服务端校验并锁定的有限起止数值 |
+
 ## 选择策略
 
 “更快”降低 `duration`；“更平滑”选 `smooth` 并适度延长时长；“匀速”选 `linear`；“快速到位”选 `ease_out`；需要一位或两位精度时选对应小数格式。

@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { REJECT_FALLBACK, SERVER_GPU_BACKEND, frameResult, round, timedProgress, valid, type Easing } from "./common.js";
+import { REJECT_FALLBACK, SERVER_GPU_BACKEND, blockedRender, valid, type Easing } from "./common.js";
 
 export interface ImageDepthParallaxParams extends JsonObject {
   startTime: number;
@@ -63,21 +63,8 @@ export const IMAGE_DEPTH_PARALLAX_DEFINITION: EffectToolDefinition<ImageDepthPar
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: (context, params) => {
-    const progress = timedProgress(context.time, params.startTime, params.duration, params.easing);
-    const centered = progress * 2 - 1;
-    return frameResult(SERVER_GPU_BACKEND.backendId, {
-      operation: "depth_displaced_mesh",
-      colorSlot: "source_image",
-      depthSlot: "source_depth",
-      mesh: [params.meshDensity, Math.max(16, Math.round(params.meshDensity * context.height / context.width))],
-      camera: {
-        x: round(params.motionX * centered),
-        y: round(params.motionY * centered),
-        z: params.cameraDistance
-      },
-      displacement: params.depthScale,
-      edgeExpansion: params.edgeExpansion
-    });
-  }
+  render: () => blockedRender(
+    "image_depth_parallax",
+    "an aligned depth-map resolver and depth-displaced server frame renderer adapter"
+  )
 };

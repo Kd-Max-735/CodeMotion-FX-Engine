@@ -44,6 +44,9 @@ import {
 const MAX_BODY_BYTES = 64 * 1024;
 const RESOURCE_ID = /^[a-z][a-z0-9_-]{7,127}$/u;
 const EXISTING_BACKEND = "effect-functions-existing-cpu-v1";
+const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
+const HAN_TEXT = /\p{Script=Han}/u;
+const SENSITIVE_PATH = /(?:https?:\/\/|file:\/\/|[a-z]:\\|\/(?:home|tmp|var|etc|users)\/)/iu;
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
 export interface EffectToolPrincipal {
@@ -88,6 +91,21 @@ export interface EffectToolListItem {
   readonly toolName: string;
   readonly displayName: string;
   readonly category: string;
+}
+
+export interface EffectToolInputRequirementView {
+  readonly name: string;
+  readonly kind: EffectInputSlotDefinition["kind"];
+  readonly required: boolean;
+  readonly cardinality: EffectInputSlotDefinition["cardinality"];
+  readonly description: string;
+  readonly acceptedMimeTypes: readonly string[];
+  readonly acceptsUploadedImage: boolean;
+}
+
+export interface EffectToolCatalogItem extends EffectToolListItem {
+  readonly configured: boolean;
+  readonly inputRequirements: readonly EffectToolInputRequirementView[];
 }
 
 interface SafeRenderResult {
@@ -144,9 +162,53 @@ export type EffectToolTurnView = Readonly<{
   execution: EffectToolVideoExecutionView;
 }>;
 
+export interface SelectedEffectToolExecutionInputView {
+  readonly authorizedInputs: readonly Readonly<{
+    name: string;
+    kind: EffectInputSlotDefinition["kind"];
+    count: number;
+  }>[];
+  readonly effectParams: Readonly<Record<string, unknown>>;
+  readonly output: {
+    readonly durationSeconds: number;
+    readonly fps: number;
+    readonly format: "mp4";
+  };
+}
+
+export interface SelectedEffectToolNativeCallView {
+  readonly id: string;
+  readonly type: "function";
+  readonly function: {
+    readonly name: string;
+    readonly arguments: Readonly<Record<string, unknown>>;
+  };
+}
+
+export type SelectedEffectToolTurnView = Readonly<{
+  kind: "message";
+  tool: EffectToolListItem;
+  reasoningContent: string;
+  content: string;
+}> | Readonly<{
+  kind: "tool_call";
+  tool: EffectToolListItem;
+  reasoningContent: string;
+  content: string;
+  toolCall: SelectedEffectToolNativeCallView;
+  executionInput: SelectedEffectToolExecutionInputView;
+  execution: EffectToolVideoExecutionView;
+}>;
+
 interface StoredExecution {
   readonly view: EffectToolExecutionView;
   readonly result: EffectRenderResult;
+}
+
+class MissingEffectToolInputError extends TypeError {
+  constructor(readonly requirements: readonly EffectToolInputRequirementView[]) {
+    super(`Required input slots are missing: ${requirements.map((item) => item.name).join(", ")}.`);
+  }
 }
 
 function ownerOf(principal: EffectToolPrincipal): OwnerContext {
@@ -170,6 +232,102 @@ function exactKeys(value: Record<string, unknown>, allowed: readonly string[], l
   if (Object.keys(value).some((key) => !accepted.has(key))) {
     throw new TypeError(`${label} contains an unknown field.`);
   }
+}
+
+function safeChineseBody(value: string, inputIds: EffectToolInputIds = {}): string {
+  const content = value.trim();
+  if (content.length === 0 || !HAN_TEXT.test(content)) {
+    throw new ProviderError("provider_response", "Ark did not return a non-empty Chinese response.");
+  }
+  const ids = Object.values(inputIds).flatMap((item) => typeof item === "string" ? [item] : [...item]);
+  if (SENSITIVE_PATH.test(content)
+    || /\b(?:asset|resource|file)_[a-z0-9_-]{7,}\b/iu.test(content)
+    || ids.some((id) => content.includes(id))) {
+    throw new ProviderError("security", "Ark final response contained protected resource information.");
+  }
+  return content;
+}
+
+function validateSelectedInputIds(
+  definition: EffectToolDefinition,
+  inputIds: EffectToolInputIds,
+  requireRequired = true
+): EffectToolInputIds {
+  const raw = exactObject(inputIds, "inputIds");
+  const declared = new Map(definition.inputSlots.map((slot) => [slot.name, slot]));
+  if (Object.keys(raw).some((name) => !declared.has(name))) {
+    throw new TypeError("inputIds contains an unknown slot.");
+  }
+  const missing = definition.inputSlots
+    .filter((slot) => slot.required && raw[slot.name] === undefined)
+    .map((slot) => requirementView(definition, slot));
+  if (requireRequired && missing.length > 0) throw new MissingEffectToolInputError(missing);
+  const normalized: Record<string, string | readonly string[]> = {};
+  for (const [name, value] of Object.entries(raw)) {
+    const slot = declared.get(name)!;
+    if (slot.cardinality === "one") {
+      if (typeof value !== "string" || !RESOURCE_ID.test(value)) {
+        throw new TypeError(`${name} requires one safe opaque resource ID.`);
+      }
+      normalized[name] = value;
+      continue;
+    }
+    if (!Array.isArray(value) || value.length === 0
+      || value.some((id) => typeof id !== "string" || !RESOURCE_ID.test(id))) {
+      throw new TypeError(`${name} requires one or more safe opaque resource IDs.`);
+    }
+    normalized[name] = Object.freeze([...value] as string[]);
+  }
+  const ids = Object.values(normalized).flatMap((value) => typeof value === "string" ? [value] : [...value]);
+  if (new Set(ids).size !== ids.length) {
+    throw new TypeError("Each input slot requires a distinct authorized resource.");
+  }
+  return Object.freeze(normalized);
+}
+
+function authorizedInputSummary(
+  definition: EffectToolDefinition,
+  inputs: AuthorizedEffectInputs
+): SelectedEffectToolExecutionInputView["authorizedInputs"] {
+  return Object.freeze(definition.inputSlots.flatMap((slot) => {
+    const value = inputs[slot.name];
+    if (value === undefined) return [];
+    return [Object.freeze({
+      name: slot.name,
+      kind: slot.kind,
+      count: Array.isArray(value) ? value.length : 1
+    })];
+  }));
+}
+
+function acceptsUploadedImage(
+  _definition: EffectToolDefinition,
+  _slot: EffectInputSlotDefinition
+): boolean {
+  return true;
+}
+
+function requirementView(
+  definition: EffectToolDefinition,
+  slot: EffectInputSlotDefinition
+): EffectToolInputRequirementView {
+  return Object.freeze({
+    name: slot.name,
+    kind: slot.kind,
+    required: slot.required,
+    cardinality: slot.cardinality,
+    description: slot.description,
+    acceptedMimeTypes: Object.freeze([...(slot.acceptedMimeTypes ?? [])]),
+    acceptsUploadedImage: acceptsUploadedImage(definition, slot)
+  });
+}
+
+function toolIdentity(definition: EffectToolDefinition): EffectToolListItem {
+  return Object.freeze({
+    toolName: definition.toolName,
+    displayName: definition.displayName,
+    category: definition.category
+  });
 }
 
 function nativeConversationArguments(value: unknown): {
@@ -269,7 +427,11 @@ function luminanceValues(data: Uint8Array): number[] {
   return values;
 }
 
-function audioBinding(pcm: Uint8Array, duration: number): Record<string, unknown> {
+function audioBinding(
+  pcm: Uint8Array,
+  duration: number,
+  definition?: EffectToolDefinition
+): Record<string, unknown> {
   const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
   const samples: number[] = [];
   let square = 0;
@@ -281,6 +443,18 @@ function audioBinding(pcm: Uint8Array, duration: number): Record<string, unknown
     peak = Math.max(peak, Math.abs(value));
   }
   const rms = samples.length === 0 ? 0 : Math.min(1, Math.sqrt(square / samples.length));
+  if (definition?.toolName === "spectrum_bars" || definition?.toolName === "waveform") {
+    const series = samples.slice(0, 8_192);
+    const waveformSamples = series.length > 0 ? series : [0];
+    const frequencyBins = waveformSamples.map((value) => Math.min(1, Math.abs(value)));
+    return {
+      version: "audio-analysis-v1",
+      frequencyBins,
+      previousFrequencyBins: frequencyBins.map((value) => value * 0.92),
+      waveformSamples,
+      previousWaveformSamples: waveformSamples.map((value) => value * 0.92)
+    };
+  }
   return {
     version: "audio-analysis-v1",
     duration,
@@ -296,6 +470,186 @@ function audioBinding(pcm: Uint8Array, duration: number): Record<string, unknown
       onsetStrength: 0
     }]
   };
+}
+
+function previewAudioBinding(definition: EffectToolDefinition, render: EffectToolRenderSettings) {
+  const sampleCount = 64;
+  const frequencyBins = Array.from({ length: sampleCount }, (_, index) =>
+    Math.max(0, Math.min(1, 0.2 + 0.55 * Math.abs(Math.sin(index * 0.31 + render.time * 2.4)))));
+  const waveformSamples = Array.from({ length: sampleCount }, (_, index) =>
+    Math.sin(index / sampleCount * Math.PI * 4 + render.time * Math.PI * 2) * 0.62);
+  if (definition.toolName === "spectrum_bars" || definition.toolName === "waveform") {
+    return {
+      version: "audio-analysis-v1",
+      frequencyBins,
+      previousFrequencyBins: frequencyBins.map((value) => value * 0.92),
+      waveformSamples,
+      previousWaveformSamples: waveformSamples.map((value) => value * 0.92)
+    };
+  }
+  const duration = 30;
+  const frames = Array.from({ length: 301 }, (_, index) => {
+    const time = index / 10;
+    const energy = Math.max(0, Math.min(1,
+      0.46 + Math.sin(time * Math.PI * 2.4) * 0.26 + Math.sin(time * Math.PI * 5.1) * 0.12));
+    return {
+      time,
+      rms: energy * 0.72,
+      peak: energy,
+      bass: energy,
+      mid: Math.max(0, energy * 0.82),
+      vocal: Math.max(0, energy * 0.76),
+      high: Math.max(0, energy * 0.64),
+      beatConfidence: energy > 0.68 ? 0.9 : 0.2,
+      onsetStrength: energy > 0.72 ? 0.85 : 0.12
+    };
+  });
+  return {
+    version: "audio-analysis-v1",
+    duration,
+    frames
+  };
+}
+
+function previewColor(pixels: Uint8Array): readonly [number, number, number, number] {
+  const pixelCount = Math.max(1, pixels.length / 4);
+  const step = Math.max(1, Math.floor(pixelCount / 128));
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let alpha = 0;
+  let count = 0;
+  for (let pixel = 0; pixel < pixelCount; pixel += step) {
+    const offset = pixel * 4;
+    red += pixels[offset]!;
+    green += pixels[offset + 1]!;
+    blue += pixels[offset + 2]!;
+    alpha += pixels[offset + 3]!;
+    count += 1;
+  }
+  return [red / count / 255, green / count / 255, blue / count / 255, alpha / count / 255];
+}
+
+function derivedPreviewPixels(
+  source: Uint8Array,
+  slot: EffectInputSlotDefinition,
+  render: EffectToolRenderSettings
+): Uint8Array {
+  const output = new Uint8Array(source);
+  if (slot.kind === "mask" || /mask|matte/u.test(slot.name)) {
+    for (let offset = 0; offset < output.length; offset += 4) {
+      const luminance = Math.round(output[offset]! * 0.2126
+        + output[offset + 1]! * 0.7152 + output[offset + 2]! * 0.0722);
+      output[offset] = luminance;
+      output[offset + 1] = luminance;
+      output[offset + 2] = luminance;
+      output[offset + 3] = luminance;
+    }
+    return output;
+  }
+  if (/target|\bto_|overlay|background/u.test(slot.name)) {
+    const rowBytes = render.width * 4;
+    for (let y = 0; y < render.height; y += 1) {
+      const row = y * rowBytes;
+      for (let x = 0; x < Math.floor(render.width / 2); x += 1) {
+        const left = row + x * 4;
+        const right = row + (render.width - 1 - x) * 4;
+        for (let channel = 0; channel < 4; channel += 1) {
+          const temporary = output[left + channel]!;
+          output[left + channel] = output[right + channel]!;
+          output[right + channel] = temporary;
+        }
+      }
+    }
+    for (let offset = 0; offset < output.length; offset += 4) {
+      output[offset] = Math.min(255, Math.round(output[offset]! * 0.72 + 38));
+      output[offset + 1] = Math.min(255, Math.round(output[offset + 1]! * 0.86 + 18));
+      output[offset + 2] = Math.min(255, Math.round(output[offset + 2]! * 1.08 + 12));
+    }
+  } else if (/previous|history/u.test(slot.name)) {
+    const snapshot = new Uint8Array(output);
+    for (let y = 0; y < render.height; y += 1) {
+      for (let x = 0; x < render.width; x += 1) {
+        const sourceX = Math.max(0, x - 4);
+        const sourceOffset = (y * render.width + sourceX) * 4;
+        const targetOffset = (y * render.width + x) * 4;
+        output[targetOffset] = snapshot[sourceOffset]!;
+        output[targetOffset + 1] = snapshot[sourceOffset + 1]!;
+        output[targetOffset + 2] = snapshot[sourceOffset + 2]!;
+        output[targetOffset + 3] = snapshot[sourceOffset + 3]!;
+      }
+    }
+  }
+  return output;
+}
+
+function previewPath(render: EffectToolRenderSettings) {
+  return [
+    { x: render.width * 0.12, y: render.height * 0.68 },
+    { x: render.width * 0.32, y: render.height * 0.28 },
+    { x: render.width * 0.58, y: render.height * 0.72 },
+    { x: render.width * 0.86, y: render.height * 0.34 }
+  ];
+}
+
+function previewDataBinding(
+  definition: EffectToolDefinition,
+  slot: EffectInputSlotDefinition,
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings
+): unknown {
+  const sample = previewColor(pixels);
+  const path = previewPath(render);
+  switch (slot.name) {
+    case "audio_analysis": return previewAudioBinding(definition, render);
+    case "chart_data": return { version: "validated-chart-v1", series: [
+      { label: "A", value: 28 }, { label: "B", value: 62 }, { label: "C", value: 44 }, { label: "D", value: 86 }
+    ] };
+    case "number_range": return { version: "validated-number-v1", from: 0, to: 100 };
+    case "validated_binding": return {
+      version: "validated-live-binding-v1", value: 0.72, previousValue: 0.48,
+      minimum: 0, maximum: 1, targetHandle: "preview-layer", targetProperty: "opacity"
+    };
+    case "target_effect": return { version: "effect-target-v1", handle: "preview-effect" };
+    case "text_layer": return { version: "text-layer-v1", layerHandle: "preview-text" };
+    case "text_font": return { version: "font-binding-v1", fontHandle: "preview-font" };
+    case "target_layer":
+      return definition.toolName === "glass" || definition.toolName === "hologram" || definition.toolName === "metal"
+        ? { version: "material-surface-v1", baseColor: sample, facing: 0.72, luminance: (sample[0] + sample[1] + sample[2]) / 3 }
+        : { version: "pixel-layer-v1", sample };
+    case "backdrop_layer":
+    case "base_layer": return { version: "pixel-layer-v1", sample };
+    case "camera_target": return { x: 0, y: 0, z: 0 };
+    case "motion_path":
+    case "stroke_path": return definition.primaryBackend.backendId === EXISTING_BACKEND
+      ? { path: "M 48 240 C 180 48 420 312 592 120" }
+      : { points: path, closed: false };
+    case "morph_paths": return {
+      fromPath: "M 160 72 L 480 72 L 480 288 L 160 288 Z",
+      toPath: "M 320 48 L 560 180 L 320 312 L 80 180 Z"
+    };
+    case "stroke_plan": return { strokes: [{ points: path, closed: false }] };
+    case "vector_field": return {
+      columns: 2, rows: 2,
+      vectors: [{ x: 0.4, y: -0.2 }, { x: 0.2, y: 0.4 }, { x: -0.3, y: 0.2 }, { x: -0.2, y: -0.4 }]
+    };
+    case "pins": return { indices: [0, 1] };
+    case "environment_texture":
+    case "overlay_texture": return {
+      version: "texture-sample-v1", width: render.width, height: render.height, sample
+    };
+    case "depth_map": return definition.toolName === "hologram"
+      ? { version: "depth-sample-v1", depth: 0.58 }
+      : { width: render.width, height: render.height, data: luminanceValues(pixels) };
+    default:
+      if (slot.kind === "font") return { version: "font-binding-v1", fontHandle: "preview-font" };
+      if (slot.kind === "model") return { version: "model-binding-v1", modelHandle: "preview-model" };
+      if (/path|shape|terminals|contour/u.test(slot.name)) return { points: path, closed: /shape|contour/u.test(slot.name) };
+      if (/mask/u.test(slot.name)) return {
+        width: render.width, height: render.height, values: luminanceValues(pixels)
+      };
+      return { version: "preview-data-v1", width: render.width, height: render.height, sample };
+  }
 }
 
 function legacyRasterBinding(
@@ -360,6 +714,11 @@ function legacyRasterBinding(
   };
 }
 
+interface EffectToolResolveCache {
+  readonly media: Map<string, Promise<VerifiedStoredMedia>>;
+  readonly pixels: Map<string, Promise<Uint8Array>>;
+}
+
 export class TenantMediaEffectToolInputResolver implements EffectToolInputResolver {
   constructor(
     private readonly media: TenantMediaStore,
@@ -380,10 +739,18 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
       throw new TypeError("inputIds contains an unknown slot.");
     }
     const output: Record<string, AuthorizedEffectInput | readonly AuthorizedEffectInput[]> = {};
+    const cache: EffectToolResolveCache = { media: new Map(), pixels: new Map() };
+    const previewResourceId = Object.values(raw).flatMap((value) =>
+      typeof value === "string" ? [value] : Array.isArray(value) ? value : [])
+      .find((value): value is string => typeof value === "string" && RESOURCE_ID.test(value));
     for (const slot of definition.inputSlots) {
-      const value = raw[slot.name];
+      const value = raw[slot.name] ?? (slot.required && previewResourceId !== undefined
+        ? slot.cardinality === "many" ? [previewResourceId] : previewResourceId
+        : undefined);
       if (value === undefined) {
-        if (slot.required) throw new TypeError(`Required input slot ${slot.name} is missing.`);
+        if (slot.required) {
+          throw new MissingEffectToolInputError([requirementView(definition, slot)]);
+        }
         continue;
       }
       const ids = slot.cardinality === "many" ? value : [value];
@@ -399,7 +766,7 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
         tenantId: principal.tenantId,
         userId: principal.userId,
         locked: true as const,
-        binding: await this.binding(owner, definition, slot, id, render, signal)
+        binding: await this.binding(owner, definition, slot, id, render, signal, cache)
       })));
       output[slot.name] = slot.cardinality === "many" ? Object.freeze(bindings) : bindings[0]!;
     }
@@ -412,38 +779,51 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     slot: EffectInputSlotDefinition,
     resourceId: string,
     render: EffectToolRenderSettings,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    cache?: EffectToolResolveCache
   ): Promise<unknown> {
     const existing = definition.primaryBackend.backendId === EXISTING_BACKEND;
     const mediaKind = slot.kind === "image" || slot.kind === "video" || slot.kind === "audio"
       || slot.kind === "mask" || slot.kind === "depth-map" || slot.kind === "texture" || slot.kind === "lut"
       || existing && ["source_layer", "source_frame", "target_frame", "overlay_layer",
         "displacement_map", "mask_layer", "matte_layer", "brush_texture"].includes(slot.name);
-    if (!mediaKind) {
-      if (this.serverResources === undefined) {
-        throw new TypeError(`No server resource resolver is configured for ${slot.kind}.`);
-      }
+    if (!mediaKind && this.serverResources !== undefined) {
       return this.serverResources.resolve(owner, definition, slot, resourceId, render, signal);
     }
-    const media = await this.media.resolve(owner, resourceId, signal);
-    if (slot.kind === "audio") {
-      if (media.asset.type !== "audio") throw new TypeError(`${slot.name} requires authorized audio.`);
+    let mediaPromise = cache?.media.get(resourceId);
+    if (mediaPromise === undefined) {
+      mediaPromise = this.media.resolve(owner, resourceId, signal);
+      cache?.media.set(resourceId, mediaPromise);
+    }
+    const media = await mediaPromise;
+    if (slot.kind === "audio" && media.asset.type === "audio") {
       const pcm = await decodeAudioPreview(media, 0.1, signal === undefined ? {} : { signal });
-      return audioBinding(pcm, Math.max(0.1, Number(media.asset.metadata.duration ?? 0.1)));
+      return audioBinding(
+        pcm,
+        Math.max(0.1, Number(media.asset.metadata.duration ?? 0.1)),
+        definition
+      );
     }
     const kind = visualKind(media.asset);
-    if (kind === undefined || slot.kind === "video" && kind !== "video"
-      || slot.kind === "image" && kind !== "image") {
+    if (kind === undefined) {
       throw new TypeError(`${slot.name} requires an authorized ${slot.kind} visual resource.`);
     }
-    const pixels = await decodeMediaFrame(media, {
-      frame: Math.floor(render.time * render.fps),
-      time: render.time,
-      deltaTime: 1 / render.fps,
-      fps: render.fps,
-      width: render.width,
-      height: render.height
-    }, signal === undefined ? {} : { signal });
+    const pixelCacheKey = JSON.stringify([
+      resourceId, render.time, render.fps, render.width, render.height
+    ]);
+    let pixelsPromise = cache?.pixels.get(pixelCacheKey);
+    if (pixelsPromise === undefined) {
+      pixelsPromise = decodeMediaFrame(media, {
+        frame: Math.floor(render.time * render.fps),
+        time: render.time,
+        deltaTime: 1 / render.fps,
+        fps: render.fps,
+        width: render.width,
+        height: render.height
+      }, signal === undefined ? {} : { signal });
+      cache?.pixels.set(pixelCacheKey, pixelsPromise);
+    }
+    const pixels = derivedPreviewPixels(await pixelsPromise, slot, render);
     if (existing) {
       if (slot.name === "brush_texture") {
         return {
@@ -456,10 +836,17 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
           }
         };
       }
+      if (slot.name === "motion_path" || slot.name === "stroke_path" || slot.name === "morph_paths") {
+        return previewDataBinding(definition, slot, pixels, render);
+      }
       return legacyRasterBinding(definition, slot, media, pixels, render);
     }
+    if (!mediaKind || slot.kind === "audio" || slot.kind === "font" || slot.kind === "model"
+      || slot.kind === "data") {
+      return previewDataBinding(definition, slot, pixels, render);
+    }
     if (slot.kind === "mask") {
-      const values = alphaValues(pixels);
+      const values = luminanceValues(pixels);
       return { width: render.width, height: render.height, data: values, values };
     }
     if (slot.kind === "depth-map") {
@@ -477,7 +864,10 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
         sample: [pixels[0]! / 255, pixels[1]! / 255, pixels[2]! / 255, pixels[3]! / 255]
       };
     }
-    return { width: render.width, height: render.height, data: pixels };
+    if (slot.kind === "video" || slot.kind === "image") {
+      return { version: "rgba8-frame-v1", width: render.width, height: render.height, data: pixels };
+    }
+    return previewDataBinding(definition, slot, pixels, render);
   }
 }
 
@@ -497,10 +887,15 @@ export class EffectToolService {
   get configured(): boolean { return this.provider !== undefined; }
 
   list(): readonly EffectToolListItem[] {
+    return Object.freeze(this.registry.list().map(toolIdentity));
+  }
+
+  catalog(): readonly EffectToolCatalogItem[] {
     return Object.freeze(this.registry.list().map((definition) => Object.freeze({
-      toolName: definition.toolName,
-      displayName: definition.displayName,
-      category: definition.category
+      ...toolIdentity(definition),
+      configured: this.configured,
+      inputRequirements: Object.freeze(definition.inputSlots.map((slot) =>
+        requirementView(definition, slot)))
     })));
   }
 
@@ -637,8 +1032,11 @@ export class EffectToolService {
         return Object.freeze({
           kind: "message",
           reasoningContent: modelTurn.reasoningContent,
-          content: modelTurn.content
+          content: safeChineseBody(modelTurn.content)
         });
+      }
+      if (modelTurn.toolCall.name !== definition.toolName) {
+        throw new ProviderError("security", "Ark attempted an unexpected tool call.");
       }
       const nativeArguments = nativeConversationArguments(modelTurn.toolCall.arguments);
       const envelope = validateAndNormalizeEffectEnvelope(definition, definition.toolName, {
@@ -685,7 +1083,7 @@ export class EffectToolService {
         kind: "tool_call",
         reasoningContent: [modelTurn.reasoningContent, finalTurn.reasoningContent]
           .filter((value) => value.trim().length > 0).join("\n\n"),
-        content: finalTurn.content,
+        content: safeChineseBody(finalTurn.content),
         toolCall: Object.freeze({
           id: modelTurn.toolCall.id,
           type: "function",
@@ -696,6 +1094,133 @@ export class EffectToolService {
         }),
         executionInput: Object.freeze({
           source_image: sourceImage,
+          effectParams: structuredClone(envelope.data),
+          output: Object.freeze({
+            durationSeconds: execution.video.durationSeconds,
+            fps: execution.video.fps,
+            format: "mp4" as const
+          })
+        }),
+        execution
+      });
+    } finally {
+      this.controllers.delete(controller);
+    }
+  }
+
+  async selectedTurn(
+    principal: EffectToolPrincipal,
+    request: {
+      readonly toolName: string;
+      readonly prompt: string;
+      readonly inputIds: EffectToolInputIds;
+    }
+  ): Promise<SelectedEffectToolTurnView> {
+    if (this.closing) throw new ProviderError("cancelled", "Effect tool service is closing.");
+    const owner = ownerOf(principal);
+    const definition = this.selected(request.toolName);
+    const identity = toolIdentity(definition);
+    if (typeof request.prompt !== "string" || request.prompt.trim().length === 0
+      || request.prompt.length > 10_000) {
+      throw new TypeError("prompt is required and must not exceed 10000 characters.");
+    }
+    validateSelectedInputIds(definition, request.inputIds, false);
+    const controller = new AbortController();
+    this.controllers.add(controller);
+    try {
+      const fieldSpec = await loadEffectFieldSpec(definition.toolName);
+      const provider = conversationProvider(this.provider);
+      const providerRequest = {
+        requestId: randomUUID(),
+        tenantId: principal.tenantId,
+        userId: principal.userId,
+        toolName: definition.toolName,
+        prompt: request.prompt,
+        fieldSpec,
+        parameterSchema: definition.parameterSchema,
+        signal: controller.signal
+      } as const;
+      const modelTurn = await provider.respond(providerRequest);
+      if (modelTurn.toolCall === undefined) {
+        return Object.freeze({
+          kind: "message",
+          tool: identity,
+          reasoningContent: modelTurn.reasoningContent,
+          content: safeChineseBody(modelTurn.content)
+        });
+      }
+      if (modelTurn.toolCall.name !== definition.toolName) {
+        throw new ProviderError("security", "Ark attempted an unexpected tool call.");
+      }
+      const nativeArguments = nativeConversationArguments(modelTurn.toolCall.arguments);
+      const envelope = validateAndNormalizeEffectEnvelope(definition, definition.toolName, {
+        type: definition.toolName,
+        data: nativeArguments.effectParams
+      });
+      const rawInputIds = validateSelectedInputIds(definition, request.inputIds, false);
+      const render = renderSettings(undefined);
+      const authorizedInputs = await this.inputs.resolve(
+        principal,
+        definition,
+        rawInputIds,
+        render,
+        controller.signal
+      );
+      if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
+      const assetIds = Object.values(rawInputIds).flatMap((value) => typeof value === "string" ? [value] : [...value]);
+      const sourceImageId = Object.values(rawInputIds).flatMap((value) =>
+        typeof value === "string" ? [value] : [...value])[0];
+      const execution = await this.nativeVideos.createPrepared(
+        owner,
+        definition,
+        envelope,
+        authorizedInputs,
+        assetIds,
+        20260814,
+        nativeArguments.durationSeconds,
+        render.width,
+        render.height,
+        sourceImageId
+      );
+      const normalizedArguments = Object.freeze({
+        effectParams: structuredClone(envelope.data),
+        output: Object.freeze({ durationSeconds: nativeArguments.durationSeconds })
+      });
+      const normalizedCall = Object.freeze({
+        id: modelTurn.toolCall.id,
+        name: definition.toolName,
+        arguments: normalizedArguments
+      });
+      const finalTurn = await provider.finalize(providerRequest, normalizedCall, Object.freeze({
+        status: execution.status,
+        output: Object.freeze({
+          format: execution.video.format,
+          mime: execution.video.mime,
+          durationSeconds: execution.video.durationSeconds,
+          fps: execution.video.fps,
+          width: execution.video.width,
+          height: execution.video.height
+        })
+      }));
+      if (finalTurn.toolCall !== undefined) {
+        throw new ProviderError("security", "Ark attempted another tool call after execution.");
+      }
+      return Object.freeze({
+        kind: "tool_call",
+        tool: identity,
+        reasoningContent: [modelTurn.reasoningContent, finalTurn.reasoningContent]
+          .filter((value) => value.trim().length > 0).join("\n\n"),
+        content: safeChineseBody(finalTurn.content, rawInputIds),
+        toolCall: Object.freeze({
+          id: modelTurn.toolCall.id,
+          type: "function",
+          function: Object.freeze({
+            name: definition.toolName,
+            arguments: structuredClone(normalizedArguments)
+          })
+        }),
+        executionInput: Object.freeze({
+          authorizedInputs: authorizedInputSummary(definition, authorizedInputs),
           effectParams: structuredClone(envelope.data),
           output: Object.freeze({
             durationSeconds: execution.video.durationSeconds,
@@ -757,7 +1282,9 @@ export class EffectToolService {
   }
 
   private selected(toolName: string): EffectToolDefinition {
-    if (typeof toolName !== "string") throw new TypeError("toolName is required.");
+    if (typeof toolName !== "string" || !TOOL_NAME.test(toolName)) {
+      throw new TypeError("toolName must be an exact snake_case tool name.");
+    }
     const definition = this.registry.getByToolName(toolName);
     if (definition === undefined) throw new RangeError("Unknown effect tool name.");
     return definition;
@@ -878,8 +1405,15 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   response.end(JSON.stringify(value));
 }
 
-function safeError(error: unknown): { status: number; code: string } {
+function safeError(error: unknown): {
+  status: number;
+  code: string;
+  requirements?: readonly EffectToolInputRequirementView[];
+} {
   if (error instanceof AuthHttpError) return { status: error.status, code: error.code };
+  if (error instanceof MissingEffectToolInputError) {
+    return { status: 422, code: "MISSING_REQUIRED_INPUTS", requirements: error.requirements };
+  }
   if (error instanceof EffectToolContractError) return { status: 422, code: error.code };
   if (error instanceof ProviderError) {
     return {
@@ -964,13 +1498,19 @@ export function createEffectToolApi(
     const executions = url.pathname === "/api/effect-tools/v1/executions";
     const nativeTool = url.pathname === "/api/effect-tools/v2";
     const nativeTurns = url.pathname === "/api/effect-tools/v2/turns";
+    const selectedTools = url.pathname === "/api/effect-tools/v3";
+    const selectedTurns = url.pathname === "/api/effect-tools/v3/turns";
     const execution = /^\/api\/effect-tools\/v1\/executions\/([^/]+)$/u.exec(url.pathname);
     const nativeExecution = /^\/api\/effect-tools\/v2\/executions\/([^/]+)$/u.exec(url.pathname);
     const nativeVideo = /^\/api\/effect-tools\/v2\/executions\/([^/]+)\/video$/u.exec(url.pathname);
     const nativeDownload = /^\/api\/effect-tools\/v2\/executions\/([^/]+)\/download$/u.exec(url.pathname);
-    const matched = request.method === "GET" && (collection || nativeTool || execution !== null)
-      || request.method === "GET" && (nativeExecution !== null || nativeVideo !== null || nativeDownload !== null)
-      || request.method === "POST" && (parameters || executions || nativeTurns);
+    const selectedExecution = /^\/api\/effect-tools\/v3\/executions\/([^/]+)$/u.exec(url.pathname);
+    const selectedVideo = /^\/api\/effect-tools\/v3\/executions\/([^/]+)\/video$/u.exec(url.pathname);
+    const selectedDownload = /^\/api\/effect-tools\/v3\/executions\/([^/]+)\/download$/u.exec(url.pathname);
+    const matched = request.method === "GET" && (collection || nativeTool || selectedTools || execution !== null)
+      || request.method === "GET" && (nativeExecution !== null || nativeVideo !== null || nativeDownload !== null
+        || selectedExecution !== null || selectedVideo !== null || selectedDownload !== null)
+      || request.method === "POST" && (parameters || executions || nativeTurns || selectedTurns);
     if (!matched) return next();
     try {
       if (auth === undefined) throw new AuthHttpError(401, "UNAUTHENTICATED");
@@ -982,15 +1522,21 @@ export function createEffectToolApi(
         await auth.authorize(request, response, "ai:plan", false);
         return sendJson(response, 200, { tool: service.nativeTool() });
       }
-      if (request.method === "GET" && nativeExecution) {
+      if (request.method === "GET" && selectedTools) {
+        await auth.authorize(request, response, "ai:plan", false);
+        const tools = service.catalog();
+        return sendJson(response, 200, { tools, count: tools.length });
+      }
+      if (request.method === "GET" && (nativeExecution || selectedExecution)) {
         const principal = await auth.authorize(request, response, "project:preview", false);
+        const match = nativeExecution ?? selectedExecution!;
         return sendJson(response, 200, {
-          execution: service.videoExecution(principal, decodeURIComponent(nativeExecution[1]!))
+          execution: service.videoExecution(principal, decodeURIComponent(match[1]!))
         });
       }
-      if (request.method === "GET" && (nativeVideo || nativeDownload)) {
-        const download = nativeDownload !== null;
-        const match = nativeDownload ?? nativeVideo!;
+      if (request.method === "GET" && (nativeVideo || nativeDownload || selectedVideo || selectedDownload)) {
+        const download = nativeDownload !== null || selectedDownload !== null;
+        const match = nativeDownload ?? nativeVideo ?? selectedDownload ?? selectedVideo!;
         const principal = await auth.authorize(request, response, download ? "export:read" : "project:preview", false);
         if (download) {
           if (auth.verifySameOriginDownload === undefined) throw new AuthHttpError(401, "UNAUTHENTICATED");
@@ -1028,6 +1574,18 @@ export function createEffectToolApi(
         });
         return sendJson(response, 200, { turn });
       }
+      if (selectedTurns) {
+        const principal = await auth.authorize(request, response, "project:preview", true);
+        if (!principal.scopes.includes("ai:plan")) throw new AuthHttpError(403, "FORBIDDEN");
+        const body = exactObject(await jsonBody(request), "request body");
+        exactKeys(body, ["toolName", "prompt", "inputIds"], "request body");
+        const turn = await service.selectedTurn(principal, {
+          toolName: body.toolName as string,
+          prompt: body.prompt as string,
+          inputIds: body.inputIds as EffectToolInputIds
+        });
+        return sendJson(response, 200, { turn });
+      }
       const principal = await auth.authorize(request, response, "project:preview", true);
       if (!principal.scopes.includes("ai:plan")) throw new AuthHttpError(403, "FORBIDDEN");
       const body = exactObject(await jsonBody(request), "request body");
@@ -1042,7 +1600,13 @@ export function createEffectToolApi(
     } catch (error) {
       const safe = safeError(error);
       if (!response.headersSent && !response.destroyed) {
-        sendJson(response, safe.status, { error: { code: safe.code, retryable: safe.status >= 500 } });
+        sendJson(response, safe.status, {
+          error: {
+            code: safe.code,
+            retryable: safe.status >= 500,
+            ...(safe.requirements === undefined ? {} : { requirements: safe.requirements })
+          }
+        });
       }
     }
   };

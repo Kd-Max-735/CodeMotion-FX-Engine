@@ -1,6 +1,16 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { BATCH_03_CPU_FALLBACK, BATCH_03_GPU_BACKEND, CLOSED_SCHEMA, VALID_PARAMS, metadataResult, round, seededSigned } from "./shared.js";
+import {
+  BATCH_03_BACKEND,
+  BATCH_03_REJECT_FALLBACK,
+  CLOSED_SCHEMA,
+  VALID_PARAMS,
+  createParticleBuffer,
+  particleTextureResult,
+  rgbaInput,
+  seededSigned,
+  setParticle
+} from "./shared.js";
 
 export interface ParticleTrailParams extends JsonObject {
   emissionRate: number;
@@ -39,16 +49,40 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
     { presetId: "trail.electric", displayName: "电光轨迹", params: { ...defaults, emissionRate: 520, trailLength: 0.55, speed: 620, width: 4, fade: 0.9, waviness: 0.7, lifetime: 0.65 } }
   ],
   inputSlots: [{ name: "source_image", kind: "image", required: false, cardinality: "one", description: "可选的服务端授权拖尾主体图像。" }],
-  primaryBackend: BATCH_03_GPU_BACKEND,
-  fallbackStrategy: { kind: "server-backend", backend: BATCH_03_CPU_FALLBACK, fidelity: "degraded", requiresFinalApproval: true },
+  primaryBackend: BATCH_03_BACKEND,
+  fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
-    const history = Array.from({ length: 8 }, (_, index) => {
-      const age = index / 7 * Math.min(params.trailLength, params.lifetime);
-      return { age: round(age), distance: round(age * params.speed), lateral: round(seededSigned(context.seed, index) * params.waviness * params.width), opacity: round(Math.exp(-params.fade * age)) };
-    });
-    return metadataResult(context, { algorithm: "temporal_emitter_history_ribbon", seed: context.seed, historyWindow: Math.min(params.trailLength, params.lifetime), history });
+    const source = rgbaInput(context, "source_image", false);
+    const historyWindow = Math.min(context.time, params.trailLength, params.lifetime);
+    const count = Math.floor(params.emissionRate * historyWindow);
+    const buffer = createParticleBuffer(context, count, "disc", source === undefined
+      ? {}
+      : { sourceComposite: { slot: "source_image", opacity: 1 } });
+    for (let index = 0; index < count; index += 1) {
+      const age = index / params.emissionRate;
+      const sampleTime = Math.max(0, context.time - age);
+      const phase = sampleTime * 0.9;
+      const headX = context.width * (0.5 + Math.sin(phase) * 0.28);
+      const headY = context.height * (0.5 + Math.cos(sampleTime * 0.7) * 0.22);
+      const tangentX = Math.cos(phase) * context.width * 0.28 * 0.9;
+      const tangentY = -Math.sin(sampleTime * 0.7) * context.height * 0.22 * 0.7;
+      const tangentLength = Math.max(0.000001, Math.hypot(tangentX, tangentY));
+      const lateral = seededSigned(context.seed, index) * params.waviness * params.width;
+      const normalX = -tangentY / tangentLength;
+      const normalY = tangentX / tangentLength;
+      setParticle(buffer, index, {
+        x: headX - tangentX / tangentLength * params.speed * age + normalX * lateral,
+        y: headY - tangentY / tangentLength * params.speed * age + normalY * lateral,
+        vx: tangentX,
+        vy: tangentY,
+        size: params.width,
+        opacity: Math.exp(-params.fade * age) * (1 - age / params.lifetime),
+        color: [110, 210, 255, 255]
+      });
+    }
+    return particleTextureResult(context, buffer);
   }
 };

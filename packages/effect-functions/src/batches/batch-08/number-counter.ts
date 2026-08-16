@@ -44,7 +44,11 @@ function formatNumber(value: number, format: NumberCounterParams["format"]): str
   if (format === "integer") return String(Math.round(value));
   if (format === "decimal_1") return value.toFixed(1);
   if (format === "decimal_2") return value.toFixed(2);
-  return `${(value * 100).toFixed(0)}%`;
+  const percentage = value * 100;
+  if (!Number.isFinite(percentage)) {
+    throw new RangeError("Rendered percentage must be finite.");
+  }
+  return `${percentage.toFixed(0)}%`;
 }
 
 const defaults: NumberCounterParams = Object.freeze({
@@ -85,7 +89,8 @@ export const NUMBER_COUNTER_DEFINITION: EffectToolDefinition<NumberCounterParams
   render: (context, params) => {
     const range = parseRange(singleBinding(context, "number_range"));
     const progress = clamp(context.time / params.duration);
-    const value = range.from + (range.to - range.from) * ease(progress, params.easing);
+    const eased = ease(progress, params.easing);
+    const value = range.from * (1 - eased) + range.to * eased;
     return {
       kind: "metadata",
       backendId: CPU_BACKEND.backendId,

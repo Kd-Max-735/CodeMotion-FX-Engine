@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, metadataResult,
+import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, invalid, metadataResult,
   normalizeColor, round, schema, valid } from "./shared.js";
 
 type SacredPattern = "flower_of_life" | "metatron" | "sri_yantra";
@@ -54,7 +54,16 @@ export const sacredGeometryDefinition: EffectToolDefinition<SacredGeometryParams
   normalizeParams: (params) => ({ ...params, scale: round(params.scale), rotation: round(params.rotation, 3),
     speed: round(params.speed), strokeColor: normalizeColor(params.strokeColor),
     backgroundColor: normalizeColor(params.backgroundColor) }),
-  validateParams: () => valid(),
+  validateParams: (params) => {
+    const primitiveCount = params.pattern === "flower_of_life"
+      ? 1 + params.rings * params.symmetry
+      : params.pattern === "metatron"
+        ? 1 + params.rings * params.symmetry * 2 + params.symmetry
+        : params.rings * 6;
+    return primitiveCount <= 601
+      ? valid()
+      : invalid("$", "sacred geometry primitive count must not exceed 601");
+  },
   render: (context, params) => {
     const rotation = (params.rotation + context.time * params.speed * 30) * Math.PI / 180;
     const circles: Array<{ x: number; y: number; radius: number }> = [];

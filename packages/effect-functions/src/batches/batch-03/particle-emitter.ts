@@ -1,6 +1,17 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { BATCH_03_CPU_FALLBACK, BATCH_03_GPU_BACKEND, CLOSED_SCHEMA, VALID_PARAMS, metadataResult, round, seededSigned, seededUnit } from "./shared.js";
+import {
+  BATCH_03_BACKEND,
+  BATCH_03_REJECT_FALLBACK,
+  CLOSED_SCHEMA,
+  VALID_PARAMS,
+  createParticleBuffer,
+  particleTextureResult,
+  rgbaInput,
+  seededSigned,
+  seededUnit,
+  setParticle
+} from "./shared.js";
 
 export interface ParticleEmitterParams extends JsonObject {
   rate: number;
@@ -41,19 +52,41 @@ export const PARTICLE_EMITTER_DEFINITION: EffectToolDefinition<ParticleEmitterPa
     { presetId: "emitter.jet", displayName: "高速喷流", params: { ...defaults, rate: 420, speed: 720, spread: 12, lifetime: 0.8, size: 4, gravity: 40, drag: 0.02 } }
   ],
   inputSlots: [{ name: "particle_texture", kind: "texture", required: false, cardinality: "one", description: "可选的服务端授权粒子纹理；缺省使用程序化圆形。" }],
-  primaryBackend: BATCH_03_GPU_BACKEND,
-  fallbackStrategy: { kind: "server-backend", backend: BATCH_03_CPU_FALLBACK, fidelity: "degraded", requiresFinalApproval: true },
+  primaryBackend: BATCH_03_BACKEND,
+  fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
-    const particles = Array.from({ length: 8 }, (_, index) => {
-      const age = seededUnit(context.seed, index * 3) * params.lifetime;
-      const angle = (params.direction + seededSigned(context.seed, index * 3 + 1) * params.spread * 0.5) * Math.PI / 180;
-      const velocity = params.speed * (0.75 + seededUnit(context.seed, index * 3 + 2) * 0.5);
-      const damp = Math.exp(-params.drag * age);
-      return { age: round(age), vx: round(Math.cos(angle) * velocity * damp), vy: round(Math.sin(angle) * velocity * damp + params.gravity * age) };
-    });
-    return metadataResult(context, { algorithm: "continuous_seeded_emission", seed: context.seed, activeCapacity: Math.ceil(params.rate * params.lifetime), particles });
+    const texture = rgbaInput(context, "particle_texture", false, false);
+    const firstEmission = Math.max(0, Math.ceil((context.time - params.lifetime) * params.rate));
+    const lastEmission = Math.max(firstEmission, Math.floor(context.time * params.rate));
+    const count = lastEmission - firstEmission;
+    const buffer = createParticleBuffer(context, count, texture === undefined ? "disc" : "sprite",
+      texture === undefined ? {} : { spriteSlot: "particle_texture" });
+    for (let index = 0; index < count; index += 1) {
+      const emissionIndex = firstEmission + index;
+      const birthTime = emissionIndex / params.rate;
+      const age = Math.max(0, context.time - birthTime);
+      const angle = (params.direction + seededSigned(context.seed, emissionIndex * 3 + 1)
+        * params.spread * 0.5) * Math.PI / 180;
+      const initialSpeed = params.speed * (0.75 + seededUnit(context.seed, emissionIndex * 3 + 2) * 0.5);
+      const travelTime = params.drag > 0.000001
+        ? (1 - Math.exp(-params.drag * age)) / params.drag
+        : age;
+      const velocityScale = Math.exp(-params.drag * age);
+      const vx = Math.cos(angle) * initialSpeed * velocityScale;
+      const vy = Math.sin(angle) * initialSpeed * velocityScale + params.gravity * age;
+      setParticle(buffer, index, {
+        x: context.width * 0.5 + Math.cos(angle) * initialSpeed * travelTime,
+        y: context.height * 0.5 + Math.sin(angle) * initialSpeed * travelTime + params.gravity * age * age * 0.5,
+        vx,
+        vy,
+        size: params.size * (0.8 + seededUnit(context.seed, emissionIndex * 3 + 3) * 0.4),
+        opacity: 1 - age / params.lifetime,
+        color: [255, 255, 255, 255]
+      });
+    }
+    return particleTextureResult(context, buffer);
   }
 };

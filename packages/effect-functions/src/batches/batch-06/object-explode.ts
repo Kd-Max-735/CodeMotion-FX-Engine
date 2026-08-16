@@ -3,10 +3,7 @@ import type { EffectToolDefinition } from "../../types.js";
 import {
   REJECT_FALLBACK,
   SERVER_THREE_BACKEND,
-  frameResult,
-  round,
-  seededUnit,
-  timedProgress,
+  blockedRender,
   valid,
   type Easing
 } from "./common.js";
@@ -78,33 +75,8 @@ export const OBJECT_EXPLODE_DEFINITION: EffectToolDefinition<ObjectExplodeParams
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: (context, params) => {
-    const progress = timedProgress(context.time, params.startTime, params.duration, params.easing);
-    const elapsed = Math.max(0, Math.min(params.duration, context.time - params.startTime));
-    const fragments = Array.from({ length: params.fragmentCount }, (_, index) => {
-      const azimuth = seededUnit(context.seed, index, 0) * Math.PI * 2;
-      const elevation = (seededUnit(context.seed, index, 1) - 0.35) * Math.PI;
-      const speed = params.explosionRadius * (0.55 + seededUnit(context.seed, index, 2) * 0.9);
-      const horizontal = Math.cos(elevation) * speed * progress;
-      return {
-        fragment: index,
-        position: [
-          round(params.originX + Math.cos(azimuth) * horizontal),
-          round(params.originY + Math.sin(elevation) * speed * progress - 0.5 * params.gravity * elapsed * elapsed),
-          round(params.originZ + Math.sin(azimuth) * horizontal)
-        ],
-        rotation: [
-          round(seededUnit(context.seed, index, 3) * params.spinTurns * 360 * progress),
-          round(seededUnit(context.seed, index, 4) * params.spinTurns * 360 * progress),
-          round(seededUnit(context.seed, index, 5) * params.spinTurns * 360 * progress)
-        ]
-      };
-    });
-    return frameResult(SERVER_THREE_BACKEND.backendId, {
-      operation: "partition_and_transform_geometry",
-      sourceSlot: "source_model",
-      progress: round(progress),
-      fragments
-    });
-  }
+  render: () => blockedRender(
+    "object_explode",
+    "an owner-authorized model partitioning and server-three frame renderer adapter"
+  )
 };

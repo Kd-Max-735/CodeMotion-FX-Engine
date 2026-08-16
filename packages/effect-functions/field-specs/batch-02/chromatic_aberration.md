@@ -9,7 +9,7 @@
 只输出一个 JSON 对象，不添加解释。顶层必须且只能有 `type` 和 `data`，`type` 精确为 `chromatic_aberration`。不得输出图片、路径、URL 或资源 ID。
 
 ```json
-{"type":"chromatic_aberration","data":{"amount":2.5,"radial":1,"angle":0,"falloff":1.8,"mix":0.6}}
+{"type":"chromatic_aberration","data":{"amount":4,"radial":0.7,"angle":0,"falloff":1,"mix":0.8}}
 ```
 
 ## 模型参数字段

@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { CAMERA_BACKEND, cameraOutput, effectProgress, invalid, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
+import { CAMERA_BACKEND, cameraOutput, effectProgress, frameOutput, invalid, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
 
 export interface DollyZoomParams extends JsonObject {
   direction: "forward" | "backward";
@@ -24,17 +24,13 @@ export function renderDollyZoom(context: ServerEffectRenderContext, params: Read
   const fov = compensatedFovDegrees(params.initialTargetDistance, currentDistance, params.initialFovDegrees);
   const position: Vector3 = { x: 0, y: 0, z: round(direction * travelled) };
   const rotation: Vector3 = { x: 0, y: 0, z: 0 };
-  return {
-    kind: "metadata" as const,
-    backendId: CAMERA_BACKEND.backendId,
-    output: {
-      ...cameraOutput("camera-dolly-zoom", position, rotation, fov, progress),
-      targetDistance: round(currentDistance),
-      projectionCompensation: "constant-subject-scale"
-    },
-    degraded: false,
-    warnings: []
-  };
+  return frameOutput(context, "camera_dolly_zoom", {
+    sourceSlot: "source_video",
+    targetSlot: "camera_target",
+    ...cameraOutput("camera-dolly-zoom", position, rotation, fov, progress),
+    targetDistance: round(currentDistance),
+    projectionCompensation: "constant-subject-scale"
+  });
 }
 
 export const DOLLY_ZOOM_DEFINITION: EffectToolDefinition<DollyZoomParams> = {

@@ -1,12 +1,21 @@
 import type {
+  AuthorizedEffectInput,
   EffectBackendDefinition,
   EffectParameterValidationResult,
-  EffectRenderResult
+  EffectRenderResult,
+  ServerEffectRenderContext
 } from "../../types.js";
 
 export const SERVER_GPU_BACKEND: EffectBackendDefinition = Object.freeze({
   backendId: "codemotion-server-gpu-v1",
   kind: "server-gpu",
+  version: "1.0.0",
+  deterministic: true
+});
+
+export const SERVER_CPU_BACKEND: EffectBackendDefinition = Object.freeze({
+  backendId: "codemotion-effect-functions-cpu-v1",
+  kind: "server-cpu",
   version: "1.0.0",
   deterministic: true
 });
@@ -80,6 +89,88 @@ export function frameResult(
     output,
     degraded: false,
     warnings
+  };
+}
+
+export const RGBA8_FRAME_VERSION = "rgba8-frame-v1" as const;
+
+export interface Rgba8FrameBinding {
+  readonly version: typeof RGBA8_FRAME_VERSION;
+  readonly width: number;
+  readonly height: number;
+  readonly data: readonly number[] | Uint8Array | Uint8ClampedArray;
+}
+
+export interface Rgba8FrameOutput extends Rgba8FrameBinding {
+  readonly sourceSlot: string;
+  readonly sampleTime: number;
+}
+
+export class Batch06AdapterRequiredError extends Error {
+  public readonly code = "BATCH_06_ADAPTER_REQUIRED";
+
+  public constructor(
+    public readonly toolName: string,
+    public readonly capability: string
+  ) {
+    super(`${toolName} is BLOCKED until Window 12 provides ${capability}.`);
+    this.name = "Batch06AdapterRequiredError";
+  }
+}
+
+export function blockedRender(toolName: string, capability: string): never {
+  throw new Batch06AdapterRequiredError(toolName, capability);
+}
+
+export function readRgba8Frame(
+  context: ServerEffectRenderContext,
+  slot: string
+): Rgba8FrameBinding {
+  const input = context.inputs[slot];
+  if (input === undefined || Array.isArray(input)) {
+    throw new TypeError(`${slot} must contain exactly one server-decoded RGBA frame.`);
+  }
+  const binding = (input as AuthorizedEffectInput).binding;
+  if (typeof binding !== "object" || binding === null) {
+    throw new TypeError(`${slot} must bind an ${RGBA8_FRAME_VERSION} object.`);
+  }
+  const value = binding as Partial<Rgba8FrameBinding>;
+  if (value.version !== RGBA8_FRAME_VERSION
+    || !Number.isInteger(value.width) || !Number.isInteger(value.height)
+    || value.width! < 1 || value.height! < 1) {
+    throw new TypeError(`${slot} must bind positive integer RGBA frame dimensions.`);
+  }
+  const data = value.data;
+  if (!Array.isArray(data) && !(data instanceof Uint8Array)
+    && !(data instanceof Uint8ClampedArray)) {
+    throw new TypeError(`${slot} must bind RGBA8 pixel data.`);
+  }
+  if (data.length !== value.width! * value.height! * 4) {
+    throw new RangeError(`${slot} pixel length does not match its dimensions.`);
+  }
+  for (const channel of data) {
+    if (!Number.isInteger(channel) || channel < 0 || channel > 255) {
+      throw new RangeError(`${slot} must contain only finite 8-bit RGBA channels.`);
+    }
+  }
+  return {
+    version: RGBA8_FRAME_VERSION,
+    width: value.width!,
+    height: value.height!,
+    data
+  };
+}
+
+export function rgbaFrameResult(
+  backendId: string,
+  output: Rgba8FrameOutput
+): EffectRenderResult<Rgba8FrameOutput> {
+  return {
+    kind: "frame",
+    backendId,
+    output,
+    degraded: false,
+    warnings: []
   };
 }
 

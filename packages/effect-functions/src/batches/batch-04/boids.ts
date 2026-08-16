@@ -57,12 +57,12 @@ export const BOIDS_DEFINITION: EffectToolDefinition<BoidsParams> = {
     additionalProperties: false,
     properties: {
       boidCount: { type: "integer", minimum: 8, maximum: 96, default: 36 },
-      maxSpeed: { type: "number", minimum: 0.1, maximum: 3, default: 1.1 },
-      perceptionRadius: { type: "number", minimum: 0.05, maximum: 0.6, default: 0.28 },
-      separation: { type: "number", minimum: 0, maximum: 5, default: 1.8 },
-      alignment: { type: "number", minimum: 0, maximum: 5, default: 1.1 },
-      cohesion: { type: "number", minimum: 0, maximum: 5, default: 0.85 },
-      boundaryForce: { type: "number", minimum: 0, maximum: 5, default: 2.2 }
+      maxSpeed: { type: "number", minimum: 0.1, maximum: 3, multipleOf: 0.01, default: 1.1 },
+      perceptionRadius: { type: "number", minimum: 0.05, maximum: 0.6, multipleOf: 0.01, default: 0.28 },
+      separation: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 1.8 },
+      alignment: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 1.1 },
+      cohesion: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 0.85 },
+      boundaryForce: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 2.2 }
     }
   },
   defaults: BOIDS_DEFAULTS,

@@ -9,7 +9,7 @@
 只输出 JSON 对象，不输出解释、Markdown 或第二个工具。顶层必须且只能含 `type` 和 `data`，`type` 必须为 `datamosh`。当前帧、上一帧、资源 ID、路径和 URL 都由服务器绑定，绝不能写入 `data`。
 
 ```json
-{"type":"datamosh","data":{"blockSize":16,"carry":0.82,"motionX":18,"motionY":-4,"corruption":0.6,"smear":0.5,"seedOffset":240}}
+{"type":"datamosh","data":{"blockSize":12,"carry":0.72,"motionX":8,"motionY":2,"corruption":0.45,"smear":0.35,"seedOffset":0}}
 ```
 
 ## 模型参数字段

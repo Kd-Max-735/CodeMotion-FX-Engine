@@ -36,7 +36,7 @@ function parseTarget(value: unknown): TargetEffectBinding {
   const record = value as Record<string, unknown>;
   if (Object.keys(record).some((key) => key !== "version" && key !== "handle")
     || record.version !== "effect-target-v1" || typeof record.handle !== "string"
-    || record.handle.length === 0) {
+    || record.handle.length === 0 || record.handle.length > 256) {
     throw new TypeError("target effect binding is invalid.");
   }
   return { version: "effect-target-v1", handle: record.handle };

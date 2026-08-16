@@ -1,12 +1,14 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
 import {
-  BATCH_03_CPU_FALLBACK,
-  BATCH_03_GPU_BACKEND,
+  BATCH_03_BACKEND,
+  BATCH_03_REJECT_FALLBACK,
   CLOSED_SCHEMA,
   VALID_PARAMS,
-  metadataResult,
-  round
+  frameResult,
+  rgbaInput,
+  sampleBilinear,
+  writePixel
 } from "./shared.js";
 
 export interface WaveWarpParams extends JsonObject {
@@ -51,23 +53,27 @@ export const WAVE_WARP_DEFINITION: EffectToolDefinition<WaveWarpParams> = {
     { presetId: "wave.ripple", displayName: "密集波纹", params: { ...defaults, amplitude: 42, frequency: 6, axis: "y", speed: 1.4 } }
   ],
   inputSlots: [{ name: "primary_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定的待扭曲图像。" }],
-  primaryBackend: BATCH_03_GPU_BACKEND,
-  fallbackStrategy: { kind: "server-backend", backend: BATCH_03_CPU_FALLBACK, fidelity: "equivalent", requiresFinalApproval: false },
+  primaryBackend: BATCH_03_BACKEND,
+  fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "medium",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
+    const source = rgbaInput(context, "primary_image", true)!;
     const phase = params.phase + context.time * params.speed * Math.PI * 2;
-    const samples = [0.125, 0.5, 0.875].map((coordinate) => ({
-      coordinate,
-      displacementPixels: round(Math.sin(coordinate * params.frequency * Math.PI * 2 + phase) * params.amplitude)
-    }));
-    return metadataResult(context, {
-      algorithm: "axis_sine_coordinate_warp",
-      axis: params.axis,
-      edgeMode: params.edgeMode,
-      phase: round(phase),
-      samples
-    });
+    const output = new Uint8ClampedArray(context.width * context.height * 4);
+    for (let y = 0; y < context.height; y += 1) {
+      for (let x = 0; x < context.width; x += 1) {
+        const coordinate = params.axis === "x"
+          ? y / Math.max(1, context.height - 1)
+          : x / Math.max(1, context.width - 1);
+        const displacement = Math.sin(coordinate * params.frequency * Math.PI * 2 + phase) * params.amplitude;
+        const sourceX = params.axis === "x" ? x - displacement : x;
+        const sourceY = params.axis === "y" ? y - displacement : y;
+        writePixel(output, (y * context.width + x) * 4,
+          sampleBilinear(source, sourceX, sourceY, params.edgeMode));
+      }
+    }
+    return frameResult(context, output);
   }
 };

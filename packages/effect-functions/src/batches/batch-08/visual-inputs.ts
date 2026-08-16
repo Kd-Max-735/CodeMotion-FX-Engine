@@ -21,6 +21,8 @@ export interface MaterialSurfaceBinding {
   readonly luminance: number;
 }
 
+const MAX_TEXTURE_DIMENSION = 16_384;
+
 export function parseRgba(value: unknown, label: string): Rgba {
   if (!Array.isArray(value) || value.length !== 4) {
     throw new TypeError(`${label} must be an RGBA tuple.`);
@@ -46,8 +48,12 @@ export function parseTextureSample(value: unknown): TextureSampleBinding {
   if (value.version !== "texture-sample-v1") throw new TypeError("texture sample version is unsupported.");
   const width = finiteNumber(value.width, "texture width");
   const height = finiteNumber(value.height, "texture height");
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
-    throw new RangeError("texture dimensions must be positive integers.");
+  if (!Number.isInteger(width) || !Number.isInteger(height)
+    || width < 1 || height < 1
+    || width > MAX_TEXTURE_DIMENSION || height > MAX_TEXTURE_DIMENSION) {
+    throw new RangeError(
+      `texture dimensions must be integers between 1 and ${MAX_TEXTURE_DIMENSION}.`
+    );
   }
   return Object.freeze({
     version: "texture-sample-v1",

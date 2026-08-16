@@ -27,6 +27,8 @@
 | `cellColor` | `#RRGGBB` | 六位十六进制 | `#90E0EF` | 细胞主体颜色 |
 | `edgeColor` | `#RRGGBB` | 六位十六进制 | `#023E8A` | 边缘颜色 |
 
+最近站点计算预算为 `gridSize² × pointCount ≤ 524288`，网格输出最多包含 4096 个 cell 索引和 4096 个边缘标记。
+
 ## 5. 表达映射
 
 “更多/更密的格子”提高 `pointCount`，需要更平滑边缘时提高 `gridSize`；“规整蜂窝感”降低 `jitter`，“自然石纹”提高它；“边更粗”提高 `edgeWidth`；“快/慢/反向”调整 `speed`；色彩只用两个直接色值。

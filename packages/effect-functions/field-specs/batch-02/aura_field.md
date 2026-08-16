@@ -9,7 +9,7 @@
 只输出 JSON，不要附加说明或 Markdown。顶层只能有 `type` 和 `data`，`type` 必须是 `aura_field`。资源 ID、路径、URL、图片或遮罩均不得进入 `data`。
 
 ```json
-{"type":"aura_field","data":{"intensity":0.35,"centerX":0.5,"centerY":0.42,"radius":0.55,"softness":0.8,"ellipticity":1.2,"hue":32,"secondaryHue":315,"pulseRate":0}}
+{"type":"aura_field","data":{"intensity":0.55,"centerX":0.5,"centerY":0.5,"radius":0.42,"softness":0.55,"ellipticity":1,"hue":285,"secondaryHue":190,"pulseRate":0.2}}
 ```
 
 ## 模型参数字段

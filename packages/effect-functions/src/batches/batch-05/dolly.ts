@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { CAMERA_BACKEND, cameraOutput, effectProgress, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
+import { CAMERA_BACKEND, cameraOutput, effectProgress, frameOutput, hasInput, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
 
 export interface DollyParams extends JsonObject {
   direction: "forward" | "backward";
@@ -16,13 +16,11 @@ export function renderDolly(context: ServerEffectRenderContext, params: Readonly
   const direction = params.direction === "forward" ? -1 : 1;
   const position: Vector3 = { x: 0, y: round(params.heightOffset * progress), z: round(direction * params.distance * progress) };
   const rotation: Vector3 = { x: 0, y: 0, z: 0 };
-  return {
-    kind: "metadata" as const,
-    backendId: CAMERA_BACKEND.backendId,
-    output: cameraOutput("camera-linear-dolly", position, rotation, params.verticalFovDegrees, progress),
-    degraded: false,
-    warnings: []
-  };
+  return frameOutput(context, "camera_linear_dolly", {
+    sourceSlot: "source_video",
+    targetSlot: hasInput(context, "camera_target") ? "camera_target" : null,
+    ...cameraOutput("camera-linear-dolly", position, rotation, params.verticalFovDegrees, progress)
+  });
 }
 
 export const DOLLY_DEFINITION: EffectToolDefinition<DollyParams> = {

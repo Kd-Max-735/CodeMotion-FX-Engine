@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { REJECT_FALLBACK, SERVER_GPU_BACKEND, frameResult, round, valid } from "./common.js";
+import { REJECT_FALLBACK, SERVER_GPU_BACKEND, blockedRender, valid } from "./common.js";
 
 type EchoBlend = "normal" | "screen" | "add";
 
@@ -53,17 +53,8 @@ export const ECHO_TRAIL_DEFINITION: EffectToolDefinition<EchoTrailParams> = {
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: (context, params) => {
-    const history = Array.from({ length: params.trailCount }, (_, index) => ({
-      sampleTime: round(Math.max(0, context.time - index * params.spacing)),
-      opacity: round(index === 0 ? 1 : params.decay ** index),
-      offset: [round(index * params.offsetX), round(index * params.offsetY)]
-    }));
-    return frameResult(SERVER_GPU_BACKEND.backendId, {
-      operation: "composite_historical_frames",
-      sourceSlot: "source_video",
-      blendMode: params.blendMode,
-      history
-    });
-  }
+  render: () => blockedRender(
+    "echo_trail",
+    "a historical-frame server video decoder and multi-frame compositor adapter"
+  )
 };

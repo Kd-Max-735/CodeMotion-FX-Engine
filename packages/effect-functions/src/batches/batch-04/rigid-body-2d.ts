@@ -57,11 +57,11 @@ export const RIGID_BODY_2D_DEFINITION: EffectToolDefinition<RigidBody2DParams> =
     additionalProperties: false,
     properties: {
       bodyCount: { type: "integer", minimum: 2, maximum: 48, default: 12 },
-      gravity: { type: "number", minimum: 0, maximum: 20, default: 7.5 },
-      restitution: { type: "number", minimum: 0, maximum: 1, default: 0.55 },
-      friction: { type: "number", minimum: 0, maximum: 1, default: 0.25 },
-      initialSpeed: { type: "number", minimum: 0, maximum: 5, default: 1.2 },
-      bodyRadius: { type: "number", minimum: 0.02, maximum: 0.15, default: 0.065 },
+      gravity: { type: "number", minimum: 0, maximum: 20, multipleOf: 0.01, default: 7.5 },
+      restitution: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 0.55 },
+      friction: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 0.25 },
+      initialSpeed: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 1.2 },
+      bodyRadius: { type: "number", minimum: 0.02, maximum: 0.15, multipleOf: 0.001, default: 0.065 },
       solverIterations: { type: "integer", minimum: 1, maximum: 8, default: 3 }
     }
   },
