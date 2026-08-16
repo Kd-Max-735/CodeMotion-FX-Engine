@@ -213,20 +213,14 @@ describe("S7R-F editor interactions", () => {
     expect(store.getSnapshot().document.selectedLayerId).toBeNull();
   });
 
-  it("mounts one server runtime only in configureServer and removes stale Effect Lab labels", () => {
+  it("mounts one AE Agent runtime only in configureServer", () => {
     const vite = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
-    expect(vite.match(/createServerRuntime\(/g)).toHaveLength(1);
+    expect(vite.match(/createAeAgentServerRuntime\(/g)).toHaveLength(1);
     expect(vite).toContain("configureServer(server: ViteDevServer)");
     expect(vite).not.toContain("codemotion-export-api");
     expect(vite).not.toContain("codemotion-editor-preview-api");
     expect(vite).not.toContain("configurePreviewServer(server) { server.middlewares.use(runtime");
     expect(vite).not.toContain("createAiPlanApi");
     expect(vite).not.toContain("TenantMediaStore");
-
-    const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-    expect(app).not.toMatch(/未运行|待 Group 7|阶段 6/);
-    expect(app).not.toContain("LAYER_PROPERTY_SCHEMA");
-    expect(app).toContain("onPointerCancel");
-    expect(app).toContain("aria-pressed");
   });
 });

@@ -162,7 +162,7 @@ describe("Vite server runtime lifecycle", () => {
     const server = await developmentServer(createRuntime);
 
     await server.environments.client.pluginContainer.watchChange(
-      resolve(editorRoot, "src/App.tsx"),
+      resolve(editorRoot, "src/EffectToolConsole.tsx"),
       { event: "update" }
     );
     expect(createRuntime).toHaveBeenCalledTimes(1);

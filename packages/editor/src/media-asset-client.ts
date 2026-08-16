@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { csrfToken } from "./ai-plan-client.js";
+import { csrfToken } from "./browser-security.js";
 import { validateApplicationScopes, type ApplicationScope } from "@codemotion/schema";
 
 export type { ApplicationScope } from "@codemotion/schema";

@@ -14,16 +14,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host 127.0.0.1",
-    "qa:visual": "node test/visual-smoke.mjs",
-    "qa:s5r": "node test/run-edge-s5r-qa.mjs",
-    "qa:render": "node test/render-center-smoke.mjs",
-    "qa:ai-live": "node test/ai-planner-live-smoke.mjs",
-    "qa:s7r-f": "node test/s7r-f-visual.mjs",
-    "qa:dev-auth": "node test/dev-auto-session-visual.mjs",
-    "qa:v22-cards": "node test/v22-card-visual.mjs",
-    "qa:v22-workflows": "node test/v22-workflow-visual.mjs",
-    "qa:jpeg-planning": "node test/jpeg-planning-browser-smoke.mjs"
+    "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
     "@codemotion/ai-planner": "0.5.0",
@@ -47,7 +38,6 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "playwright-core": "^1.54.0",
     "vite": "^6.0.0"
   }
 }

@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { csrfToken } from "./ai-plan-client.js";
+import { csrfToken } from "./browser-security.js";
 import { BrowserApiError } from "./media-asset-client.js";
 
 export interface NativeEffectToolView {

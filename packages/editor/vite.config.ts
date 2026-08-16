@@ -2,14 +2,14 @@ import { defineConfig, loadEnv, type Plugin, type PluginOption, type ViteDevServ
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { createServerRuntime } from "./src/server-runtime.js";
+import { createAeAgentServerRuntime } from "./src/ae-agent-server-runtime.js";
 
 const workspaceRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
 
-type RuntimeLifecycle = Pick<Awaited<ReturnType<typeof createServerRuntime>>, "handle" | "close">;
-type RuntimeFactory = (options: Parameters<typeof createServerRuntime>[0]) => Promise<RuntimeLifecycle>;
+type RuntimeLifecycle = Pick<Awaited<ReturnType<typeof createAeAgentServerRuntime>>, "handle" | "close">;
+type RuntimeFactory = (options: Parameters<typeof createAeAgentServerRuntime>[0]) => Promise<RuntimeLifecycle>;
 
-const defaultRuntimeFactory: RuntimeFactory = (options) => createServerRuntime(options);
+const defaultRuntimeFactory: RuntimeFactory = (options) => createAeAgentServerRuntime(options);
 const RUNTIME_CLOSE_TIMEOUT_MS = 30_000;
 
 function settledClose(callback: () => Promise<void>): Promise<void> {
@@ -39,7 +39,7 @@ export function createServerRuntimePlugin(
   createRuntime: RuntimeFactory = defaultRuntimeFactory
 ): Plugin {
   return {
-    name: "codemotion-server-runtime",
+    name: "ae-agent-server-runtime",
     async configureServer(server: ViteDevServer) {
       const host = "127.0.0.1";
       const port = 4174;
