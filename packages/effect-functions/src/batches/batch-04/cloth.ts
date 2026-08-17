@@ -8,6 +8,7 @@ import {
   fixedSteps,
   indexList,
   pointList,
+  requireImageInput,
   rounded,
   simulationResult,
   validParams
@@ -72,6 +73,7 @@ export const CLOTH_DEFINITION: EffectToolDefinition<ClothParams> = {
     { presetId: "cloth.flag", displayName: "强风旗帜", params: { ...CLOTH_DEFAULTS, resolution: 12, windStrength: 6, solverIterations: 6 } }
   ],
   inputSlots: [
+    { name: "cloth_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定、随布料网格变形的单张图像。" },
     { name: "mesh", kind: "model", required: false, cardinality: "one", description: "Optional owner-locked server cloth mesh vertices." },
     { name: "pins", kind: "data", required: false, cardinality: "one", description: "Optional owner-locked server pin index set." }
   ],
@@ -81,6 +83,7 @@ export const CLOTH_DEFINITION: EffectToolDefinition<ClothParams> = {
   normalizeParams: normalize,
   validateParams: validParams,
   render: (context, rawParams) => {
+    requireImageInput(context, "cloth_image");
     const params = normalize(rawParams);
     const steps = fixedSteps(context, 60, 300);
     const count = params.resolution * params.resolution;

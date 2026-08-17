@@ -43,8 +43,8 @@ const INDIVIDUAL_MODULES = [
 ] as const;
 
 const STATE_BUDGETS = new Map<string, readonly [string, number]>([
-  ["particle_orbit_field", ["particles", 96]],
-  ["particle_flow_field", ["particles", 128]],
+  ["particle_orbit_field", ["particles", 384]],
+  ["particle_flow_field", ["particles", 512]],
   ["sim_spring", ["nodes", 32]],
   ["sim_rigid_body_2d", ["bodies", 48]],
   ["sim_soft_body", ["nodes", 48]],
@@ -55,11 +55,26 @@ const STATE_BUDGETS = new Map<string, readonly [string, number]>([
   ["sim_collision_shatter", ["fragments", 64]]
 ]);
 
+const TEST_IMAGE = new Uint8Array(1280 * 720 * 4).fill(160);
+
+function requiredInputs(definition: EffectToolDefinition): AuthorizedEffectInputs {
+  return Object.freeze(Object.fromEntries(definition.inputSlots
+    .filter((slot) => slot.required)
+    .map((slot) => [slot.name, {
+      slot: slot.name,
+      kind: slot.kind,
+      tenantId: "tenant-batch-04",
+      userId: "user-batch-04",
+      locked: true as const,
+      binding: { width: 1280, height: 720, data: TEST_IMAGE }
+    }])));
+}
+
 function context(
   definition: EffectToolDefinition,
   time = 0.5,
   seed = 20260814,
-  inputs: AuthorizedEffectInputs = {}
+  inputs: AuthorizedEffectInputs = requiredInputs(definition)
 ): ServerEffectRenderContext {
   return {
     environment: "server",
@@ -90,7 +105,9 @@ function authorizedInput(
         ? { indices: [0, 1], points: [{ x: -0.5, y: -0.5 }, { x: 0.5, y: -0.5 }] }
         : slot.name === "obstacle_mask"
           ? { blockedIndices: [0, 1, 2] }
-          : { centroids: [{ x: -0.1, y: -0.1 }, { x: 0.1, y: -0.1 }] };
+          : slot.kind === "image"
+            ? { width: 1280, height: 720, data: TEST_IMAGE }
+            : { centroids: [{ x: -0.1, y: -0.1 }, { x: 0.1, y: -0.1 }] };
   return {
     [slot.name]: {
       slot: slot.name,
@@ -354,7 +371,10 @@ describe("batch-04 definitions", () => {
       for (const name of Object.keys(schemaProperties(definition))) expect(forbidden.has(name)).toBe(false);
       for (const slot of definition.inputSlots) slots.add(slot.name);
     }
-    expect(slots).toEqual(new Set(["vector_field", "mesh", "pins", "obstacle_mask", "fracture_map"]));
+    expect(slots).toEqual(new Set([
+      "vector_field", "background_image", "cloth_image", "source_image",
+      "mesh", "pins", "obstacle_mask", "fracture_map"
+    ]));
   });
 
   it("accepts valid owner-locked resources and deterministic omission defaults", async () => {
@@ -372,10 +392,17 @@ describe("batch-04 definitions", () => {
           definition,
           definition.toolName,
           { type: definition.toolName, data: {} },
-          context(definition, 0.5, 20260814, authorizedInput(slot))
+          context(definition, 0.5, 20260814, {
+            ...requiredInputs(definition),
+            ...authorizedInput(slot)
+          })
         );
         expectFiniteJson(result.output);
-        expect(asRecord(result.output).state).not.toEqual(omittedState);
+        if (slot.kind === "image") {
+          expect(asRecord(result.output).state).toEqual(omittedState);
+        } else {
+          expect(asRecord(result.output).state).not.toEqual(omittedState);
+        }
       }
     }
   });
@@ -392,7 +419,7 @@ describe("batch-04 definitions", () => {
         required,
         required.toolName,
         { type: required.toolName, data: {} },
-        context(required)
+        context(required, 0.5, 20260814, {})
       )).rejects.toMatchObject({ code: "INPUT_AUTHORIZATION_INVALID" });
       expect(renderCalls).toBe(0);
 
@@ -408,7 +435,10 @@ describe("batch-04 definitions", () => {
           required,
           required.toolName,
           { type: required.toolName, data: {} },
-          context(required, 0.5, 20260814, { [slot.name]: invalid } as unknown as AuthorizedEffectInputs)
+          context(required, 0.5, 20260814, {
+            ...requiredInputs(required),
+            [slot.name]: invalid
+          } as unknown as AuthorizedEffectInputs)
         )).rejects.toMatchObject({ code: "INPUT_AUTHORIZATION_INVALID" });
         expect(renderCalls).toBe(0);
       }

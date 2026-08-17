@@ -26,7 +26,7 @@ export interface OrbitFieldParams extends JsonObject {
 }
 
 export const ORBIT_FIELD_DEFAULTS: OrbitFieldParams = {
-  particleCount: 32,
+  particleCount: 120,
   orbitStrength: 2.4,
   tangentialSpeed: 1.2,
   radialDamping: 0.8,
@@ -37,7 +37,7 @@ export const ORBIT_FIELD_DEFAULTS: OrbitFieldParams = {
 
 function normalize(params: Readonly<OrbitFieldParams>): OrbitFieldParams {
   return {
-    particleCount: boundedInt(params.particleCount, 8, 96, ORBIT_FIELD_DEFAULTS.particleCount),
+    particleCount: boundedInt(params.particleCount, 24, 384, ORBIT_FIELD_DEFAULTS.particleCount),
     orbitStrength: rounded(bounded(params.orbitStrength, 0.1, 8, ORBIT_FIELD_DEFAULTS.orbitStrength), 2),
     tangentialSpeed: rounded(bounded(params.tangentialSpeed, 0, 4, ORBIT_FIELD_DEFAULTS.tangentialSpeed), 2),
     radialDamping: rounded(bounded(params.radialDamping, 0, 5, ORBIT_FIELD_DEFAULTS.radialDamping), 2),
@@ -58,7 +58,7 @@ export const ORBIT_FIELD_DEFINITION: EffectToolDefinition<OrbitFieldParams> = {
     type: "object",
     additionalProperties: false,
     properties: {
-      particleCount: { type: "integer", minimum: 8, maximum: 96, default: 32 },
+      particleCount: { type: "integer", minimum: 24, maximum: 384, default: 120 },
       orbitStrength: { type: "number", minimum: 0.1, maximum: 8, multipleOf: 0.01, default: 2.4 },
       tangentialSpeed: { type: "number", minimum: 0, maximum: 4, multipleOf: 0.01, default: 1.2 },
       radialDamping: { type: "number", minimum: 0, maximum: 5, multipleOf: 0.01, default: 0.8 },
@@ -69,9 +69,9 @@ export const ORBIT_FIELD_DEFINITION: EffectToolDefinition<OrbitFieldParams> = {
   },
   defaults: ORBIT_FIELD_DEFAULTS,
   presets: [
-    { presetId: "orbit_field.gentle", displayName: "柔和环流", params: { ...ORBIT_FIELD_DEFAULTS, particleCount: 24, orbitStrength: 1.2, tangentialSpeed: 0.7, radialDamping: 1.4 } },
-    { presetId: "orbit_field.vortex", displayName: "紧凑涡旋", params: { ...ORBIT_FIELD_DEFAULTS, particleCount: 64, orbitStrength: 5.2, tangentialSpeed: 2.2, spread: 0.4 } },
-    { presetId: "orbit_field.reverse", displayName: "反向宽轨", params: { ...ORBIT_FIELD_DEFAULTS, particleCount: 48, direction: "clockwise", fieldScale: 1.8, spread: 0.9 } }
+    { presetId: "orbit_field.gentle", displayName: "柔和环流", params: { ...ORBIT_FIELD_DEFAULTS, particleCount: 80, orbitStrength: 1.2, tangentialSpeed: 0.7, radialDamping: 1.4 } },
+    { presetId: "orbit_field.vortex", displayName: "紧凑涡旋", params: { ...ORBIT_FIELD_DEFAULTS, particleCount: 240, orbitStrength: 5.2, tangentialSpeed: 2.2, spread: 0.4 } },
+    { presetId: "orbit_field.reverse", displayName: "反向宽轨", params: { ...ORBIT_FIELD_DEFAULTS, particleCount: 160, direction: "clockwise", fieldScale: 1.8, spread: 0.9 } }
   ],
   inputSlots: [{
     name: "vector_field",

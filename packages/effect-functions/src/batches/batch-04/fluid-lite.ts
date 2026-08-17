@@ -7,6 +7,7 @@ import {
   boundedInt,
   fixedSteps,
   indexList,
+  requireImageInput,
   rounded,
   simulationResult,
   validParams
@@ -76,19 +77,17 @@ export const FLUID_LITE_DEFINITION: EffectToolDefinition<FluidLiteParams> = {
     { presetId: "fluid_lite.ink", displayName: "浓墨扩散", params: { ...FLUID_LITE_DEFAULTS, injectionStrength: 8, densityDiffusion: 0.01, viscosity: 0.08, buoyancy: 0.3 } },
     { presetId: "fluid_lite.swirl", displayName: "旋涡流体", params: { ...FLUID_LITE_DEFAULTS, gridSize: 22, vorticity: 4.8, viscosity: 0.008, pressureIterations: 7 } }
   ],
-  inputSlots: [{
-    name: "obstacle_mask",
-    kind: "mask",
-    required: false,
-    cardinality: "one",
-    description: "Optional owner-locked server obstacle-cell mask."
-  }],
+  inputSlots: [
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定、承载轻量流体置换的单张图像。" },
+    { name: "obstacle_mask", kind: "mask", required: false, cardinality: "one", description: "Optional owner-locked server obstacle-cell mask." }
+  ],
   primaryBackend: BATCH_04_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: normalize,
   validateParams: validParams,
   render: (context, rawParams) => {
+    requireImageInput(context, "source_image");
     const params = normalize(rawParams);
     const steps = fixedSteps(context, 30, 180);
     const cellCount = params.gridSize ** 2;

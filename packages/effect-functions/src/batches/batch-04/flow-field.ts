@@ -26,7 +26,7 @@ export interface FlowFieldParams extends JsonObject {
 }
 
 export const FLOW_FIELD_DEFAULTS: FlowFieldParams = {
-  particleCount: 48,
+  particleCount: 180,
   fieldStrength: 1.8,
   fieldScale: 1.2,
   turbulence: 0.35,
@@ -37,7 +37,7 @@ export const FLOW_FIELD_DEFAULTS: FlowFieldParams = {
 
 function normalize(params: Readonly<FlowFieldParams>): FlowFieldParams {
   return {
-    particleCount: boundedInt(params.particleCount, 8, 128, FLOW_FIELD_DEFAULTS.particleCount),
+    particleCount: boundedInt(params.particleCount, 32, 512, FLOW_FIELD_DEFAULTS.particleCount),
     fieldStrength: rounded(bounded(params.fieldStrength, 0.1, 6, FLOW_FIELD_DEFAULTS.fieldStrength), 2),
     fieldScale: rounded(bounded(params.fieldScale, 0.25, 4, FLOW_FIELD_DEFAULTS.fieldScale), 2),
     turbulence: rounded(bounded(params.turbulence, 0, 2, FLOW_FIELD_DEFAULTS.turbulence), 2),
@@ -58,7 +58,7 @@ export const FLOW_FIELD_DEFINITION: EffectToolDefinition<FlowFieldParams> = {
     type: "object",
     additionalProperties: false,
     properties: {
-      particleCount: { type: "integer", minimum: 8, maximum: 128, default: 48 },
+      particleCount: { type: "integer", minimum: 32, maximum: 512, default: 180 },
       fieldStrength: { type: "number", minimum: 0.1, maximum: 6, multipleOf: 0.01, default: 1.8 },
       fieldScale: { type: "number", minimum: 0.25, maximum: 4, multipleOf: 0.01, default: 1.2 },
       turbulence: { type: "number", minimum: 0, maximum: 2, multipleOf: 0.01, default: 0.35 },
@@ -69,9 +69,9 @@ export const FLOW_FIELD_DEFINITION: EffectToolDefinition<FlowFieldParams> = {
   },
   defaults: FLOW_FIELD_DEFAULTS,
   presets: [
-    { presetId: "flow_field.laminar", displayName: "平稳层流", params: { ...FLOW_FIELD_DEFAULTS, particleCount: 32, fieldStrength: 1, turbulence: 0.05, drag: 2 } },
-    { presetId: "flow_field.gust", displayName: "快速阵风", params: { ...FLOW_FIELD_DEFAULTS, particleCount: 72, fieldStrength: 3.6, advectionSpeed: 2.2, turbulence: 0.55 } },
-    { presetId: "flow_field.chaotic", displayName: "湍动流场", params: { ...FLOW_FIELD_DEFAULTS, particleCount: 96, fieldScale: 2.5, turbulence: 1.5, drag: 0.45 } }
+    { presetId: "flow_field.laminar", displayName: "平稳层流", params: { ...FLOW_FIELD_DEFAULTS, particleCount: 120, fieldStrength: 1, turbulence: 0.05, drag: 2 } },
+    { presetId: "flow_field.gust", displayName: "快速阵风", params: { ...FLOW_FIELD_DEFAULTS, particleCount: 260, fieldStrength: 3.6, advectionSpeed: 2.2, turbulence: 0.55 } },
+    { presetId: "flow_field.chaotic", displayName: "湍动流场", params: { ...FLOW_FIELD_DEFAULTS, particleCount: 360, fieldScale: 2.5, turbulence: 1.5, drag: 0.45 } }
   ],
   inputSlots: [{
     name: "vector_field",

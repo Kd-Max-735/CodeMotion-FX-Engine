@@ -7,6 +7,7 @@ import {
   boundedInt,
   createRng,
   fixedSteps,
+  requireImageInput,
   rounded,
   simulationResult,
   validParams,
@@ -71,13 +72,14 @@ export const RIGID_BODY_2D_DEFINITION: EffectToolDefinition<RigidBody2DParams> =
     { presetId: "rigid_body_2d.bouncy", displayName: "高弹碰撞", params: { ...RIGID_BODY_2D_DEFAULTS, bodyCount: 20, restitution: 0.9, initialSpeed: 2.5, friction: 0.08 } },
     { presetId: "rigid_body_2d.crowd", displayName: "密集刚体", params: { ...RIGID_BODY_2D_DEFAULTS, bodyCount: 40, bodyRadius: 0.04, solverIterations: 6 } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "source_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定、用于刚体贴片的单张图像。" }],
   primaryBackend: BATCH_04_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: normalize,
   validateParams: validParams,
   render: (context, rawParams) => {
+    requireImageInput(context, "source_image");
     const params = normalize(rawParams);
     const steps = fixedSteps(context, 60, 300);
     const rng = createRng(context.seed ^ 0x52424732);

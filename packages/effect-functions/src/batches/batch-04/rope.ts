@@ -7,6 +7,7 @@ import {
   boundedInt,
   fixedSteps,
   pointList,
+  requireImageInput,
   rounded,
   simulationResult,
   validParams
@@ -74,19 +75,17 @@ export const ROPE_DEFINITION: EffectToolDefinition<RopeParams> = {
     { presetId: "rope.cable", displayName: "拉紧缆绳", params: { ...ROPE_DEFAULTS, anchorMode: "both", stiffness: 1, gravity: 3, solverIterations: 8 } },
     { presetId: "rope.loose", displayName: "松软长绳", params: { ...ROPE_DEFAULTS, segmentCount: 32, ropeLength: 1.7, stiffness: 0.55, damping: 0.06 } }
   ],
-  inputSlots: [{
-    name: "pins",
-    kind: "data",
-    required: false,
-    cardinality: "one",
-    description: "Optional owner-locked server anchor points for the rope ends."
-  }],
+  inputSlots: [
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定的绳索模拟背景图像。" },
+    { name: "pins", kind: "data", required: false, cardinality: "one", description: "Optional owner-locked server anchor points for the rope ends." }
+  ],
   primaryBackend: BATCH_04_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",
   normalizeParams: normalize,
   validateParams: validParams,
   render: (context, rawParams) => {
+    requireImageInput(context, "source_image");
     const params = normalize(rawParams);
     const steps = fixedSteps(context, 60, 360);
     const pointCount = params.segmentCount + 1;

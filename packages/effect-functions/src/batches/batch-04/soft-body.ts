@@ -7,6 +7,7 @@ import {
   boundedInt,
   fixedSteps,
   pointList,
+  requireImageInput,
   rounded,
   simulationResult,
   validParams,
@@ -71,19 +72,17 @@ export const SOFT_BODY_DEFINITION: EffectToolDefinition<SoftBodyParams> = {
     { presetId: "soft_body.rubber", displayName: "紧实橡胶", params: { ...SOFT_BODY_DEFAULTS, stiffness: 78, pressure: 2.5, damping: 4, solverIterations: 5 } },
     { presetId: "soft_body.heavy", displayName: "沉重软体", params: { ...SOFT_BODY_DEFAULTS, nodeCount: 32, gravity: 12, pressure: 1.2, shapeRadius: 0.55 } }
   ],
-  inputSlots: [{
-    name: "mesh",
-    kind: "model",
-    required: false,
-    cardinality: "one",
-    description: "Optional owner-locked server mesh vertices used as the soft-body boundary."
-  }],
+  inputSlots: [
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定、映射到软体表面的单张图像。" },
+    { name: "mesh", kind: "model", required: false, cardinality: "one", description: "Optional owner-locked server mesh vertices used as the soft-body boundary." }
+  ],
   primaryBackend: BATCH_04_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: normalize,
   validateParams: validParams,
   render: (context, rawParams) => {
+    requireImageInput(context, "source_image");
     const params = normalize(rawParams);
     const steps = fixedSteps(context, 60, 300);
     const boundVertices = pointList(context.inputs, "mesh", "vertices", params.nodeCount);

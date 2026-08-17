@@ -123,6 +123,28 @@ describe("120-tool selector helpers", () => {
     }
   );
 
+  it.each([
+    ["sim_boids", "background_image"],
+    ["sim_cloth", "cloth_image"],
+    ["sim_collision_shatter", "source_image"],
+    ["sim_fluid_lite", "source_image"],
+    ["sim_rigid_body_2d", "source_image"],
+    ["sim_rope", "source_image"],
+    ["sim_soft_body", "source_image"],
+    ["sim_spring", "source_image"]
+  ])("requires exactly one image for %s", (toolName, slotName) => {
+    const simulation = tool({
+      toolName,
+      inputRequirements: [
+        input(slotName, "image"),
+        input("server_geometry", "data", false)
+      ]
+    });
+    expect(imageUploadRequirement(simulation)).toEqual({ min: 1, max: 1 });
+    expect(turnInputIds(simulation, ["asset_imageabcdefgh"]))
+      .toEqual({ [slotName]: "asset_imageabcdefgh" });
+  });
+
   it("preserves available selections, truncates excess, and fills the required minimum", () => {
     const transition = tool({
       inputRequirements: [input("source_frame", "image"), input("target_frame", "image")]

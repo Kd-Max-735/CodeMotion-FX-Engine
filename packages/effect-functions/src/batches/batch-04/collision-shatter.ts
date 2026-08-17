@@ -8,6 +8,7 @@ import {
   createRng,
   fixedSteps,
   pointList,
+  requireImageInput,
   rounded,
   simulationResult,
   validParams
@@ -76,6 +77,7 @@ export const COLLISION_SHATTER_DEFINITION: EffectToolDefinition<CollisionShatter
     { presetId: "collision_shatter.heavy", displayName: "重力坍落", params: { ...COLLISION_SHATTER_DEFAULTS, fragmentCount: 32, gravity: 16, drag: 1.4, restitution: 0.12 } }
   ],
   inputSlots: [
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定、被切分为碰撞碎片的单张图像。" },
     { name: "mesh", kind: "model", required: false, cardinality: "one", description: "Optional owner-locked server source mesh." },
     { name: "fracture_map", kind: "data", required: false, cardinality: "one", description: "Optional owner-locked server fracture centroids and topology." }
   ],
@@ -85,26 +87,34 @@ export const COLLISION_SHATTER_DEFINITION: EffectToolDefinition<CollisionShatter
   normalizeParams: normalize,
   validateParams: validParams,
   render: (context, rawParams) => {
+    requireImageInput(context, "source_image");
     const params = normalize(rawParams);
     const steps = fixedSteps(context, 60, 300);
     const rng = createRng(context.seed ^ 0x53484154);
     const fractureCentroids = pointList(context.inputs, "fracture_map", "centroids", params.fragmentCount);
     const meshVertices = pointList(context.inputs, "mesh", "vertices", params.fragmentCount);
     const spreadRadians = params.spreadAngle * Math.PI / 180;
+    const columns = Math.max(2, Math.ceil(Math.sqrt(params.fragmentCount * context.width / context.height)));
+    const rows = Math.ceil(params.fragmentCount / columns);
     const fragments = Array.from({ length: params.fragmentCount }, (_, index) => {
       const source = fractureCentroids[index] ?? meshVertices[index];
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const sourceX = source?.x ?? -0.9 + (column + 0.5) / columns * 1.8;
+      const sourceY = source?.y ?? -0.82 + (row + 0.5) / rows * 1.64;
       const baseAngle = -Math.PI / 2 - spreadRadians / 2 + spreadRadians * ((index + 0.5) / params.fragmentCount);
       const angle = baseAngle + (rng() - 0.5) * spreadRadians / params.fragmentCount * params.randomness * 3;
       const speed = params.impactStrength * (0.45 + rng() * 0.55 * params.randomness + (1 - params.randomness) * 0.25);
-      const radius = 0.08 + 0.32 * Math.sqrt((index + 0.5) / params.fragmentCount);
       return {
-        x: source?.x ?? Math.cos(index * 2.399963) * radius,
-        y: source?.y ?? Math.sin(index * 2.399963) * radius - 0.15,
+        x: sourceX,
+        y: sourceY,
+        sourceX,
+        sourceY,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         rotation: 0,
         angularVelocity: (rng() * 2 - 1) * params.spin,
-        size: rounded(0.025 + rng() * 0.045, 4)
+        size: rounded(Math.min(0.86 / columns, 0.78 / rows) * (0.88 + rng() * 0.12), 4)
       };
     });
     let floorImpacts = 0;
@@ -130,7 +140,7 @@ export const COLLISION_SHATTER_DEFINITION: EffectToolDefinition<CollisionShatter
     const meanDistance = fragments.reduce((sum, fragment) => sum + Math.hypot(fragment.x, fragment.y + 0.15), 0)
       / fragments.length;
     return simulationResult("fx.sim.collisionShatter", steps.count, steps.dt,
-      { fragments: fragments.map((fragment, index) => ({ id: index, x: rounded(fragment.x), y: rounded(fragment.y), vx: rounded(fragment.vx), vy: rounded(fragment.vy), rotation: rounded(fragment.rotation), size: fragment.size })) },
+      { fragments: fragments.map((fragment, index) => ({ id: index, x: rounded(fragment.x), y: rounded(fragment.y), sourceX: rounded(fragment.sourceX), sourceY: rounded(fragment.sourceY), vx: rounded(fragment.vx), vy: rounded(fragment.vy), rotation: rounded(fragment.rotation), size: fragment.size })) },
       { fragmentCount: fragments.length, floorImpacts, meanDistance: rounded(meanDistance), boundFractureMap: fractureCentroids.length > 0 },
       steps.capped);
   }

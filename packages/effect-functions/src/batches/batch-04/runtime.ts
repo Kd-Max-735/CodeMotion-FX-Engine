@@ -135,6 +135,23 @@ export function inputBinding(
   return record(binding?.binding);
 }
 
+export function requireImageInput(
+  context: ServerEffectRenderContext,
+  slot: string
+): Record<string, unknown> {
+  const binding = inputBinding(context.inputs, slot);
+  const width = binding?.width;
+  const height = binding?.height;
+  const data = binding?.data;
+  if (binding === undefined || !Number.isInteger(width) || !Number.isInteger(height)
+    || (width as number) !== context.width || (height as number) !== context.height
+    || !(Array.isArray(data) || data instanceof Uint8Array || data instanceof Uint8ClampedArray)
+    || data.length !== context.width * context.height * 4) {
+    throw new TypeError(`Input slot ${slot} must bind an RGBA image matching the render context.`);
+  }
+  return binding;
+}
+
 export function pointList(
   inputs: AuthorizedEffectInputs,
   slot: string,

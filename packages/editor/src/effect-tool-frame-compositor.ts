@@ -12,7 +12,10 @@ const POLISHED_STRUCTURED_TOOLS = new Set([
   "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke",
   "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on",
   "particle_dissolve", "particle_logo_assemble", "particle_snow_rain", "particle_spark",
-  "particle_trail", "particle_emitter"
+  "particle_trail", "particle_emitter",
+  "particle_flow_field", "particle_orbit_field", "sim_boids", "sim_cloth",
+  "sim_collision_shatter", "sim_fluid_lite", "sim_rigid_body_2d", "sim_rope",
+  "sim_soft_body", "sim_spring"
 ]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -148,6 +151,174 @@ function drawLine(
       color,
       opacity
     );
+  }
+}
+
+type ScreenPoint = Readonly<{ x: number; y: number }>;
+type TextureVertex = Readonly<{ x: number; y: number; u: number; v: number }>;
+
+function simulationPointToPixel(point: ScreenPoint, request: FrameRequest): readonly [number, number] {
+  return [
+    (point.x + 1) * 0.5 * (request.width - 1),
+    (point.y + 1) * 0.5 * (request.height - 1)
+  ];
+}
+
+function shadeFrame(output: Uint8ClampedArray, amount: number, tint: readonly number[] = [5, 8, 14]): void {
+  const safeAmount = Math.max(0, Math.min(1, amount));
+  for (let offset = 0; offset < output.length; offset += 4) {
+    output[offset] = clampByte(output[offset]! * safeAmount + tint[0]! * (1 - safeAmount));
+    output[offset + 1] = clampByte(output[offset + 1]! * safeAmount + tint[1]! * (1 - safeAmount));
+    output[offset + 2] = clampByte(output[offset + 2]! * safeAmount + tint[2]! * (1 - safeAmount));
+    output[offset + 3] = 255;
+  }
+}
+
+function clearFrame(output: Uint8ClampedArray, color: readonly number[]): void {
+  for (let offset = 0; offset < output.length; offset += 4) {
+    output[offset] = color[0]!;
+    output[offset + 1] = color[1]!;
+    output[offset + 2] = color[2]!;
+    output[offset + 3] = 255;
+  }
+}
+
+function drawScreenPolyline(
+  output: Uint8ClampedArray,
+  points: readonly ScreenPoint[],
+  request: FrameRequest,
+  color: readonly number[],
+  opacity: number,
+  thickness: number
+): void {
+  for (let index = 1; index < points.length; index += 1) {
+    const from = points[index - 1]!;
+    const to = points[index]!;
+    drawLine(output, request.width, request.height, from.x, from.y, to.x, to.y, color, opacity, thickness);
+  }
+}
+
+function fillScreenTriangle(
+  output: Uint8ClampedArray,
+  request: FrameRequest,
+  a: ScreenPoint,
+  b: ScreenPoint,
+  c: ScreenPoint,
+  color: readonly number[],
+  opacity: number
+): void {
+  const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+  if (Math.abs(denominator) < 1e-6) return;
+  const minimumX = Math.max(0, Math.floor(Math.min(a.x, b.x, c.x)));
+  const maximumX = Math.min(request.width - 1, Math.ceil(Math.max(a.x, b.x, c.x)));
+  const minimumY = Math.max(0, Math.floor(Math.min(a.y, b.y, c.y)));
+  const maximumY = Math.min(request.height - 1, Math.ceil(Math.max(a.y, b.y, c.y)));
+  for (let y = minimumY; y <= maximumY; y += 1) {
+    for (let x = minimumX; x <= maximumX; x += 1) {
+      const wa = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / denominator;
+      const wb = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / denominator;
+      const wc = 1 - wa - wb;
+      if (wa >= -0.001 && wb >= -0.001 && wc >= -0.001) {
+        blendPixel(output, request.width, request.height, x, y, color, opacity);
+      }
+    }
+  }
+}
+
+function drawTexturedTriangle(
+  output: Uint8ClampedArray,
+  source: Uint8Array,
+  request: FrameRequest,
+  a: TextureVertex,
+  b: TextureVertex,
+  c: TextureVertex,
+  opacity = 1,
+  shade = 1
+): void {
+  const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+  if (Math.abs(denominator) < 1e-6) return;
+  const minimumX = Math.max(0, Math.floor(Math.min(a.x, b.x, c.x)));
+  const maximumX = Math.min(request.width - 1, Math.ceil(Math.max(a.x, b.x, c.x)));
+  const minimumY = Math.max(0, Math.floor(Math.min(a.y, b.y, c.y)));
+  const maximumY = Math.min(request.height - 1, Math.ceil(Math.max(a.y, b.y, c.y)));
+  for (let y = minimumY; y <= maximumY; y += 1) {
+    for (let x = minimumX; x <= maximumX; x += 1) {
+      const wa = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / denominator;
+      const wb = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / denominator;
+      const wc = 1 - wa - wb;
+      if (wa < -0.001 || wb < -0.001 || wc < -0.001) continue;
+      const u = Math.max(0, Math.min(1, wa * a.u + wb * b.u + wc * c.u));
+      const v = Math.max(0, Math.min(1, wa * a.v + wb * b.v + wc * c.v));
+      const sourceX = Math.round(u * (request.width - 1));
+      const sourceY = Math.round(v * (request.height - 1));
+      const offset = (sourceY * request.width + sourceX) * 4;
+      blendPixel(output, request.width, request.height, x, y, [
+        source[offset]! * shade, source[offset + 1]! * shade,
+        source[offset + 2]! * shade, source[offset + 3]!
+      ], opacity);
+    }
+  }
+}
+
+function drawTexturedQuad(
+  output: Uint8ClampedArray,
+  source: Uint8Array,
+  request: FrameRequest,
+  vertices: readonly [TextureVertex, TextureVertex, TextureVertex, TextureVertex],
+  opacity = 1,
+  shade = 1
+): void {
+  drawTexturedTriangle(output, source, request, vertices[0], vertices[1], vertices[2], opacity, shade);
+  drawTexturedTriangle(output, source, request, vertices[0], vertices[2], vertices[3], opacity, shade);
+}
+
+function drawTexturedDisc(
+  output: Uint8ClampedArray,
+  source: Uint8Array,
+  request: FrameRequest,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  opacity = 1
+): void {
+  const safeRadius = Math.max(2, Math.min(96, radius));
+  for (let dy = -safeRadius; dy <= safeRadius; dy += 1) {
+    const y = Math.round(centerY + dy);
+    if (y < 0 || y >= request.height) continue;
+    for (let dx = -safeRadius; dx <= safeRadius; dx += 1) {
+      const distance = Math.hypot(dx, dy);
+      if (distance > safeRadius) continue;
+      const x = Math.round(centerX + dx);
+      if (x < 0 || x >= request.width) continue;
+      const u = dx / (safeRadius * 2) + 0.5;
+      const v = dy / (safeRadius * 2) + 0.5;
+      const sourceX = Math.max(0, Math.min(request.width - 1, Math.round(u * (request.width - 1))));
+      const sourceY = Math.max(0, Math.min(request.height - 1, Math.round(v * (request.height - 1))));
+      const offset = (sourceY * request.width + sourceX) * 4;
+      const edge = Math.min(1, (safeRadius - distance) / Math.max(1, safeRadius * 0.12));
+      blendPixel(output, request.width, request.height, x, y, [
+        source[offset]!, source[offset + 1]!, source[offset + 2]!, source[offset + 3]!
+      ], opacity * edge);
+    }
+  }
+}
+
+function drawRing(
+  output: Uint8ClampedArray,
+  request: FrameRequest,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  color: readonly number[],
+  opacity: number,
+  thickness: number
+): void {
+  const steps = Math.max(36, Math.ceil(radius * 1.5));
+  for (let index = 0; index < steps; index += 1) {
+    const angle = index / steps * Math.PI * 2;
+    drawDisc(output, request.width, request.height,
+      centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius,
+      thickness, color, opacity);
   }
 }
 
@@ -595,6 +766,322 @@ function drawStructuredOutput(
   }
 }
 
+function stateRecords(state: Record<string, unknown>, key: string): readonly Record<string, unknown>[] {
+  const entries = state[key];
+  return Array.isArray(entries) ? entries.flatMap((entry) => {
+    const item = record(entry);
+    return item === undefined ? [] : [item];
+  }) : [];
+}
+
+function texturedPolygon(
+  output: Uint8ClampedArray,
+  source: Uint8Array,
+  request: FrameRequest,
+  points: readonly ScreenPoint[]
+): void {
+  if (points.length < 3) return;
+  const minimumX = Math.max(0, Math.floor(Math.min(...points.map((point) => point.x))));
+  const maximumX = Math.min(request.width - 1, Math.ceil(Math.max(...points.map((point) => point.x))));
+  const minimumY = Math.max(0, Math.floor(Math.min(...points.map((point) => point.y))));
+  const maximumY = Math.min(request.height - 1, Math.ceil(Math.max(...points.map((point) => point.y))));
+  const spanX = Math.max(1, maximumX - minimumX);
+  const spanY = Math.max(1, maximumY - minimumY);
+  for (let y = minimumY; y <= maximumY; y += 1) {
+    for (let x = minimumX; x <= maximumX; x += 1) {
+      let inside = false;
+      for (let index = 0, previous = points.length - 1; index < points.length; previous = index, index += 1) {
+        const a = points[index]!;
+        const b = points[previous]!;
+        if ((a.y > y) !== (b.y > y)
+          && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+      }
+      if (!inside) continue;
+      const sourceX = Math.round((x - minimumX) / spanX * (request.width - 1));
+      const sourceY = Math.round((y - minimumY) / spanY * (request.height - 1));
+      const offset = (sourceY * request.width + sourceX) * 4;
+      const sheen = 0.9 + 0.1 * Math.sin((x - minimumX) / spanX * Math.PI);
+      blendPixel(output, request.width, request.height, x, y, [
+        source[offset]! * sheen, source[offset + 1]! * sheen,
+        source[offset + 2]! * sheen, source[offset + 3]!
+      ], 0.96);
+    }
+  }
+}
+
+function simulationFrame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  toolName: string,
+  source: Uint8Array | undefined
+): boolean {
+  const state = record(value.state);
+  if (state === undefined) return false;
+
+  if (toolName === "particle_flow_field" || toolName === "particle_orbit_field") {
+    shadeFrame(output, source === undefined ? 0.3 : 0.48, toolName === "particle_orbit_field"
+      ? [4, 5, 18] : [5, 12, 18]);
+    const particles = stateRecords(state, "particles");
+    if (toolName === "particle_orbit_field") {
+      const center = simulationPointToPixel({ x: 0, y: 0 }, request);
+      drawDisc(output, request.width, request.height, center[0], center[1], 30, [80, 42, 255, 255], 0.09);
+      for (const radius of [0.18, 0.34, 0.5]) {
+        drawRing(output, request, center[0], center[1], Math.min(request.width, request.height) * radius,
+          [96, 92, 255, 255], 0.025, 1.2);
+      }
+    }
+    particles.forEach((particle, index) => {
+      const x = Number(particle.x);
+      const y = Number(particle.y);
+      const vx = Number(particle.vx);
+      const vy = Number(particle.vy);
+      if (![x, y, vx, vy].every(Number.isFinite)) return;
+      const pixel = simulationPointToPixel({ x, y }, request);
+      const speed = Math.hypot(vx, vy);
+      const scale = Math.min(22, 5 + speed * 5.5);
+      const velocityLength = Math.max(0.001, speed);
+      const color = toolName === "particle_orbit_field"
+        ? index % 3 === 0 ? [255, 108, 218, 255] : [102, 154, 255, 255]
+        : index % 4 === 0 ? [108, 255, 193, 255] : [76, 205, 255, 255];
+      const tailX = pixel[0] - vx / velocityLength * scale;
+      const tailY = pixel[1] - vy / velocityLength * scale;
+      drawLine(output, request.width, request.height, tailX, tailY, pixel[0], pixel[1], color, 0.18, 3.8);
+      drawLine(output, request.width, request.height, tailX, tailY, pixel[0], pixel[1], color, 0.62, 1.15);
+      drawDisc(output, request.width, request.height, pixel[0], pixel[1], 7.5, color, 0.1);
+      drawDisc(output, request.width, request.height, pixel[0], pixel[1], 2.8, color, 0.9);
+      drawDisc(output, request.width, request.height, pixel[0] - 0.7, pixel[1] - 0.7, 1.1,
+        [248, 255, 255, 255], 0.96);
+    });
+    return true;
+  }
+
+  if (toolName === "sim_boids") {
+    shadeFrame(output, 0.7, [4, 10, 16]);
+    stateRecords(state, "boids").forEach((boid, index) => {
+      const point = simulationPointToPixel({ x: Number(boid.x), y: Number(boid.y) }, request);
+      const vx = Number(boid.vx);
+      const vy = Number(boid.vy);
+      const speed = Math.max(0.001, Math.hypot(vx, vy));
+      const directionX = vx / speed;
+      const directionY = vy / speed;
+      const normalX = -directionY;
+      const normalY = directionX;
+      const length = 7 + Math.min(8, speed * 3.5);
+      const width = 4.5 + index % 3;
+      const nose = { x: point[0] + directionX * length, y: point[1] + directionY * length };
+      const left = { x: point[0] - directionX * length * 0.55 + normalX * width,
+        y: point[1] - directionY * length * 0.55 + normalY * width };
+      const right = { x: point[0] - directionX * length * 0.55 - normalX * width,
+        y: point[1] - directionY * length * 0.55 - normalY * width };
+      fillScreenTriangle(output, request,
+        { x: nose.x + 2, y: nose.y + 3 }, { x: left.x + 2, y: left.y + 3 },
+        { x: right.x + 2, y: right.y + 3 }, [0, 0, 0, 255], 0.32);
+      fillScreenTriangle(output, request, nose, left, right,
+        index % 4 === 0 ? [255, 190, 82, 255] : [112, 231, 255, 255], 0.88);
+      drawDisc(output, request.width, request.height, nose.x, nose.y, 1.2, [255, 255, 240, 255], 0.95);
+    });
+    return true;
+  }
+
+  if (toolName === "sim_cloth" && source !== undefined) {
+    const vertices = stateRecords(state, "vertices");
+    const resolution = Math.round(Math.sqrt(vertices.length));
+    if (resolution < 2 || resolution * resolution !== vertices.length) return false;
+    clearFrame(output, [7, 10, 18]);
+    const vertex = (index: number): TextureVertex => {
+      const item = vertices[index]!;
+      const pixel = simulationPointToPixel({ x: Number(item.x), y: Number(item.y) }, request);
+      return { x: pixel[0], y: pixel[1], u: index % resolution / (resolution - 1),
+        v: Math.floor(index / resolution) / (resolution - 1) };
+    };
+    for (let row = 0; row < resolution - 1; row += 1) {
+      for (let column = 0; column < resolution - 1; column += 1) {
+        const topLeft = row * resolution + column;
+        const quad = [vertex(topLeft), vertex(topLeft + 1), vertex(topLeft + resolution + 1),
+          vertex(topLeft + resolution)] as const;
+        const shade = 0.84 + column / Math.max(1, resolution - 1) * 0.2;
+        drawTexturedQuad(output, source, request, quad, 1, shade);
+      }
+    }
+    for (let row = 0; row < resolution; row += Math.max(2, Math.floor(resolution / 4))) {
+      const points = Array.from({ length: resolution }, (_, column) => vertex(row * resolution + column));
+      drawScreenPolyline(output, points, request, [240, 250, 255, 255], 0.08, 1.2);
+    }
+    return true;
+  }
+
+  if (toolName === "sim_collision_shatter" && source !== undefined) {
+    const fragments = stateRecords(state, "fragments");
+    shadeFrame(output, 0.13, [6, 8, 13]);
+    const columns = Math.max(2, Math.ceil(Math.sqrt(fragments.length * request.width / request.height)));
+    const rows = Math.max(1, Math.ceil(fragments.length / columns));
+    fragments.forEach((fragment, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const sourceX = Number.isFinite(Number(fragment.sourceX))
+        ? Number(fragment.sourceX) : -0.9 + (column + 0.5) / columns * 1.8;
+      const sourceY = Number.isFinite(Number(fragment.sourceY))
+        ? Number(fragment.sourceY) : -0.82 + (row + 0.5) / rows * 1.64;
+      const center = simulationPointToPixel({
+        x: sourceX + (Number(fragment.x) - sourceX) * 0.22,
+        y: sourceY + (Number(fragment.y) - sourceY) * 0.72
+      }, request);
+      const rotation = Number(fragment.rotation) || 0;
+      const halfWidth = request.width / columns * 0.48;
+      const halfHeight = request.height / rows * 0.46;
+      const cosine = Math.cos(rotation);
+      const sine = Math.sin(rotation);
+      const corners = [[-halfWidth, -halfHeight], [halfWidth, -halfHeight],
+        [halfWidth, halfHeight], [-halfWidth, halfHeight]] as const;
+      const uv = [[column / columns, row / rows], [(column + 1) / columns, row / rows],
+        [(column + 1) / columns, (row + 1) / rows], [column / columns, (row + 1) / rows]] as const;
+      const quad = corners.map((corner, cornerIndex) => ({
+        x: center[0] + corner[0] * cosine - corner[1] * sine,
+        y: center[1] + corner[0] * sine + corner[1] * cosine,
+        u: uv[cornerIndex]![0], v: uv[cornerIndex]![1]
+      })) as unknown as readonly [TextureVertex, TextureVertex, TextureVertex, TextureVertex];
+      const shadow = quad.map((item) => ({ x: item.x + 5, y: item.y + 7 })) as unknown as
+        readonly [ScreenPoint, ScreenPoint, ScreenPoint, ScreenPoint];
+      fillScreenTriangle(output, request, shadow[0], shadow[1], shadow[2], [0, 0, 0, 255], 0.35);
+      fillScreenTriangle(output, request, shadow[0], shadow[2], shadow[3], [0, 0, 0, 255], 0.35);
+      drawTexturedQuad(output, source, request, quad, 0.98, 0.92 + index % 3 * 0.05);
+      drawScreenPolyline(output, [...quad, quad[0]!], request, [245, 250, 255, 255], 0.12, 0.8);
+    });
+    return true;
+  }
+
+  if (toolName === "sim_fluid_lite" && source !== undefined) {
+    const gridSize = Number(state.gridSize);
+    const cells = stateRecords(state, "cells");
+    if (!Number.isInteger(gridSize) || gridSize < 2 || cells.length !== gridSize * gridSize) return false;
+    const maximumDensity = Math.max(1e-6, ...cells.map((cell) => Number(cell.density) || 0));
+    const snapshot = new Uint8Array(source);
+    for (let y = 0; y < request.height; y += 1) {
+      const row = Math.min(gridSize - 1, Math.floor(y / request.height * gridSize));
+      for (let x = 0; x < request.width; x += 1) {
+        const column = Math.min(gridSize - 1, Math.floor(x / request.width * gridSize));
+        const cell = cells[row * gridSize + column]!;
+        const density = Math.sqrt(Math.max(0, Number(cell.density) || 0) / maximumDensity);
+        const vx = Number(cell.vx) || 0;
+        const vy = Number(cell.vy) || 0;
+        const sourceX = Math.max(0, Math.min(request.width - 1,
+          Math.round(x - vx * request.width / gridSize * 2.4 * density)));
+        const sourceY = Math.max(0, Math.min(request.height - 1,
+          Math.round(y - vy * request.height / gridSize * 2.4 * density)));
+        const from = (sourceY * request.width + sourceX) * 4;
+        const to = (y * request.width + x) * 4;
+        const tint = density * 0.34;
+        output[to] = clampByte(snapshot[from]! * (1 - tint) + 35 * tint);
+        output[to + 1] = clampByte(snapshot[from + 1]! * (1 - tint) + 178 * tint);
+        output[to + 2] = clampByte(snapshot[from + 2]! * (1 - tint) + 218 * tint);
+        output[to + 3] = 255;
+      }
+    }
+    return true;
+  }
+
+  if (toolName === "sim_rigid_body_2d" && source !== undefined) {
+    shadeFrame(output, 0.28, [6, 9, 15]);
+    stateRecords(state, "bodies").forEach((body, index) => {
+      const center = simulationPointToPixel({ x: Number(body.x), y: Number(body.y) }, request);
+      const radius = Math.max(8, Number(body.radius) * Math.min(request.width, request.height) * 0.5);
+      drawDisc(output, request.width, request.height, center[0] + 4, center[1] + 6,
+        radius + 3, [0, 0, 0, 255], 0.34);
+      drawDisc(output, request.width, request.height, center[0], center[1], radius + 4,
+        index % 3 === 0 ? [255, 176, 74, 255] : [78, 198, 255, 255], 0.22);
+      drawTexturedDisc(output, source, request, center[0], center[1], radius, 0.96);
+      drawRing(output, request, center[0], center[1], radius, [242, 250, 255, 255], 0.12, 1.1);
+    });
+    return true;
+  }
+
+  if (toolName === "sim_rope") {
+    shadeFrame(output, 0.58, [8, 7, 10]);
+    const points = stateRecords(state, "points").map((point) => {
+      const pixel = simulationPointToPixel({ x: Number(point.x), y: Number(point.y) }, request);
+      return { x: pixel[0], y: pixel[1] };
+    });
+    if (points.length < 2) return false;
+    drawScreenPolyline(output, points.map((point) => ({ x: point.x + 4, y: point.y + 6 })),
+      request, [0, 0, 0, 255], 0.38, 8.5);
+    drawScreenPolyline(output, points, request, [62, 31, 15, 255], 0.96, 7);
+    drawScreenPolyline(output, points, request, [206, 132, 62, 255], 0.9, 4.8);
+    drawScreenPolyline(output, points, request, [255, 222, 148, 255], 0.72, 1.2);
+    points.forEach((point, index) => {
+      if (index % 2 === 0) drawDisc(output, request.width, request.height, point.x, point.y,
+        3.3, index % 4 === 0 ? [255, 228, 164, 255] : [128, 68, 30, 255], 0.62);
+    });
+    drawDisc(output, request.width, request.height, points[0]!.x, points[0]!.y, 9,
+      [78, 86, 98, 255], 0.9);
+    drawDisc(output, request.width, request.height, points[0]!.x - 2, points[0]!.y - 2, 3,
+      [230, 238, 245, 255], 0.8);
+    return true;
+  }
+
+  if (toolName === "sim_soft_body" && source !== undefined) {
+    const points = stateRecords(state, "nodes").map((node) => {
+      const pixel = simulationPointToPixel({ x: Number(node.x), y: Number(node.y) }, request);
+      return { x: pixel[0], y: pixel[1] };
+    });
+    if (points.length < 3) return false;
+    shadeFrame(output, 0.18, [5, 8, 13]);
+    const shadow = points.map((point) => ({ x: point.x + 7, y: point.y + 10 }));
+    fillScreenTriangle(output, request, shadow[0]!, shadow[Math.floor(shadow.length / 3)]!,
+      shadow[Math.floor(shadow.length * 2 / 3)]!, [0, 0, 0, 255], 0.22);
+    texturedPolygon(output, source, request, points);
+    drawScreenPolyline(output, [...points, points[0]!], request, [26, 217, 187, 255], 0.34, 5.5);
+    drawScreenPolyline(output, [...points, points[0]!], request, [232, 255, 248, 255], 0.56, 1.2);
+    const top = points.reduce((best, point) => point.y < best.y ? point : best, points[0]!);
+    drawDisc(output, request.width, request.height, top.x - 6, top.y + 8, 14,
+      [255, 255, 255, 255], 0.08);
+    return true;
+  }
+
+  if (toolName === "sim_spring") {
+    shadeFrame(output, 0.46, [7, 8, 12]);
+    const nodes = stateRecords(state, "nodes").map((node) => {
+      const pixel = simulationPointToPixel({ x: Number(node.x), y: Number(node.y) }, request);
+      return { x: pixel[0], y: pixel[1] };
+    });
+    if (nodes.length < 2) return false;
+    const coil: ScreenPoint[] = [];
+    for (let index = 0; index < nodes.length - 1; index += 1) {
+      const from = nodes[index]!;
+      const to = nodes[index + 1]!;
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const length = Math.max(0.001, Math.hypot(dx, dy));
+      const normalX = -dy / length;
+      const normalY = dx / length;
+      const turns = 5;
+      for (let step = 0; step < turns; step += 1) {
+        const progress = step / turns;
+        const offset = Math.sin(progress * Math.PI * 2) * 7;
+        coil.push({ x: from.x + dx * progress + normalX * offset,
+          y: from.y + dy * progress + normalY * offset });
+      }
+    }
+    coil.push(nodes[nodes.length - 1]!);
+    drawScreenPolyline(output, coil.map((point) => ({ x: point.x + 4, y: point.y + 5 })),
+      request, [0, 0, 0, 255], 0.38, 6.5);
+    drawScreenPolyline(output, coil, request, [116, 72, 22, 255], 0.95, 4.6);
+    drawScreenPolyline(output, coil, request, [255, 190, 62, 255], 0.9, 2.8);
+    drawScreenPolyline(output, coil, request, [255, 247, 198, 255], 0.78, 0.8);
+    const anchor = nodes[0]!;
+    drawDisc(output, request.width, request.height, anchor.x, anchor.y, 9, [86, 96, 112, 255], 0.92);
+    const load = nodes[nodes.length - 1]!;
+    if (source !== undefined) {
+      drawDisc(output, request.width, request.height, load.x + 4, load.y + 6, 24, [0, 0, 0, 255], 0.32);
+      drawTexturedDisc(output, source, request, load.x, load.y, 21, 0.95);
+      drawRing(output, request, load.x, load.y, 21, [255, 224, 132, 255], 0.24, 1.2);
+    }
+    return true;
+  }
+
+  return false;
+}
+
 function polishedStructuredFrame(
   output: Uint8ClampedArray,
   value: Record<string, unknown>,
@@ -602,6 +1089,7 @@ function polishedStructuredFrame(
   toolName: string,
   source?: Uint8Array
 ): boolean {
+  if (simulationFrame(output, value, request, toolName, source)) return true;
   if (toolName === "shape_boolean_animate") {
     const grid = numericGrid(value, "alpha");
     if (grid === undefined) return false;

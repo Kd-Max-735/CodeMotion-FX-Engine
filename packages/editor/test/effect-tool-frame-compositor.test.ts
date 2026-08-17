@@ -73,7 +73,9 @@ describe("effect tool frame compositor", () => {
     "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke",
     "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on",
     "particle_dissolve", "particle_logo_assemble", "particle_snow_rain", "particle_spark",
-    "particle_trail", "particle_emitter"
+    "particle_trail", "particle_emitter", "particle_flow_field", "particle_orbit_field",
+    "sim_boids", "sim_cloth", "sim_collision_shatter", "sim_fluid_lite",
+    "sim_rigid_body_2d", "sim_rope", "sim_soft_body", "sim_spring"
   ])(
     "does not add the generic moving scanline to %s",
     (toolName) => {
@@ -209,5 +211,57 @@ describe("effect tool frame compositor", () => {
     expect([...output.slice(0, 4)]).toEqual([5, 8, 14, 255]);
     expect(new Set(Array.from({ length: output.length / 4 }, (_, index) =>
       output.slice(index * 4, index * 4 + 4).join(",")))).toEqual(new Set(["5,8,14,255"]));
+  });
+
+  it.each([
+    ["particle_flow_field", { particles: [
+      { x: -0.4, y: -0.2, vx: 1.2, vy: 0.4 }, { x: 0.2, y: 0.1, vx: -0.5, vy: 1.1 }
+    ] }],
+    ["particle_orbit_field", { particles: [
+      { x: -0.35, y: 0, vx: 0, vy: -1.3 }, { x: 0.35, y: 0, vx: 0, vy: 1.3 }
+    ] }],
+    ["sim_boids", { boids: [
+      { x: -0.2, y: -0.1, vx: 0.8, vy: 0.3 }, { x: 0.3, y: 0.2, vx: -0.6, vy: 0.4 }
+    ] }],
+    ["sim_cloth", { vertices: [
+      { x: -0.7, y: -0.7 }, { x: 0.7, y: -0.65 }, { x: -0.6, y: 0.55 }, { x: 0.62, y: 0.62 }
+    ] }],
+    ["sim_collision_shatter", { fragments: [
+      { x: -0.5, y: -0.35, rotation: -0.2 }, { x: 0.45, y: -0.28, rotation: 0.25 },
+      { x: -0.35, y: 0.45, rotation: 0.15 }, { x: 0.5, y: 0.4, rotation: -0.32 }
+    ] }],
+    ["sim_fluid_lite", { gridSize: 2, cells: [
+      { density: 0.2, vx: 0.1, vy: -0.2 }, { density: 1, vx: -0.4, vy: -0.6 },
+      { density: 0.5, vx: 0.3, vy: -0.1 }, { density: 0.1, vx: 0, vy: 0 }
+    ] }],
+    ["sim_rigid_body_2d", { bodies: [
+      { x: -0.35, y: 0.25, radius: 0.16 }, { x: 0.4, y: 0.45, radius: 0.13 }
+    ] }],
+    ["sim_rope", { points: [
+      { x: -0.6, y: -0.6 }, { x: -0.3, y: -0.1 }, { x: 0.1, y: 0.25 }, { x: 0.55, y: 0.5 }
+    ] }],
+    ["sim_soft_body", { nodes: [
+      { x: -0.45, y: 0.1 }, { x: 0, y: -0.3 }, { x: 0.48, y: 0.12 }, { x: 0.28, y: 0.58 }, { x: -0.3, y: 0.55 }
+    ] }],
+    ["sim_spring", { nodes: [
+      { x: -0.65, y: -0.45 }, { x: -0.3, y: -0.1 }, { x: 0.05, y: 0.12 }, { x: 0.42, y: 0.48 }
+    ] }]
+  ] as const)("renders a dedicated material visual for %s", (toolName, state) => {
+    const source = solidSource();
+    const output = composeEffectToolFrame(metadata({ state }), detailedRequest, toolName, source);
+    expect(changedPixelCount(source, output)).toBeGreaterThan(300);
+  });
+
+  it("maps positive simulation gravity toward the bottom of the frame", () => {
+    const source = solidSource();
+    const output = composeEffectToolFrame(metadata({ state: { nodes: [
+      { x: -0.35, y: 0.35 }, { x: 0, y: 0.18 }, { x: 0.35, y: 0.35 },
+      { x: 0.22, y: 0.72 }, { x: -0.24, y: 0.7 }
+    ] } }), detailedRequest, "sim_soft_body", source);
+    const brightnessAt = (x: number, y: number): number => {
+      const offset = (y * detailedRequest.width + x) * 4;
+      return output[offset]! + output[offset + 1]! + output[offset + 2]!;
+    };
+    expect(brightnessAt(48, 46)).toBeGreaterThan(brightnessAt(48, 12));
   });
 });

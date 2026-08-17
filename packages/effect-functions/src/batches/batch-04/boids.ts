@@ -7,6 +7,7 @@ import {
   boundedInt,
   createRng,
   fixedSteps,
+  requireImageInput,
   rounded,
   simulationResult,
   validParams,
@@ -71,13 +72,14 @@ export const BOIDS_DEFINITION: EffectToolDefinition<BoidsParams> = {
     { presetId: "boids.swarm", displayName: "躁动蜂群", params: { ...BOIDS_DEFAULTS, boidCount: 80, maxSpeed: 2.4, perceptionRadius: 0.16, separation: 3.8, alignment: 0.45 } },
     { presetId: "boids.drift", displayName: "舒缓迁徙", params: { ...BOIDS_DEFAULTS, boidCount: 24, maxSpeed: 0.55, alignment: 1.8, cohesion: 1.4, boundaryForce: 1 } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定的群集背景图；素材身份不进入模型参数。" }],
   primaryBackend: BATCH_04_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: normalize,
   validateParams: validParams,
   render: (context, rawParams) => {
+    requireImageInput(context, "background_image");
     const params = normalize(rawParams);
     const steps = fixedSteps(context, 60, 300);
     const rng = createRng(context.seed ^ 0x424f4944);

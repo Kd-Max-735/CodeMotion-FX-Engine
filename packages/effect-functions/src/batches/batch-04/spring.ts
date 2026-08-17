@@ -6,6 +6,7 @@ import {
   bounded,
   boundedInt,
   fixedSteps,
+  requireImageInput,
   rounded,
   simulationResult,
   validParams,
@@ -74,13 +75,14 @@ export const SPRING_DEFINITION: EffectToolDefinition<SpringParams> = {
     { presetId: "spring.tight", displayName: "紧致回弹", params: { ...SPRING_DEFAULTS, stiffness: 82, damping: 4.2, substeps: 4, impulseStrength: 3 } },
     { presetId: "spring.bridge", displayName: "双端悬挂", params: { ...SPRING_DEFAULTS, nodeCount: 20, anchorMode: "both", gravity: 8, restLength: 0.08 } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "source_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定的弹簧动力学背景和负载图像。" }],
   primaryBackend: BATCH_04_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",
   normalizeParams: normalize,
   validateParams: validParams,
   render: (context, rawParams) => {
+    requireImageInput(context, "source_image");
     const params = normalize(rawParams);
     const steps = fixedSteps(context, 60, 360);
     const nodes: SimulationPoint[] = Array.from({ length: params.nodeCount }, (_, index) => ({

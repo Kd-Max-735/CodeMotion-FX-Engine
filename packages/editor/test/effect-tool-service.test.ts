@@ -251,10 +251,11 @@ class TestInputResolver implements EffectToolInputResolver {
         })
       }));
     }
-    if (definition.inputSlots.some((slot) => slot.name === "background_image")) {
+    const requiredImage = definition.inputSlots.find((slot) => slot.required && slot.kind === "image");
+    if (requiredImage !== undefined) {
       return Promise.resolve(Object.freeze({
-        background_image: Object.freeze({
-          slot: "background_image",
+        [requiredImage.name]: Object.freeze({
+          slot: requiredImage.name,
           kind: "image" as const,
           tenantId: this.wrongOwner ? "tenant-other" : owner.tenantId,
           userId: owner.userId,

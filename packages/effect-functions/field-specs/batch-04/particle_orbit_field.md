@@ -1,6 +1,6 @@
 # 粒子轨道场 `particle_orbit_field`
 
-用户已经选中本工具。你只负责根据用户描述决定参数值；工具会用固定时间步模拟粒子围绕中心的径向恢复、切向追随和阻尼运动。
+用户已经选中本工具。你只负责根据用户描述决定参数值；工具会用固定时间步模拟高密度发光粒子围绕能量核心的径向恢复、切向追随和阻尼运动，并呈现多层景深和彗尾。
 
 只输出一个合法 JSON 对象，不要输出 Markdown、解释、注释或额外字段。`type` 必须严格等于 `particle_orbit_field`，`data` 只能包含下表字段。服务端绑定的 `vector_field` 不是模型参数，不得输出资源 ID、路径、URL 或资源内容。
 
@@ -12,7 +12,7 @@
 
 | 字段 | 必填 | 取值 | 选择策略 |
 | --- | --- | --- | --- |
-| `particleCount` | 否 | 整数 8–96，默认 32 | 画面越密集越大；没有密度要求时保持 32 |
+| `particleCount` | 否 | 整数 24–384，默认 120 | 画面越密集越大；没有密度要求时保持 120 |
 | `orbitStrength` | 否 | 0.1–8，默认 2.4 | 决定粒子回到目标轨道的力度和收束速度 |
 | `tangentialSpeed` | 否 | 0–4，默认 1.2 | 决定沿轨道旋转的基础速度；0 会弱化旋转 |
 | `radialDamping` | 否 | 0–5，默认 0.8 | 大值快速稳定，小值保留超调和摆动 |
@@ -26,15 +26,15 @@
 
 自然语言示例：
 
-- “少量粒子缓慢逆时针环绕”：`particleCount` 16，`tangentialSpeed` 0.5，`direction` 为 `counterclockwise`。
+- “少量粒子缓慢逆时针环绕”：`particleCount` 32，`tangentialSpeed` 0.5，`direction` 为 `counterclockwise`。
 - “紧凑高速涡旋”：`spread` 0.3，`orbitStrength` 5–6，`tangentialSpeed` 2.5–3。
 - “宽阔、平稳的顺时针星环”：`spread` 0.9，`radialDamping` 2，`direction` 为 `clockwise`。
-- “粒子很多但运动轻柔”：`particleCount` 72，`orbitStrength` 1.2，`tangentialSpeed` 0.7。
+- “粒子很多但运动轻柔”：`particleCount` 260，`orbitStrength` 1.2，`tangentialSpeed` 0.7。
 - “明显摇摆后回到轨道”：`orbitStrength` 3，`radialDamping` 0.25。
 - “几乎停止旋转，只保持环形”：`tangentialSpeed` 0.1，`orbitStrength` 2.4。
 
-推荐档位：`orbitStrength` 柔和 0.8–1.8 / 中等 2–4 / 强 4.5–7；`tangentialSpeed` 慢 0.3–0.8 / 中 1–1.8 / 快 2.2–3.5；`particleCount` 稀 8–24 / 中 32–56 / 密 64–96。
+推荐档位：`orbitStrength` 柔和 0.8–1.8 / 中等 2–4 / 强 4.5–7；`tangentialSpeed` 慢 0.3–0.8 / 中 1–1.8 / 快 2.2–3.5；`particleCount` 稀 24–64 / 中 96–180 / 密 220–384。
 
-中性值与默认行为：省略字段时使用默认值，得到 32 粒子、中等收束、逆时针、半径适中的稳定轨道。描述含糊时优先保留默认值。
+中性值与默认行为：省略字段时使用默认值，得到 120 个发光粒子、中等收束、逆时针、半径适中的稳定轨道。描述含糊时优先保留默认值。
 
 不适用范围：真实天体力学、三维轨道、粒子碰撞、重力坠落、多中心路径规划、资源选择。需要外部矢量场时由服务端绑定，不写入 `data`。
