@@ -2,6 +2,8 @@
 
 沿服务端绑定笔迹生成重叠的确定性马克笔笔头印迹，模拟透明叠色、渗色和纸面边缘。只输出 JSON，不要附加解释、Markdown 或代码块：
 
+视频由服务端在前 1.4 秒沿笔迹逐步落笔，之后保留完整涂抹结果；该显现时间不是模型参数。
+
 ```json
 {"type":"marker_stroke","data":{"width":28,"opacity":0.82,"overlap":0.35,"bleed":0.12,"edgeRoughness":0.08,"spacing":0.3}}
 ```

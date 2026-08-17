@@ -740,6 +740,32 @@ describe("server single effect-tool service", () => {
         expect(Buffer.from(laterOutput.data).equals(Buffer.from(earlyOutput.data)), `${toolName} animates`).toBe(false);
       }
     }
+
+    const geometryCases = [
+      ["blob_morph", "source_shape", 32, true],
+      ["dash_flow", "source_path", 32, true],
+      ["electric_arc", "terminals", 4, false],
+      ["lightning_trace", "guide_path", 11, false],
+      ["marker_stroke", "stroke_path", 11, false]
+    ] as const;
+    for (const [toolName, slotName, pointCount, closed] of geometryCases) {
+      const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
+      const inputs = await resolver.resolve(principal, definition, {
+        [slotName]: media.asset.id
+      }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
+      const input = inputs[slotName];
+      expect(Array.isArray(input)).toBe(false);
+      const binding = (input as { binding: {
+        points: readonly { x: number; y: number }[];
+        closed: boolean;
+      } }).binding;
+      expect(binding.points).toHaveLength(pointCount);
+      expect(binding.closed).toBe(closed);
+      expect(new Set(binding.points.map((point) => `${point.x.toFixed(3)},${point.y.toFixed(3)}`)).size)
+        .toBeGreaterThan(3);
+      expect(binding.points.every((point) => point.x >= 0 && point.x < width
+        && point.y >= 0 && point.y < height)).toBe(true);
+    }
     expect(decode).toHaveBeenCalled();
   });
 

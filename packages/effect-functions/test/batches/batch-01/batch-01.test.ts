@@ -53,7 +53,7 @@ function slotBinding(name: string): unknown {
   return pathBinding;
 }
 
-function contextFor(definition: EffectToolDefinition, seed = 173): ServerEffectRenderContext {
+function contextFor(definition: EffectToolDefinition, seed = 173, time = 1.25): ServerEffectRenderContext {
   const inputs: Record<string, unknown> = {};
   for (const slot of definition.inputSlots) {
     inputs[slot.name] = {
@@ -70,9 +70,9 @@ function contextFor(definition: EffectToolDefinition, seed = 173): ServerEffectR
     requestId: "batch-01-request",
     tenantId: "tenant-batch-01",
     userId: "user-batch-01",
-    time: 1.25,
+    time,
     deltaTime: 1 / 30,
-    frame: 38,
+    frame: Math.round(time * 30),
     fps: 30,
     width: 160,
     height: 120,
@@ -162,6 +162,38 @@ describe("batch-01 effect definitions", () => {
       expect(second.output).not.toEqual(first.output);
     }
   );
+
+  it("reveals lightning and marker geometry over server render time", async () => {
+    const lightning = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === "lightning_trace")!;
+    const marker = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === "marker_stroke")!;
+    const renderAt = async (definition: EffectToolDefinition, time: number) => executeSelectedEffectTool(
+      definition,
+      definition.toolName,
+      { type: definition.toolName, data: {} },
+      contextFor(definition, 173, time)
+    );
+
+    const lightningStart = (await renderAt(lightning, 0)).output as {
+      main: readonly unknown[]; revealProgress: number;
+    };
+    const lightningMiddle = (await renderAt(lightning, 0.625)).output as {
+      main: readonly unknown[]; revealProgress: number;
+    };
+    const lightningEnd = (await renderAt(lightning, 1.25)).output as {
+      main: readonly unknown[]; revealProgress: number;
+    };
+    expect(lightningStart.main).toHaveLength(0);
+    expect(lightningMiddle.main.length).toBeGreaterThan(1);
+    expect(lightningEnd.main.length).toBeGreaterThan(lightningMiddle.main.length);
+    expect([lightningStart.revealProgress, lightningMiddle.revealProgress, lightningEnd.revealProgress])
+      .toEqual([0, 0.5, 1]);
+
+    const markerStart = (await renderAt(marker, 0)).output as { revealProgress: number };
+    const markerMiddle = (await renderAt(marker, 0.7)).output as { revealProgress: number };
+    const markerEnd = (await renderAt(marker, 1.4)).output as { revealProgress: number };
+    expect([markerStart.revealProgress, markerMiddle.revealProgress, markerEnd.revealProgress])
+      .toEqual([0, 0.5, 1]);
+  });
 
   it.each(BATCH_01_DEFINITIONS)("rejects unknown and invalid $toolName parameters", (definition) => {
     expect(() => validateAndNormalizeEffectEnvelope(

@@ -1,7 +1,7 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
 import {
-  SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, effectResult, numberField,
+  SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, clamp, effectResult, numberField,
   parameterSchema, randomAt, readPath, resamplePath, round, roundPoint
 } from "./common.js";
 
@@ -64,6 +64,14 @@ export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> 
         angle: round(Math.atan2(dy, dx))
       };
     });
-    return effectResult("metadata", { algorithm: "overlapping_marker_dabs", dabs, composite: "multiply-alpha" });
+    return effectResult("metadata", {
+      algorithm: "overlapping_marker_dabs",
+      dabs,
+      composite: "multiply-alpha",
+      bleed: round(params.bleed),
+      edgeRoughness: round(params.edgeRoughness),
+      overlap: round(params.overlap),
+      revealProgress: round(clamp(context.time / 1.4, 0, 1))
+    });
   }
 };

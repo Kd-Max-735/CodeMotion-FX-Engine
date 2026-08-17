@@ -776,6 +776,40 @@ function derivedVisualContour(
   }));
 }
 
+function pixelContour(
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings
+): readonly Readonly<{ x: number; y: number }>[] {
+  return Object.freeze(derivedVisualContour(pixels, render).map((point) => Object.freeze({
+    x: point.x * (render.width - 1),
+    y: point.y * (render.height - 1)
+  })));
+}
+
+function derivedFeaturePath(
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings
+): readonly Readonly<{ x: number; y: number }>[] {
+  const pointCount = 11;
+  return Object.freeze(Array.from({ length: pointCount }, (_, index) => {
+    const u = 0.08 + index / (pointCount - 1) * 0.84;
+    let bestV = 0.5 + Math.sin(index * 1.17) * 0.08;
+    let bestScore = 0;
+    for (let step = 2; step <= 18; step += 1) {
+      const v = 0.12 + step / 20 * 0.76;
+      const score = Math.abs(
+        sourceLuminance(pixels, render, u, Math.max(0, v - 0.025))
+        - sourceLuminance(pixels, render, u, Math.min(1, v + 0.025))
+      );
+      if (score > bestScore) {
+        bestScore = score;
+        bestV = v;
+      }
+    }
+    return Object.freeze({ x: u * (render.width - 1), y: bestV * (render.height - 1) });
+  }));
+}
+
 function derivedVectorRasterSource(
   pixels: Uint8Array,
   render: EffectToolRenderSettings
@@ -806,6 +840,25 @@ function previewDataBinding(
 ): unknown {
   const sample = previewColor(pixels);
   const path = previewPath(render);
+  if (definition.toolName === "blob_morph" && slot.name === "source_shape") {
+    return { points: pixelContour(pixels, render), closed: true };
+  }
+  if (definition.toolName === "dash_flow" && slot.name === "source_path") {
+    return { points: pixelContour(pixels, render), closed: true };
+  }
+  if (definition.toolName === "electric_arc" && slot.name === "terminals") {
+    const contour = pixelContour(pixels, render);
+    return {
+      points: [contour[2]!, contour[10]!, contour[18]!, contour[26]!],
+      closed: false
+    };
+  }
+  if (definition.toolName === "lightning_trace" && slot.name === "guide_path") {
+    return { points: derivedFeaturePath(pixels, render), closed: false };
+  }
+  if (definition.toolName === "marker_stroke" && slot.name === "stroke_path") {
+    return { points: derivedFeaturePath(pixels, render), closed: false };
+  }
   switch (slot.name) {
     case "audio_analysis": return previewAudioBinding(definition, render);
     case "chart_data": return { version: "validated-chart-v1", series: [

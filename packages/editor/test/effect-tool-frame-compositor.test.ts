@@ -21,6 +21,45 @@ function frame(data: readonly number[]): EffectRenderResult {
   };
 }
 
+function metadata(output: Record<string, unknown>): EffectRenderResult {
+  return {
+    kind: "metadata",
+    backendId: "test",
+    degraded: false,
+    warnings: [],
+    output
+  };
+}
+
+const detailedRequest = {
+  frame: 18,
+  time: 0.6,
+  deltaTime: 1 / 30,
+  fps: 30,
+  width: 96,
+  height: 64
+};
+
+function solidSource(): Uint8Array {
+  const source = new Uint8Array(detailedRequest.width * detailedRequest.height * 4);
+  for (let offset = 0; offset < source.length; offset += 4) {
+    source[offset] = 18;
+    source[offset + 1] = 24;
+    source[offset + 2] = 32;
+    source[offset + 3] = 255;
+  }
+  return source;
+}
+
+function changedPixelCount(source: Uint8Array, output: Uint8Array): number {
+  let count = 0;
+  for (let offset = 0; offset < source.length; offset += 4) {
+    if (source[offset] !== output[offset] || source[offset + 1] !== output[offset + 1]
+      || source[offset + 2] !== output[offset + 2]) count += 1;
+  }
+  return count;
+}
+
 describe("effect tool frame compositor", () => {
   it("composites transparent text effect frames over the uploaded source image", () => {
     const source = Uint8Array.from([10, 20, 30, 255]);
@@ -28,5 +67,59 @@ describe("effect tool frame compositor", () => {
       .toEqual([130, 10, 15, 255]);
     expect([...composeEffectToolFrame(frame([250, 0, 0, 128]), request, "film_grain", source)])
       .toEqual([250, 0, 0, 128]);
+  });
+
+  it.each(["blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke"])(
+    "does not add the generic moving scanline to %s",
+    (toolName) => {
+      const source = solidSource();
+      expect(composeEffectToolFrame(undefined, detailedRequest, toolName, source)).toEqual(source);
+    }
+  );
+
+  it.each([
+    ["blob_morph", {
+      points: [{ x: 20, y: 12 }, { x: 66, y: 8 }, { x: 82, y: 34 }, { x: 58, y: 55 }, { x: 18, y: 48 }],
+      center: { x: 49, y: 31 }, closed: true
+    }],
+    ["dash_flow", {
+      segments: [
+        { points: [{ x: 10, y: 38 }, { x: 28, y: 13 }, { x: 48, y: 30 }] },
+        { points: [{ x: 56, y: 34 }, { x: 72, y: 52 }, { x: 88, y: 24 }] }
+      ], lineCap: "round"
+    }],
+    ["electric_arc", {
+      arcs: [{ points: [{ x: 8, y: 46 }, { x: 24, y: 16 }, { x: 43, y: 42 }, { x: 68, y: 12 }, { x: 90, y: 38 }] }],
+      branches: [{ points: [{ x: 43, y: 42 }, { x: 52, y: 51 }, { x: 61, y: 47 }], intensity: 0.7 }],
+      glowRadius: 12, intensity: 1.5
+    }],
+    ["lightning_trace", {
+      main: [{ x: 8, y: 42 }, { x: 22, y: 18 }, { x: 39, y: 40 }, { x: 58, y: 14 }, { x: 86, y: 32 }],
+      branches: [{ points: [{ x: 39, y: 40 }, { x: 49, y: 54 }, { x: 60, y: 49 }], intensity: 0.65 }],
+      glowRadius: 10, revealProgress: 0.6
+    }],
+    ["marker_stroke", {
+      dabs: [
+        { center: { x: 18, y: 43 }, width: 20, height: 16, opacity: 0.82, angle: -0.3 },
+        { center: { x: 34, y: 35 }, width: 22, height: 17, opacity: 0.8, angle: -0.2 },
+        { center: { x: 51, y: 31 }, width: 23, height: 18, opacity: 0.84, angle: 0.08 },
+        { center: { x: 69, y: 36 }, width: 21, height: 17, opacity: 0.81, angle: 0.28 }
+      ], bleed: 0.2, edgeRoughness: 0.12, revealProgress: 1
+    }]
+  ] as const)("renders a substantial specialized visual for %s", (toolName, value) => {
+    const source = solidSource();
+    const output = composeEffectToolFrame(metadata(value), detailedRequest, toolName, source);
+    expect(changedPixelCount(source, output)).toBeGreaterThan(80);
+  });
+
+  it.each([
+    ["electric_arc", { arcs: [{ points: [{ x: 8, y: 8 }, { x: 88, y: 56 }] }], intensity: 0, glowRadius: 20 }],
+    ["marker_stroke", {
+      dabs: [{ center: { x: 48, y: 32 }, width: 40, height: 30, opacity: 0, angle: 0 }],
+      bleed: 0.3, edgeRoughness: 0.2, revealProgress: 1
+    }]
+  ] as const)("keeps %s visually neutral when its opacity control is zero", (toolName, value) => {
+    const source = solidSource();
+    expect(composeEffectToolFrame(metadata(value), detailedRequest, toolName, source)).toEqual(source);
   });
 });

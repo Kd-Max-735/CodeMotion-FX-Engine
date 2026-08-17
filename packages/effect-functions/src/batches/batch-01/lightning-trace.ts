@@ -1,7 +1,7 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
 import {
-  SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, animatedSeed, effectResult,
+  SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, animatedSeed, clamp, effectResult,
   integerField, numberField, parameterSchema, randomAt, readPath, resamplePath,
   round, roundPoint, slicePath
 } from "./common.js";
@@ -49,7 +49,18 @@ export const LIGHTNING_TRACE_DEFINITION: EffectToolDefinition<LightningTracePara
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
     const guide = readPath(context, "guide_path");
-    const active = { points: slicePath(guide, 0, params.progress, params.segmentLength), closed: false };
+    const revealProgress = clamp(context.time / 1.25, 0, 1);
+    const activeProgress = params.progress * revealProgress;
+    if (activeProgress <= Number.EPSILON) {
+      return effectResult("metadata", {
+        algorithm: "seeded_guided_lightning",
+        main: [],
+        branches: [],
+        glowRadius: round(params.glow),
+        revealProgress: 0
+      });
+    }
+    const active = { points: slicePath(guide, 0, activeProgress, params.segmentLength), closed: false };
     const samples = resamplePath(active, params.segmentLength);
     const seed = animatedSeed(context, 4 + params.flicker * 20, 71);
     const main = samples.map((point, index) => {
@@ -79,6 +90,12 @@ export const LIGHTNING_TRACE_DEFINITION: EffectToolDefinition<LightningTracePara
       });
       return { points, intensity: round(1 - branchIndex / Math.max(1, params.branchCount) * 0.65) };
     });
-    return effectResult("metadata", { algorithm: "seeded_guided_lightning", main, branches, glowRadius: round(params.glow) });
+    return effectResult("metadata", {
+      algorithm: "seeded_guided_lightning",
+      main,
+      branches,
+      glowRadius: round(params.glow),
+      revealProgress: round(revealProgress)
+    });
   }
 };

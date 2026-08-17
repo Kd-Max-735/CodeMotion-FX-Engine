@@ -8,6 +8,10 @@ const TEXT_OVERLAY_TOOLS = new Set([
   "text_extrude_3d", "text_path_reveal", "typewriter", "word_explode"
 ]);
 
+const POLISHED_STRUCTURED_TOOLS = new Set([
+  "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke"
+]);
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) && !ArrayBuffer.isView(value)
     ? value as Record<string, unknown> : undefined;
@@ -172,6 +176,126 @@ function finitePoint(value: unknown): { readonly x: number; readonly y: number }
     ? { x: item.x, y: item.y } : undefined;
 }
 
+function pointArray(value: unknown): readonly { readonly x: number; readonly y: number }[] {
+  if (!Array.isArray(value)) return [];
+  const points = value.map(finitePoint);
+  return points.every((point) => point !== undefined)
+    ? points as readonly { readonly x: number; readonly y: number }[] : [];
+}
+
+function pixelPoints(
+  points: readonly { readonly x: number; readonly y: number }[],
+  request: FrameRequest
+): readonly (readonly [number, number])[] {
+  return points.map((point) => pointToPixel(point, request.width, request.height));
+}
+
+function drawPolyline(
+  output: Uint8ClampedArray,
+  points: readonly { readonly x: number; readonly y: number }[],
+  request: FrameRequest,
+  color: readonly number[],
+  opacity: number,
+  thickness: number,
+  closed = false
+): void {
+  if (points.length < 2) return;
+  const pixels = pixelPoints(points, request);
+  const segmentCount = pixels.length - 1 + (closed ? 1 : 0);
+  for (let index = 0; index < segmentCount; index += 1) {
+    const from = pixels[index % pixels.length]!;
+    const to = pixels[(index + 1) % pixels.length]!;
+    drawLine(output, request.width, request.height, from[0], from[1], to[0], to[1], color, opacity, thickness);
+  }
+}
+
+function drawElectricPath(
+  output: Uint8ClampedArray,
+  points: readonly { readonly x: number; readonly y: number }[],
+  request: FrameRequest,
+  glow: number,
+  intensity = 1
+): void {
+  if (intensity <= 0) return;
+  const energy = Math.max(0.2, Math.min(2.4, intensity));
+  if (glow > 0) {
+    drawPolyline(output, points, request, [8, 24, 76, 255], 0.13 * energy, Math.max(2, glow * 0.72));
+    drawPolyline(output, points, request, [40, 104, 255, 255], 0.24 * energy, Math.max(1.4, glow * 0.38));
+  }
+  drawPolyline(output, points, request, [72, 224, 255, 255], 0.55 * energy, 2.2);
+  drawPolyline(output, points, request, [238, 252, 255, 255], Math.min(1, 0.82 * energy), 0.8);
+}
+
+function fillPolygon(
+  output: Uint8ClampedArray,
+  points: readonly { readonly x: number; readonly y: number }[],
+  request: FrameRequest
+): void {
+  if (points.length < 3) return;
+  const pixels = pixelPoints(points, request);
+  const minimumY = Math.max(0, Math.floor(Math.min(...pixels.map((point) => point[1]))));
+  const maximumY = Math.min(request.height - 1, Math.ceil(Math.max(...pixels.map((point) => point[1]))));
+  for (let y = minimumY; y <= maximumY; y += 1) {
+    const intersections: number[] = [];
+    for (let index = 0; index < pixels.length; index += 1) {
+      const a = pixels[index]!;
+      const b = pixels[(index + 1) % pixels.length]!;
+      if ((a[1] > y) === (b[1] > y)) continue;
+      intersections.push(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]));
+    }
+    intersections.sort((left, right) => left - right);
+    for (let pair = 0; pair + 1 < intersections.length; pair += 2) {
+      const fromX = Math.max(0, Math.ceil(intersections[pair]!));
+      const toX = Math.min(request.width - 1, Math.floor(intersections[pair + 1]!));
+      const vertical = (y - minimumY) / Math.max(1, maximumY - minimumY);
+      for (let x = fromX; x <= toX; x += 1) {
+        const sheen = 0.13 + (1 - vertical) * 0.11 + Math.sin(x * 0.031 + y * 0.019) * 0.015;
+        blendPixel(output, request.width, request.height, x, y, [28, 210, 178, 255], sheen);
+      }
+    }
+  }
+}
+
+function drawMarkerDab(
+  output: Uint8ClampedArray,
+  request: FrameRequest,
+  dab: Record<string, unknown>,
+  bleed: number,
+  roughness: number
+): void {
+  const center = finitePoint(dab.center);
+  const width = typeof dab.width === "number" ? Math.max(1, Math.min(400, dab.width)) : 1;
+  const height = typeof dab.height === "number" ? Math.max(1, Math.min(400, dab.height)) : width * 0.75;
+  const opacity = typeof dab.opacity === "number" ? Math.max(0, Math.min(1, dab.opacity)) : 0.8;
+  const angle = typeof dab.angle === "number" && Number.isFinite(dab.angle) ? dab.angle : 0;
+  if (center === undefined || opacity <= 0) return;
+  const pixel = pointToPixel(center, request.width, request.height);
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  const halfAlong = height * 0.5;
+  const halfAcross = width * 0.5;
+  const radius = Math.ceil(Math.hypot(halfAlong, halfAcross) * (1 + bleed * 0.45));
+  for (let dy = -radius; dy <= radius; dy += 1) {
+    const y = Math.round(pixel[1] + dy);
+    if (y < 0 || y >= request.height) continue;
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      const x = Math.round(pixel[0] + dx);
+      if (x < 0 || x >= request.width) continue;
+      const along = dx * cosine + dy * sine;
+      const across = -dx * sine + dy * cosine;
+      const roughEdge = halfAcross * (1 + roughness * Math.sin(along * 0.41 + y * 0.17));
+      const edge = Math.max(Math.abs(along) / Math.max(1, halfAlong), Math.abs(across) / Math.max(1, roughEdge));
+      const bleedEdge = 1 + bleed * (0.2 + 0.3 * (0.5 + 0.5 * Math.sin(x * 0.37 + y * 0.23)));
+      if (edge > bleedEdge) continue;
+      const body = edge <= 1 ? 1 - Math.max(0, edge - 0.78) / 0.22 : 0;
+      const feather = edge > 1 ? (bleedEdge - edge) / Math.max(0.001, bleedEdge - 1) : 0;
+      const paperGrain = 0.84 + 0.16 * (0.5 + 0.5 * Math.sin(x * 0.73 + y * 1.13));
+      const alpha = opacity * paperGrain * (body * 0.24 + feather * 0.075);
+      blendPixel(output, request.width, request.height, x, y, [255, 78, 118, 255], alpha);
+    }
+  }
+}
+
 function drawGeometry(
   output: Uint8ClampedArray,
   value: unknown,
@@ -317,6 +441,134 @@ function drawStructuredOutput(
       output[offset + 2] = clampByte(output[offset + 2]! * 0.55 + color[2]! * 0.45);
     }
   }
+}
+
+function polishedStructuredFrame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  toolName: string
+): boolean {
+  if (toolName === "blob_morph") {
+    const points = pointArray(value.points);
+    if (points.length < 3) return false;
+    fillPolygon(output, points, request);
+    drawPolyline(output, points, request, [5, 45, 54, 255], 0.32, 8, true);
+    drawPolyline(output, points, request, [32, 232, 191, 255], 0.5, 3.8, true);
+    drawPolyline(output, points, request, [203, 255, 239, 255], 0.82, 1.1, true);
+    const center = finitePoint(value.center);
+    if (center !== undefined) {
+      const pixel = pointToPixel(center, request.width, request.height);
+      drawDisc(output, request.width, request.height, pixel[0] - request.width * 0.035,
+        pixel[1] - request.height * 0.045, Math.min(request.width, request.height) * 0.055,
+        [190, 255, 238, 255], 0.13);
+    }
+    points.filter((_, index) => index % Math.max(2, Math.floor(points.length / 8)) === 0)
+      .forEach((point, index) => {
+        const pixel = pointToPixel(point, request.width, request.height);
+        const pulse = 0.08 + (Math.sin(request.time * 2.2 + index) + 1) * 0.025;
+        drawDisc(output, request.width, request.height, pixel[0], pixel[1], 5, [128, 255, 218, 255], pulse);
+      });
+    return true;
+  }
+
+  if (toolName === "dash_flow") {
+    const segments = Array.isArray(value.segments) ? value.segments : [];
+    let rendered = false;
+    segments.forEach((entry, index) => {
+      const segment = record(entry);
+      const points = pointArray(segment?.points);
+      if (points.length < 2) return;
+      rendered = true;
+      drawPolyline(output, points, request, [8, 28, 52, 255], 0.32, 5.2);
+      drawPolyline(output, points, request, index % 2 === 0
+        ? [32, 220, 255, 255] : [104, 255, 198, 255], 0.64, 2.8);
+      drawPolyline(output, points, request, [231, 255, 252, 255], 0.86, 0.9);
+    });
+    return rendered;
+  }
+
+  if (toolName === "electric_arc") {
+    const glow = typeof value.glowRadius === "number" ? Math.max(0, value.glowRadius) : 10;
+    const intensity = typeof value.intensity === "number" ? Math.max(0, value.intensity) : 1;
+    if (intensity <= 0) return true;
+    const arcs = Array.isArray(value.arcs) ? value.arcs : [];
+    let rendered = false;
+    arcs.forEach((entry) => {
+      const points = pointArray(record(entry)?.points);
+      if (points.length < 2) return;
+      rendered = true;
+      drawElectricPath(output, points, request, glow, intensity);
+      for (const endpoint of [points[0]!, points[points.length - 1]!]) {
+        const pixel = pointToPixel(endpoint, request.width, request.height);
+        drawDisc(output, request.width, request.height, pixel[0], pixel[1], Math.max(5, glow * 0.7),
+          [62, 166, 255, 255], 0.28);
+        drawDisc(output, request.width, request.height, pixel[0], pixel[1], 2.2,
+          [245, 255, 255, 255], 0.95);
+      }
+    });
+    const branches = Array.isArray(value.branches) ? value.branches : [];
+    branches.forEach((entry) => {
+      const branch = record(entry);
+      const points = pointArray(branch?.points);
+      const branchIntensity = typeof branch?.intensity === "number" ? branch.intensity : intensity * 0.65;
+      drawElectricPath(output, points, request, glow * 0.55, branchIntensity * 0.72);
+      const tip = points[points.length - 1];
+      if (tip !== undefined) {
+        const pixel = pointToPixel(tip, request.width, request.height);
+        drawDisc(output, request.width, request.height, pixel[0], pixel[1], 3.4,
+          [178, 241, 255, 255], 0.38);
+      }
+    });
+    return rendered;
+  }
+
+  if (toolName === "lightning_trace") {
+    const main = pointArray(value.main);
+    const glow = typeof value.glowRadius === "number" ? Math.max(0, value.glowRadius) : 8;
+    if (main.length >= 2) drawElectricPath(output, main, request, glow, 1.35);
+    const branches = Array.isArray(value.branches) ? value.branches : [];
+    branches.forEach((entry) => {
+      const branch = record(entry);
+      const points = pointArray(branch?.points);
+      const intensity = typeof branch?.intensity === "number" ? branch.intensity : 0.55;
+      drawElectricPath(output, points, request, glow * 0.52, intensity * 0.72);
+    });
+    const head = main[main.length - 1];
+    if (head !== undefined) {
+      const pixel = pointToPixel(head, request.width, request.height);
+      drawDisc(output, request.width, request.height, pixel[0], pixel[1], Math.max(7, glow * 1.2),
+        [42, 128, 255, 255], 0.32);
+      drawDisc(output, request.width, request.height, pixel[0], pixel[1], 2.6,
+        [248, 255, 255, 255], 1);
+    }
+    return true;
+  }
+
+  if (toolName === "marker_stroke") {
+    const dabs = Array.isArray(value.dabs) ? value.dabs : [];
+    const reveal = typeof value.revealProgress === "number"
+      ? Math.max(0, Math.min(1, value.revealProgress)) : 1;
+    const visibleCount = Math.min(dabs.length, Math.ceil(dabs.length * reveal));
+    const bleed = typeof value.bleed === "number" ? Math.max(0, Math.min(1, value.bleed)) : 0.12;
+    const roughness = typeof value.edgeRoughness === "number"
+      ? Math.max(0, Math.min(0.5, value.edgeRoughness)) : 0.08;
+    for (let index = 0; index < visibleCount; index += 1) {
+      const dab = record(dabs[index]);
+      if (dab !== undefined) drawMarkerDab(output, request, dab, bleed, roughness);
+    }
+    const tip = record(dabs[Math.max(0, visibleCount - 1)]);
+    const tipCenter = finitePoint(tip?.center);
+    const tipOpacity = typeof tip?.opacity === "number" ? tip.opacity : 0;
+    if (visibleCount > 0 && tipCenter !== undefined && tipOpacity > 0) {
+      const pixel = pointToPixel(tipCenter, request.width, request.height);
+      drawDisc(output, request.width, request.height, pixel[0], pixel[1], 4,
+        [255, 188, 92, 255], 0.28);
+    }
+    return true;
+  }
+
+  return false;
 }
 
 function shiftedSource(
@@ -641,10 +893,12 @@ function adapterPreview(
       }
     }
   }
-  const scanline = Math.floor(((request.time * 90) % (request.height + 40)) - 20);
-  for (let y = Math.max(0, scanline - 2); y <= Math.min(request.height - 1, scanline + 2); y += 1) {
-    for (let x = 0; x < request.width; x += 1) {
-      blendPixel(output, request.width, request.height, x, y, [96, 220, 255, 255], 0.22);
+  if (!POLISHED_STRUCTURED_TOOLS.has(toolName)) {
+    const scanline = Math.floor(((request.time * 90) % (request.height + 40)) - 20);
+    for (let y = Math.max(0, scanline - 2); y <= Math.min(request.height - 1, scanline + 2); y += 1) {
+      for (let x = 0; x < request.width; x += 1) {
+        blendPixel(output, request.width, request.height, x, y, [96, 220, 255, 255], 0.22);
+      }
     }
   }
 }
@@ -666,16 +920,19 @@ export function composeEffectToolFrame(
   const output = sourceFrame(source, request, toolName);
   const value = result === undefined ? undefined : record(result.output);
   if (value !== undefined) {
-    operationFrame(output, source, value, request);
-    const fieldRendered = scalarField(output, value, request);
-    const state = record(value.state);
-    const simulationGrid = state !== undefined && Number.isInteger(state.gridSize) && Array.isArray(state.cells);
-    particleFrame(output, value, request);
-    if (!fieldRendered && !simulationGrid) {
-      drawGeometry(output, value, request);
-      drawStructuredOutput(output, value, request);
+    const polished = polishedStructuredFrame(output, value, request, toolName);
+    if (!polished) {
+      operationFrame(output, source, value, request);
+      const fieldRendered = scalarField(output, value, request);
+      const state = record(value.state);
+      const simulationGrid = state !== undefined && Number.isInteger(state.gridSize) && Array.isArray(state.cells);
+      particleFrame(output, value, request);
+      if (!fieldRendered && !simulationGrid) {
+        drawGeometry(output, value, request);
+        drawStructuredOutput(output, value, request);
+      }
+      dataVisualization(output, value, request, toolName);
     }
-    dataVisualization(output, value, request, toolName);
   }
   adapterPreview(output, source, request, toolName);
   return new Uint8Array(output.buffer, output.byteOffset, output.byteLength);
