@@ -599,15 +599,18 @@ describe("server single effect-tool service", () => {
       decode as never
     );
     const cases = [
-      ["character_cascade", "text_raster", "text"],
-      ["kinetic_typography", "text_raster", "text"],
-      ["scramble_decode", "text_raster", "text"],
-      ["path_trim", "vector_source", "shape"],
-      ["path_morph", "vector_source", "shape"],
-      ["radial_burst", "vector_source", "shape"]
+      ["character_cascade", "text_raster", "text", true],
+      ["kinetic_typography", "text_raster", "text", true],
+      ["scramble_decode", "text_raster", "text", true],
+      ["text_morph", "text_raster", "text", true],
+      ["text_extrude_3d", "text_raster", "text", true],
+      ["path_trim", "vector_source", "shape", true],
+      ["path_morph", "vector_source", "shape", true],
+      ["radial_burst", "vector_source", "shape", true],
+      ["shape_repeater", "vector_source", "shape", false]
     ] as const;
 
-    for (const [toolName, primarySlot, sourceKind] of cases) {
+    for (const [toolName, primarySlot, sourceKind, animates] of cases) {
       const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
       const inputs = await resolver.resolve(principal, definition, {
         [primarySlot]: media.asset.id
@@ -615,8 +618,20 @@ describe("server single effect-tool service", () => {
       const primary = inputs[primarySlot];
       expect(primary).toBeDefined();
       expect(Array.isArray(primary)).toBe(false);
-      const binding = (primary as { binding: { rasterInput: { source: { kind: string } } } }).binding;
+      const binding = (primary as { binding: {
+        surface: { data: Uint8Array };
+        rasterInput: { source: { kind: string; glyphs?: readonly {
+          coverage: { data: Uint8Array };
+        }[] } };
+      } }).binding;
       expect(binding.rasterInput.source.kind).toBe(sourceKind);
+      if (toolName === "text_extrude_3d") {
+        expect(binding.rasterInput.source.glyphs?.length).toBeGreaterThan(0);
+        expect(binding.rasterInput.source.glyphs?.every((glyph) =>
+          glyph.coverage.data.some((value) => value > 0))).toBe(true);
+        expect(binding.surface.data.some((value, offset) => offset % 4 === 3 && value === 0)).toBe(true);
+        expect(binding.surface.data.some((value, offset) => offset % 4 === 3 && value > 0)).toBe(true);
+      }
       const renderAt = (time: number) => executeSelectedEffectTool(
         definition, toolName, { type: toolName, data: definition.defaults }, {
           environment: "server",
@@ -642,8 +657,10 @@ describe("server single effect-tool service", () => {
       const laterOutput = later.output as { width: number; height: number; data: Uint8Array };
       expect([laterOutput.width, laterOutput.height, laterOutput.data.length])
         .toEqual([width, height, pixels.length]);
-      expect(Buffer.from(laterOutput.data).equals(Buffer.from(pixels)), `${toolName} applies effect`).toBe(false);
-      expect(Buffer.from(laterOutput.data).equals(Buffer.from(earlyOutput.data)), `${toolName} animates`).toBe(false);
+      expect(Buffer.from(laterOutput.data).equals(Buffer.from(binding.surface.data)), `${toolName} applies effect`).toBe(false);
+      if (animates) {
+        expect(Buffer.from(laterOutput.data).equals(Buffer.from(earlyOutput.data)), `${toolName} animates`).toBe(false);
+      }
     }
     expect(decode).toHaveBeenCalled();
   });

@@ -57,9 +57,11 @@ const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
 const HAN_TEXT = /\p{Script=Han}/u;
 const SENSITIVE_PATH = /(?:https?:\/\/|file:\/\/|[a-z]:\\|\/(?:home|tmp|var|etc|users)\/)/iu;
 const IMAGE_DERIVED_TEXT_TOOLS = new Set([
-  "character_cascade", "kinetic_typography", "scramble_decode"
+  "character_cascade", "kinetic_typography", "scramble_decode", "text_morph"
 ]);
-const IMAGE_DERIVED_VECTOR_TOOLS = new Set(["path_trim", "path_morph", "radial_burst"]);
+const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
+  "path_trim", "path_morph", "radial_burst", "shape_repeater"
+]);
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
 export interface EffectToolPrincipal {
@@ -667,6 +669,98 @@ function derivedTextRasterSource(
   });
 }
 
+const EXTRUDED_PREVIEW_GLYPHS = Object.freeze([
+  Object.freeze(["11110", "10000", "10000", "11110", "10000", "10000", "10000"]),
+  Object.freeze(["10001", "01010", "00100", "00100", "00100", "01010", "10001"]),
+  Object.freeze(["11110", "00001", "00001", "01110", "00001", "00001", "11110"]),
+  Object.freeze(["11110", "10001", "10001", "10001", "10001", "10001", "11110"])
+]);
+
+function derivedTextExtrudePreview(
+  media: VerifiedStoredMedia,
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings
+): { readonly source: TextRasterSource; readonly pixels: Uint8Array } {
+  const glyphCount = Math.max(1, Math.min(
+    EXTRUDED_PREVIEW_GLYPHS.length,
+    Math.floor(render.width / 5)
+  ));
+  const top = Math.min(render.height - 1, Math.floor(render.height * 0.2));
+  const bottom = Math.max(top + 1, Math.ceil(render.height * 0.8));
+  const surfacePixels = new Uint8Array(render.width * render.height * 4);
+  const characters = ["F", "X", "3", "D"].slice(0, glyphCount);
+  const glyphs = characters.map((character, index) => {
+    const cellLeft = Math.floor(index * render.width / glyphCount);
+    const cellRight = Math.floor((index + 1) * render.width / glyphCount);
+    const horizontalInset = cellRight - cellLeft >= 4 ? 1 : 0;
+    const left = Math.min(render.width - 1, cellLeft + horizontalInset);
+    const right = Math.max(left + 1, cellRight - horizontalInset);
+    const width = Math.max(1, right - left);
+    const height = Math.max(1, bottom - top);
+    const coverage = new Uint8Array(width * height);
+    const pattern = EXTRUDED_PREVIEW_GLYPHS[index]!;
+    let occupied = false;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const patternY = Math.min(pattern.length - 1, Math.floor(y / height * pattern.length));
+        const row = pattern[patternY]!;
+        const patternX = Math.min(row.length - 1, Math.floor(x / width * row.length));
+        if (row[patternX] !== "1") continue;
+        occupied = true;
+        const coverageOffset = y * width + x;
+        const targetOffset = ((top + y) * render.width + left + x) * 4;
+        coverage[coverageOffset] = 255;
+        surfacePixels[targetOffset] = Math.max(48, pixels[targetOffset]!);
+        surfacePixels[targetOffset + 1] = Math.max(96, pixels[targetOffset + 1]!);
+        surfacePixels[targetOffset + 2] = Math.max(144, pixels[targetOffset + 2]!);
+        surfacePixels[targetOffset + 3] = 255;
+      }
+    }
+    if (!occupied) {
+      const x = Math.floor(width / 2);
+      const y = Math.floor(height / 2);
+      coverage[y * width + x] = 255;
+      const targetOffset = ((top + y) * render.width + left + x) * 4;
+      surfacePixels[targetOffset] = 72;
+      surfacePixels[targetOffset + 1] = 168;
+      surfacePixels[targetOffset + 2] = 255;
+      surfacePixels[targetOffset + 3] = 255;
+    }
+    return Object.freeze({
+      glyphId: character.codePointAt(0)!,
+      cluster: index,
+      advance: cellRight - cellLeft,
+      offsetX: 0,
+      offsetY: 0,
+      bounds: Object.freeze({ x: left, y: top, width, height }),
+      coverage: Object.freeze({
+        width,
+        height,
+        data: coverage,
+        rowOrder: "top-to-bottom" as const
+      })
+    });
+  });
+  return Object.freeze({
+    source: Object.freeze({
+      kind: "text",
+      text: characters.join(""),
+      font: Object.freeze({
+        fontId: "codemotion.server-derived-extrude-proxy-v1",
+        assetId: `server-derived:${media.asset.id}`,
+        assetHash: media.asset.hash ?? "sha256:server-derived-extrude-proxy-v1",
+        family: "CodeMotion Server Derived Extrude Proxy",
+        style: "normal",
+        weight: 700,
+        unitsPerEm: 1000,
+        missingGlyphPolicy: "error" as const
+      }),
+      glyphs: Object.freeze(glyphs)
+    }),
+    pixels: surfacePixels
+  });
+}
+
 function sourceLuminance(
   pixels: Uint8Array,
   render: EffectToolRenderSettings,
@@ -816,13 +910,17 @@ function legacyRasterBinding(
 ) {
   const kind = visualKind(media.asset)!;
   const layerId = `single-tool:${slot.name}:${media.asset.id}`;
+  const extrudedText = slot.name === "text_raster" && definition.toolName === "text_extrude_3d"
+    ? derivedTextExtrudePreview(media, pixels, render)
+    : undefined;
   const derivedText = slot.name === "text_raster" && IMAGE_DERIVED_TEXT_TOOLS.has(definition.toolName);
   const derivedVector = slot.name === "vector_source" && IMAGE_DERIVED_VECTOR_TOOLS.has(definition.toolName);
-  const source = derivedText
-    ? derivedTextRasterSource(media, pixels, render)
-    : derivedVector
-      ? derivedVectorRasterSource(pixels, render)
-      : {
+  const source = extrudedText?.source
+    ?? (derivedText
+      ? derivedTextRasterSource(media, pixels, render)
+      : derivedVector
+        ? derivedVectorRasterSource(pixels, render)
+        : {
           kind,
           assetId: media.asset.id,
           assetHash: media.asset.hash ?? "",
@@ -835,7 +933,7 @@ function legacyRasterBinding(
             alphaMode: "straight" as const,
             rowOrder: "top-to-bottom" as const
           }
-        };
+        });
   const rasterInput: LayerRasterizationInput = {
     layerId,
     layerType: source.kind,
@@ -868,7 +966,7 @@ function legacyRasterBinding(
     surface: {
       width: render.width,
       height: render.height,
-      data: new Uint8ClampedArray(pixels),
+      data: new Uint8ClampedArray(extrudedText?.pixels ?? pixels),
       colorSpace: "srgb" as const,
       alphaMode: "straight" as const
     },
