@@ -3,6 +3,11 @@ import type { FrameRequest } from "@codemotion/exporter";
 
 type PixelBytes = Uint8Array | Uint8ClampedArray;
 
+const TEXT_OVERLAY_TOOLS = new Set([
+  "character_cascade", "kinetic_typography", "scramble_decode", "text_morph",
+  "text_extrude_3d", "text_path_reveal", "typewriter", "word_explode"
+]);
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) && !ArrayBuffer.isView(value)
     ? value as Record<string, unknown> : undefined;
@@ -27,6 +32,31 @@ function exactFrame(result: EffectRenderResult, request: FrameRequest): Uint8Arr
 
 function clampByte(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function compositeExactTextFrame(
+  source: Uint8Array,
+  overlay: Uint8Array,
+  request: FrameRequest
+): Uint8Array {
+  const output = new Uint8ClampedArray(source);
+  for (let offset = 0; offset < overlay.length; offset += 4) {
+    const overlayAlpha = overlay[offset + 3]! / 255;
+    if (overlayAlpha === 0) continue;
+    const sourceAlpha = output[offset + 3]! / 255;
+    const alpha = overlayAlpha + sourceAlpha * (1 - overlayAlpha);
+    for (let channel = 0; channel < 3; channel += 1) {
+      output[offset + channel] = clampByte(alpha === 0 ? 0 : (
+        overlay[offset + channel]! * overlayAlpha
+        + output[offset + channel]! * sourceAlpha * (1 - overlayAlpha)
+      ) / alpha);
+    }
+    output[offset + 3] = clampByte(alpha * 255);
+  }
+  if (output.length !== request.width * request.height * 4) {
+    throw new RangeError("Composited text frame dimensions do not match the frame request.");
+  }
+  return new Uint8Array(output.buffer, output.byteOffset, output.byteLength);
 }
 
 function sourceFrame(source: Uint8Array | undefined, request: FrameRequest, toolName: string): Uint8ClampedArray {
@@ -627,7 +657,11 @@ export function composeEffectToolFrame(
 ): Uint8Array {
   if (result !== undefined) {
     const exact = exactFrame(result, request);
-    if (exact !== undefined) return exact;
+    if (exact !== undefined) {
+      return source !== undefined && source.length === exact.length && TEXT_OVERLAY_TOOLS.has(toolName)
+        ? compositeExactTextFrame(source, exact, request)
+        : exact;
+    }
   }
   const output = sourceFrame(source, request, toolName);
   const value = result === undefined ? undefined : record(result.output);

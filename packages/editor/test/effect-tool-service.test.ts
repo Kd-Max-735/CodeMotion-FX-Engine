@@ -525,6 +525,57 @@ describe("server single effect-tool service", () => {
     })).rejects.toMatchObject({ code: "security" });
   });
 
+  it("requires every distinct selected-tool image only when Ark chooses the Tool Call", async () => {
+    const provider = new NativeRecordingProvider();
+    const inputs = new TestInputResolver();
+    const service = new EffectToolService(provider, inputs);
+    const setToolCall = (toolName: string) => {
+      const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
+      provider.turn = {
+        reasoningContent: "用户要求生成视频，需要调用当前工具。",
+        content: "准备执行当前工具。",
+        toolCall: {
+          id: `call-${toolName}`,
+          name: toolName,
+          arguments: {
+            effectParams: structuredClone(definition.defaults),
+            output: { durationSeconds: 5, generationMode: "standard" }
+          }
+        }
+      };
+    };
+
+    await expect(service.selectedTurn(principal, {
+      toolName: "photo_stack",
+      prompt: "这个工具有哪些参数？",
+      inputIds: { source_images: ["asset_imageabcdefgh"] }
+    })).resolves.toMatchObject({ kind: "message" });
+
+    setToolCall("wipe");
+    await expect(service.selectedTurn(principal, {
+      toolName: "wipe",
+      prompt: "生成擦除转场",
+      inputIds: { source_frame: "asset_imageabcdefgh" }
+    })).rejects.toThrow(/target_frame/u);
+
+    await expect(service.selectedTurn(principal, {
+      toolName: "wipe",
+      prompt: "生成擦除转场",
+      inputIds: {
+        source_frame: "asset_imageabcdefgh",
+        target_frame: "asset_imageabcdefgh"
+      }
+    })).rejects.toThrow(/distinct authorized resource/u);
+
+    setToolCall("photo_stack");
+    await expect(service.selectedTurn(principal, {
+      toolName: "photo_stack",
+      prompt: "生成照片叠放",
+      inputIds: { source_images: ["asset_imageabcdefgh"] }
+    })).rejects.toThrow(/2–32/u);
+    expect(inputs.calls).toBe(0);
+  });
+
   it("reference-counts concurrent asset use and aborts parameter generation during close", async () => {
     const provider = new BlockingProvider();
     const service = new EffectToolService(provider, new TestInputResolver());
@@ -562,8 +613,8 @@ describe("server single effect-tool service", () => {
   });
 
   it("derives structured image previews for the reported existing tools", async () => {
-    const width = 24;
-    const height = 16;
+    const width = 96;
+    const height = 64;
     const pixels = new Uint8Array(width * height * 4);
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
@@ -626,13 +677,14 @@ describe("server single effect-tool service", () => {
       expect(Array.isArray(primary)).toBe(false);
       const binding = (primary as { binding: {
         surface: { data: Uint8Array };
-        rasterInput: { layerId: string; source: { kind: string; glyphs?: readonly {
+        rasterInput: { layerId: string; source: { kind: string; text?: string; glyphs?: readonly {
           coverage: { data: Uint8Array };
         }[] } };
       } }).binding;
       expect(binding.rasterInput.source.kind).toBe(sourceKind);
-      if (toolName === "text_extrude_3d") {
-        expect(binding.rasterInput.source.glyphs?.length).toBeGreaterThan(0);
+      if (sourceKind === "text") {
+        expect(binding.rasterInput.source.text).toBe("笔唯思");
+        expect(binding.rasterInput.source.glyphs).toHaveLength(3);
         expect(binding.rasterInput.source.glyphs?.every((glyph) =>
           glyph.coverage.data.some((value) => value > 0))).toBe(true);
         expect(binding.surface.data.some((value, offset) => offset % 4 === 3 && value === 0)).toBe(true);
@@ -677,7 +729,11 @@ describe("server single effect-tool service", () => {
       const laterOutput = later.output as { width: number; height: number; data: Uint8Array };
       expect([laterOutput.width, laterOutput.height, laterOutput.data.length])
         .toEqual([width, height, pixels.length]);
-      expect(Buffer.from(laterOutput.data).equals(Buffer.from(binding.surface.data)), `${toolName} applies effect`).toBe(false);
+      expect(
+        Buffer.from(earlyOutput.data).equals(Buffer.from(binding.surface.data))
+          && Buffer.from(laterOutput.data).equals(Buffer.from(binding.surface.data)),
+        `${toolName} applies effect`
+      ).toBe(false);
       if (animates) {
         expect(Buffer.from(laterOutput.data).equals(Buffer.from(earlyOutput.data)), `${toolName} animates`).toBe(false);
       }
@@ -827,7 +883,7 @@ describe("server single effect-tool service", () => {
     });
   });
 
-  it("exposes the strict 120-tool v3 catalog and derives required preview inputs from one image", async () => {
+  it("exposes the strict 120-tool v3 catalog and binds each required preview input to a distinct image", async () => {
     const provider = new NativeRecordingProvider();
     const video = await testVideoService();
     const service = new EffectToolService(provider, new TestInputResolver(), EFFECT_TOOL_REGISTRY, video.service);
@@ -890,7 +946,10 @@ describe("server single effect-tool service", () => {
         body: JSON.stringify({
           toolName: "depth_of_field",
           prompt: "生成景深视频",
-          inputIds: { source_frame: "asset_imageabcdefgh" }
+          inputIds: {
+            source_frame: "asset_imageabcdefgh",
+            depth_field: "asset_imageijklmnop"
+          }
         })
       });
       expect(execution.status).toBe(200);

@@ -398,8 +398,8 @@ function target(width: number, height: number, colorSpace: ColorSpace) {
   });
 }
 
-// Generated from the formal Noto Sans SC font at 14 px for browser card fixtures.
-const CARD_FIXTURE_GLYPHS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+// Generated from the formal Noto Sans SC font at 14 px for fixtures and the server default text layer.
+export const DEFAULT_CJK_GLYPH_PATTERNS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   "笔": ["00000000000000", "00110001100000", "00110001100000", "01111111111111", "11111011011000", "11001111111100", "01111111111000", "00000011111100", "01111111111100", "01111110000000", "00000111111111", "11111111111111", "01111110000110", "00000011000110", "00000011111110", "00000000000000", "00000000000000", "00000000000000"],
   "唯": ["00000000000000", "00000001111000", "00000011111000", "01111011011000", "01011111111111", "01011111011000", "01011111011000", "01011111111110", "01011011011000", "01011011011000", "01111011111110", "01000011011000", "01000011011000", "00000011111111", "00000011000000", "00000000000000", "00000000000000", "00000000000000"],
   "思": ["00000000000000", "00000000000000", "00111111111100", "00110011001100", "00110011001100", "00111111111100", "00110011001100", "00110011001100", "00111111111100", "00000110000000", "00111111101100", "01101101101110", "01101100011110", "11101100011111", "11001111111010", "00000000000000", "00000000000000", "00000000000000"]
@@ -407,7 +407,7 @@ const CARD_FIXTURE_GLYPHS: Readonly<Record<string, readonly string[]>> = Object.
 
 function glyphCoverage(character: string, width = 8, height = 12): CoverageBuffer {
   const data = new Uint8Array(width * height);
-  const pattern = CARD_FIXTURE_GLYPHS[character];
+  const pattern = DEFAULT_CJK_GLYPH_PATTERNS[character];
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       if (pattern) {

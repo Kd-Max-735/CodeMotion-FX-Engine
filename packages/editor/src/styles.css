@@ -157,11 +157,14 @@ h1, h2, p { margin: 0; }
 .ae-agent .selected-tool-tray > span b, .ae-agent .selected-tool-tray > span code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ae-agent .selected-tool-tray > span code { color: #679080; font-size: 8px; }
 .ae-agent .selected-tool-tray > button { overflow: hidden; border-color: var(--ae-line); background: #fafafa; color: var(--ae-muted); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.ae-agent .selected-tool-tray > .asset-count { border-color: var(--ae-line); background: #fafafa; color: var(--ae-muted); font-variant-numeric: tabular-nums; }
 .ae-agent .composer-shell textarea { width: 100%; min-height: 50px; max-height: 140px; padding: 13px 16px 8px; resize: none; overflow-y: auto; border: 0; outline: 0; background: transparent; color: var(--ae-ink); font-size: 13px; line-height: 1.55; }
 .ae-agent .composer-shell textarea::placeholder { color: #a0a3a7; }
 .ae-agent .composer-toolbar { min-height: 46px; display: flex; align-items: center; gap: 8px; padding: 6px 9px 8px; }
 .ae-agent .attach-button { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 7px; color: #5f6266; cursor: pointer; }
 .ae-agent .attach-button:hover { background: var(--ae-soft); }
+.ae-agent .attach-button.is-disabled { opacity: .38; cursor: not-allowed; }
+.ae-agent .attach-button.is-disabled:hover { background: transparent; }
 .ae-agent .attach-button input { display: none; }
 .ae-agent .thinking-toggle { height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--ae-line); border-radius: 7px; color: #666a6e; cursor: pointer; font-size: 10px; }
 .ae-agent .thinking-toggle input { width: 12px; height: 12px; margin: 0; accent-color: var(--ae-accent); }

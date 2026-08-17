@@ -124,6 +124,9 @@ describe("selected-tool Ark Provider", () => {
     expect(body.tool_choice).toBe("auto");
     expect(body.messages[0]!.content).toContain("生成快一点");
     expect(body.messages[0]!.content).toContain("generationMode");
+    expect(body.messages[0]!.content).toContain("笔唯思");
+    expect(body.messages[0]!.content).toContain("sourceText=penvis");
+    expect(body.messages[0]!.content).toContain("不得把默认文案填入 charset");
     expect(body.tools[0]!.function.parameters.properties.output).toMatchObject({
       required: ["durationSeconds", "generationMode"],
       properties: { generationMode: { enum: ["fast", "standard", "fine"], default: "standard" } }

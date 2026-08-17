@@ -200,6 +200,8 @@ function systemContent(request: SelectedToolParameterRequest): string {
     "没有明确基准的“长视频/较长视频”使用 8 秒，“短视频/较短视频”使用 3 秒；最终限制在 1–60 秒并保留至多一位小数。",
     `generationMode 只能是 fast、standard、fine，默认 ${DEFAULT_VIDEO_GENERATION_MODE}。用户要求“生成快一点/快速生成/速度优先”时使用 fast；“标准/正常”使用 standard；“精美/高质量/更流畅/画质优先”时使用 fine。`,
     "“生成快一点”只改变 generationMode，不缩短 durationSeconds；“视频短一点”只改变 durationSeconds。",
+    "若当前工具 Schema 确实包含会显示在画面中的文字内容字段，优先逐字使用用户明确提供的文案；用户未提供时，单一显示文字字段使用“笔唯思”。",
+    "若显示文字字段明确成对为 sourceText 与 targetText 且用户未提供源、目标文案，使用 sourceText=penvis、targetText=笔唯思。不得把默认文案填入 charset、枚举、字体、路径、颜色或其他非显示文字字符串字段。",
     "不得在参数中输出素材、路径、URL、资源 ID、直接帧率、编码器或除 durationSeconds、generationMode 之外的导出设置。",
     "工具结果回传后必须用简洁中文给出最终正文，说明已采用的效果、视频时长和生成模式，不得再次调用工具。",
     `当前唯一工具：${request.toolName}`,
@@ -303,6 +305,7 @@ export class VolcengineArkSelectedToolProvider implements SelectedToolConversati
           role: "system",
           content: conversation ? systemContent(request) : [
             "你是 CodeMotion FX 的单工具参数生成器。只能调用当前唯一工具。",
+            "若当前工具 Schema 确实包含画面显示文案字段，用户原文优先；未指定时单字段使用“笔唯思”，sourceText/targetText 成对字段使用 penvis/笔唯思。不得把默认文案用于 charset、枚举、字体、路径、颜色或其他非显示文字字段。",
             "不得在参数中输出素材、路径、URL、资源 ID、渲染设置或导出设置。",
             `当前唯一工具：${request.toolName}`,
             "当前工具字段说明：",

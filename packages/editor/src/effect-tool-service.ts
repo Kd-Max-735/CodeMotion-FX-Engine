@@ -29,6 +29,7 @@ import {
   type SelectedToolParameterProvider,
   type VideoGenerationMode
 } from "@codemotion/ai-planner";
+import { DEFAULT_CJK_GLYPH_PATTERNS } from "@codemotion/effects-2d";
 import {
   OwnedTaskStore,
   decodeAudioPreview,
@@ -51,6 +52,8 @@ import {
 } from "./effect-tool-video-service.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const MIN_MANY_INPUTS = 2;
+const MAX_MANY_INPUTS = 32;
 const RESOURCE_ID = /^[a-z][a-z0-9_-]{7,127}$/u;
 const EXISTING_BACKEND = "effect-functions-existing-cpu-v1";
 const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
@@ -58,7 +61,7 @@ const HAN_TEXT = /\p{Script=Han}/u;
 const SENSITIVE_PATH = /(?:https?:\/\/|file:\/\/|[a-z]:\\|\/(?:home|tmp|var|etc|users)\/)/iu;
 const IMAGE_DERIVED_TEXT_TOOLS = new Set([
   "character_cascade", "kinetic_typography", "scramble_decode", "text_morph",
-  "text_path_reveal", "typewriter", "word_explode"
+  "text_extrude_3d", "text_path_reveal", "typewriter", "word_explode"
 ]);
 const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
   "path_trim", "path_morph", "radial_burst", "shape_repeater", "brush_reveal", "chalk_stroke"
@@ -290,9 +293,10 @@ function validateSelectedInputIds(
       normalized[name] = value;
       continue;
     }
-    if (!Array.isArray(value) || value.length === 0
+    if (!Array.isArray(value) || value.length === 0 || value.length > MAX_MANY_INPUTS
+      || requireRequired && value.length < MIN_MANY_INPUTS
       || value.some((id) => typeof id !== "string" || !RESOURCE_ID.test(id))) {
-      throw new TypeError(`${name} requires one or more safe opaque resource IDs.`);
+      throw new TypeError(`${name} requires ${MIN_MANY_INPUTS}–${MAX_MANY_INPUTS} safe opaque resource IDs.`);
     }
     normalized[name] = Object.freeze([...value] as string[]);
   }
@@ -641,128 +645,53 @@ function previewPath(render: EffectToolRenderSettings) {
   ];
 }
 
-function derivedTextRasterSource(
-  media: VerifiedStoredMedia,
-  pixels: Uint8Array,
-  render: EffectToolRenderSettings
-): TextRasterSource {
-  const columns = Math.max(1, Math.min(12, render.width));
-  const rows = Math.max(1, Math.min(4, render.height));
-  const glyphs = Array.from({ length: columns * rows }, (_, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
-    const left = Math.floor(column * render.width / columns);
-    const right = Math.floor((column + 1) * render.width / columns);
-    const top = Math.floor(row * render.height / rows);
-    const bottom = Math.floor((row + 1) * render.height / rows);
-    const width = Math.max(1, right - left);
-    const height = Math.max(1, bottom - top);
-    const coverage = new Uint8Array(width * height);
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const sourceOffset = ((top + y) * render.width + left + x) * 4;
-        coverage[y * width + x] = pixels[sourceOffset + 3]!;
-      }
-    }
-    return Object.freeze({
-      glyphId: index + 1,
-      cluster: index,
-      advance: width,
-      offsetX: 0,
-      offsetY: 0,
-      bounds: Object.freeze({ x: left, y: top, width, height }),
-      coverage: Object.freeze({
-        width,
-        height,
-        data: coverage,
-        rowOrder: "top-to-bottom" as const
-      })
-    });
-  });
-  return Object.freeze({
-    kind: "text",
-    text: "X".repeat(glyphs.length),
-    font: Object.freeze({
-      fontId: "codemotion.server-derived-grid-v1",
-      assetId: `server-derived:${media.asset.id}`,
-      assetHash: media.asset.hash ?? "sha256:server-derived-grid-v1",
-      family: "CodeMotion Server Derived Grid",
-      style: "normal",
-      weight: 500,
-      unitsPerEm: 1000,
-      missingGlyphPolicy: "error" as const
-    }),
-    glyphs: Object.freeze(glyphs)
-  });
-}
-
-const EXTRUDED_PREVIEW_GLYPHS = Object.freeze([
-  Object.freeze(["11110", "10000", "10000", "11110", "10000", "10000", "10000"]),
-  Object.freeze(["10001", "01010", "00100", "00100", "00100", "01010", "10001"]),
-  Object.freeze(["11110", "00001", "00001", "01110", "00001", "00001", "11110"]),
-  Object.freeze(["11110", "10001", "10001", "10001", "10001", "10001", "11110"])
-]);
-
-function derivedTextExtrudePreview(
+function defaultTextRasterBinding(
   media: VerifiedStoredMedia,
   pixels: Uint8Array,
   render: EffectToolRenderSettings
 ): { readonly source: TextRasterSource; readonly pixels: Uint8Array } {
-  const glyphCount = Math.max(1, Math.min(
-    EXTRUDED_PREVIEW_GLYPHS.length,
-    Math.floor(render.width / 5)
-  ));
-  const top = Math.min(render.height - 1, Math.floor(render.height * 0.2));
-  const bottom = Math.max(top + 1, Math.ceil(render.height * 0.8));
+  const text = "笔唯思";
+  const characters = [...text];
+  const gap = Math.max(1, Math.floor(render.width * 0.015));
+  const glyphHeight = Math.max(1, Math.min(Math.max(1, render.height - 2), Math.floor(render.height * 0.38)));
+  const maximumGlyphWidth = Math.max(1, Math.floor((render.width - gap * (characters.length - 1) - 2) / characters.length));
+  const glyphWidth = Math.max(1, Math.min(maximumGlyphWidth, Math.round(glyphHeight * 14 / 18)));
+  const totalWidth = glyphWidth * characters.length + gap * (characters.length - 1);
+  const startX = Math.max(0, Math.floor((render.width - totalWidth) / 2));
+  const top = Math.max(0, Math.floor((render.height - glyphHeight) / 2));
   const surfacePixels = new Uint8Array(render.width * render.height * 4);
-  const characters = ["F", "X", "3", "D"].slice(0, glyphCount);
   const glyphs = characters.map((character, index) => {
-    const cellLeft = Math.floor(index * render.width / glyphCount);
-    const cellRight = Math.floor((index + 1) * render.width / glyphCount);
-    const horizontalInset = cellRight - cellLeft >= 4 ? 1 : 0;
-    const left = Math.min(render.width - 1, cellLeft + horizontalInset);
-    const right = Math.max(left + 1, cellRight - horizontalInset);
-    const width = Math.max(1, right - left);
-    const height = Math.max(1, bottom - top);
-    const coverage = new Uint8Array(width * height);
-    const pattern = EXTRUDED_PREVIEW_GLYPHS[index]!;
-    let occupied = false;
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const patternY = Math.min(pattern.length - 1, Math.floor(y / height * pattern.length));
+    const left = startX + index * (glyphWidth + gap);
+    const pattern = DEFAULT_CJK_GLYPH_PATTERNS[character]!;
+    const coverage = new Uint8Array(glyphWidth * glyphHeight);
+    for (let y = 0; y < glyphHeight; y += 1) {
+      for (let x = 0; x < glyphWidth; x += 1) {
+        const patternY = Math.min(pattern.length - 1, Math.floor(y * pattern.length / glyphHeight));
         const row = pattern[patternY]!;
-        const patternX = Math.min(row.length - 1, Math.floor(x / width * row.length));
-        if (row[patternX] !== "1") continue;
-        occupied = true;
-        const coverageOffset = y * width + x;
+        const patternX = Math.min(row.length - 1, Math.floor(x * row.length / glyphWidth));
+        const alpha = row[patternX] === "1" ? 255 : 0;
+        coverage[y * glyphWidth + x] = alpha;
+        if (alpha === 0 || left + x >= render.width || top + y >= render.height) continue;
         const targetOffset = ((top + y) * render.width + left + x) * 4;
-        coverage[coverageOffset] = 255;
-        surfacePixels[targetOffset] = Math.max(48, pixels[targetOffset]!);
-        surfacePixels[targetOffset + 1] = Math.max(96, pixels[targetOffset + 1]!);
-        surfacePixels[targetOffset + 2] = Math.max(144, pixels[targetOffset + 2]!);
-        surfacePixels[targetOffset + 3] = 255;
+        const backgroundLuminance = pixels[targetOffset]! * 0.2126
+          + pixels[targetOffset + 1]! * 0.7152 + pixels[targetOffset + 2]! * 0.0722;
+        const ink = backgroundLuminance > 150 ? [24, 35, 48] : [238, 248, 255];
+        surfacePixels[targetOffset] = ink[0]!;
+        surfacePixels[targetOffset + 1] = ink[1]!;
+        surfacePixels[targetOffset + 2] = ink[2]!;
+        surfacePixels[targetOffset + 3] = alpha;
       }
-    }
-    if (!occupied) {
-      const x = Math.floor(width / 2);
-      const y = Math.floor(height / 2);
-      coverage[y * width + x] = 255;
-      const targetOffset = ((top + y) * render.width + left + x) * 4;
-      surfacePixels[targetOffset] = 72;
-      surfacePixels[targetOffset + 1] = 168;
-      surfacePixels[targetOffset + 2] = 255;
-      surfacePixels[targetOffset + 3] = 255;
     }
     return Object.freeze({
       glyphId: character.codePointAt(0)!,
       cluster: index,
-      advance: cellRight - cellLeft,
+      advance: glyphWidth + gap,
       offsetX: 0,
       offsetY: 0,
-      bounds: Object.freeze({ x: left, y: top, width, height }),
+      bounds: Object.freeze({ x: left, y: top, width: glyphWidth, height: glyphHeight }),
       coverage: Object.freeze({
-        width,
-        height,
+        width: glyphWidth,
+        height: glyphHeight,
         data: coverage,
         rowOrder: "top-to-bottom" as const
       })
@@ -771,14 +700,14 @@ function derivedTextExtrudePreview(
   return Object.freeze({
     source: Object.freeze({
       kind: "text",
-      text: characters.join(""),
+      text,
       font: Object.freeze({
-        fontId: "codemotion.server-derived-extrude-proxy-v1",
+        fontId: "codemotion.default-cjk-text-v1",
         assetId: `server-derived:${media.asset.id}`,
-        assetHash: media.asset.hash ?? "sha256:server-derived-extrude-proxy-v1",
-        family: "CodeMotion Server Derived Extrude Proxy",
+        assetHash: media.asset.hash ?? "sha256:codemotion-default-cjk-text-v1",
+        family: "Noto Sans CJK",
         style: "normal",
-        weight: 700,
+        weight: 500,
         unitsPerEm: 1000,
         missingGlyphPolicy: "error" as const
       }),
@@ -939,17 +868,14 @@ function legacyRasterBinding(
 ) {
   const kind = visualKind(media.asset)!;
   const layerId = `single-tool:${slot.name}:${media.asset.id}`;
-  const extrudedText = slot.name === "text_raster" && definition.toolName === "text_extrude_3d"
-    ? derivedTextExtrudePreview(media, pixels, render)
+  const derivedText = slot.name === "text_raster" && IMAGE_DERIVED_TEXT_TOOLS.has(definition.toolName)
+    ? defaultTextRasterBinding(media, pixels, render)
     : undefined;
-  const derivedText = slot.name === "text_raster" && IMAGE_DERIVED_TEXT_TOOLS.has(definition.toolName);
   const derivedVector = slot.name === "vector_source" && IMAGE_DERIVED_VECTOR_TOOLS.has(definition.toolName);
-  const source = extrudedText?.source
-    ?? (derivedText
-      ? derivedTextRasterSource(media, pixels, render)
-      : derivedVector
-        ? derivedVectorRasterSource(pixels, render)
-        : {
+  const source = derivedText?.source
+    ?? (derivedVector
+      ? derivedVectorRasterSource(pixels, render)
+      : {
           kind,
           assetId: media.asset.id,
           assetHash: media.asset.hash ?? "",
@@ -995,7 +921,7 @@ function legacyRasterBinding(
     surface: {
       width: render.width,
       height: render.height,
-      data: new Uint8ClampedArray(extrudedText?.pixels ?? pixels),
+      data: new Uint8ClampedArray(derivedText?.pixels ?? pixels),
       colorSpace: "srgb" as const,
       alphaMode: "straight" as const
     },
@@ -1456,7 +1382,7 @@ export class EffectToolService {
         type: definition.toolName,
         data: nativeArguments.effectParams
       });
-      const rawInputIds = validateSelectedInputIds(definition, request.inputIds, false);
+      const rawInputIds = validateSelectedInputIds(definition, request.inputIds, true);
       const render = renderSettings(undefined);
       const authorizedInputs = await this.inputs.resolve(
         principal,

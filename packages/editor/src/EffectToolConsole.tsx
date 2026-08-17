@@ -18,7 +18,7 @@ type ConversationEntry = Readonly<{
   role: "user";
   content: string;
   tool: SelectedEffectToolView;
-  asset?: BrowserAssetSummaryV1;
+  assets?: readonly BrowserAssetSummaryV1[];
 }> | Readonly<{
   id: string;
   role: "assistant";
@@ -44,19 +44,58 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败。";
 }
 
+const MIN_MANY_IMAGES = 2;
+const MAX_MANY_IMAGES = 32;
+
+export function imageUploadRequirement(tool: SelectedEffectToolView): Readonly<{ min: number; max: number }> {
+  const required = tool.inputRequirements.filter((slot) => slot.required);
+  const slots = (required.length > 0 ? required : tool.inputRequirements.filter((slot) => !slot.required))
+    .filter((slot) => slot.acceptsUploadedImage);
+  return Object.freeze(slots.reduce((range, slot) => ({
+    min: range.min + (slot.required ? slot.cardinality === "many" ? MIN_MANY_IMAGES : 1 : 0),
+    max: range.max + (slot.cardinality === "many" ? MAX_MANY_IMAGES : 1)
+  }), { min: 0, max: 0 }));
+}
+
+export function reconcileSelectedAssetIds(
+  tool: SelectedEffectToolView,
+  selectedAssetIds: readonly string[],
+  availableAssetIds: readonly string[]
+): string[] {
+  const requirement = imageUploadRequirement(tool);
+  const available = new Set(availableAssetIds);
+  const next = selectedAssetIds.filter((assetId, index) =>
+    available.has(assetId) && selectedAssetIds.indexOf(assetId) === index).slice(0, requirement.max);
+  for (const assetId of availableAssetIds) {
+    if (next.length >= requirement.min) break;
+    if (!next.includes(assetId)) next.push(assetId);
+  }
+  return next;
+}
+
 export function turnInputIds(
   tool: SelectedEffectToolView,
-  selectedAssetId: string | undefined
+  selectedAssetIds: readonly string[]
 ): Readonly<Record<string, string | readonly string[]>> {
-  if (selectedAssetId === undefined) return Object.freeze({});
   const required = tool.inputRequirements.filter((slot) => slot.required);
-  const requiredImage = required.find((slot) => slot.acceptsUploadedImage);
-  const optionalImages = tool.inputRequirements.filter((slot) => !slot.required && slot.acceptsUploadedImage);
-  const slot = requiredImage ?? (required.length === 0 ? optionalImages[0] : undefined);
-  if (slot === undefined) return Object.freeze({});
-  return Object.freeze({
-    [slot.name]: slot.cardinality === "many" ? Object.freeze([selectedAssetId]) : selectedAssetId
+  const slots = (required.length > 0 ? required : tool.inputRequirements.filter((slot) => !slot.required))
+    .filter((slot) => slot.acceptsUploadedImage);
+  const output: Record<string, string | readonly string[]> = {};
+  let offset = 0;
+  slots.forEach((slot, index) => {
+    if (slot.cardinality === "one") {
+      const assetId = selectedAssetIds[offset];
+      if (assetId !== undefined) output[slot.name] = assetId;
+      offset += 1;
+      return;
+    }
+    const reserved = slots.slice(index + 1).reduce((count, remaining) =>
+      count + (remaining.cardinality === "many" ? MIN_MANY_IMAGES : 1), 0);
+    const count = Math.min(MAX_MANY_IMAGES, Math.max(0, selectedAssetIds.length - offset - reserved));
+    if (count > 0) output[slot.name] = Object.freeze(selectedAssetIds.slice(offset, offset + count));
+    offset += count;
   });
+  return Object.freeze(output);
 }
 
 export function filterEffectTools(
@@ -179,7 +218,7 @@ export function EffectToolConsole() {
   const [tools, setTools] = useState<readonly SelectedEffectToolView[]>([]);
   const [selectedToolName, setSelectedToolName] = useState<string>();
   const [assets, setAssets] = useState<BrowserAssetSummaryV1[]>([]);
-  const [selectedAssetId, setSelectedAssetId] = useState<string>();
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [entries, setEntries] = useState<ConversationEntry[]>([]);
   const [prompt, setPrompt] = useState("");
   const [thinking, setThinking] = useState(true);
@@ -191,8 +230,16 @@ export function EffectToolConsole() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string>();
   const imageAssets = useMemo(() => assets.filter((asset) => asset.kind === "image" || asset.kind === "svg"), [assets]);
-  const selectedAsset = imageAssets.find((asset) => asset.assetId === selectedAssetId);
   const selectedTool = tools.find((item) => item.toolName === selectedToolName) ?? tools[0];
+  const selectedAssets = selectedAssetIds.flatMap((assetId) => {
+    const asset = imageAssets.find((item) => item.assetId === assetId);
+    return asset === undefined ? [] : [asset];
+  });
+  const uploadRequirement = selectedTool === undefined
+    ? { min: 0, max: 0 }
+    : imageUploadRequirement(selectedTool);
+  const uploadDisabled = uploading || busy || uploadRequirement.max === 0
+    || selectedAssetIds.length >= uploadRequirement.max;
   const filteredTools = useMemo(() => {
     return filterEffectTools(tools, toolQuery);
   }, [toolQuery, tools]);
@@ -210,11 +257,19 @@ export function EffectToolConsole() {
       setTools(nextTools);
       setSelectedToolName(nextTools.find((item) => item.toolName === "film_grain")?.toolName ?? nextTools[0]?.toolName);
       setAssets(page.items);
-      setSelectedAssetId(page.items.find((asset) => asset.kind === "image" || asset.kind === "svg")?.assetId);
     }).catch((cause) => { if (!controller.signal.aborted) setError(errorMessage(cause)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (selectedTool === undefined) return;
+    setSelectedAssetIds((current) => reconcileSelectedAssetIds(
+      selectedTool,
+      current,
+      imageAssets.map((asset) => asset.assetId)
+    ));
+  }, [selectedTool?.toolName, imageAssets]);
 
   useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [entries, busy]);
   useEffect(() => {
@@ -232,17 +287,37 @@ export function EffectToolConsole() {
   }, [activeToolIndex, filteredTools, toolMenuOpen]);
 
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (file === undefined) return;
+    const requestedTool = selectedTool;
+    if (files.length === 0 || requestedTool === undefined) return;
+    const requirement = imageUploadRequirement(requestedTool);
+    const remaining = Math.max(0, requirement.max - selectedAssetIds.length);
+    if (files.length > remaining) {
+      setError(`当前特效最多使用 ${requirement.max} 张图片，还可上传 ${remaining} 张。`);
+      return;
+    }
     setUploading(true);
     setError(undefined);
+    const uploaded: BrowserAssetSummaryV1[] = [];
     try {
-      const asset = await mediaAssetApi.upload(file, "reference-image");
-      setAssets((current) => [asset, ...current.filter((item) => item.assetId !== asset.assetId)]);
-      setSelectedAssetId(asset.assetId);
+      for (const file of files) uploaded.push(await mediaAssetApi.upload(file, "reference-image"));
     } catch (cause) { setError(errorMessage(cause)); }
-    finally { setUploading(false); }
+    finally {
+      if (uploaded.length > 0) {
+        const uploadedIds = uploaded.map((asset) => asset.assetId);
+        setAssets((current) => [
+          ...uploaded,
+          ...current.filter((item) => !uploadedIds.includes(item.assetId))
+        ]);
+        setSelectedAssetIds((current) => reconcileSelectedAssetIds(
+          requestedTool,
+          [...current, ...uploadedIds],
+          [...uploadedIds, ...imageAssets.map((asset) => asset.assetId)]
+        ));
+      }
+      setUploading(false);
+    }
   };
 
   const submit = async (event?: FormEvent) => {
@@ -250,7 +325,7 @@ export function EffectToolConsole() {
     const value = prompt.trim();
     const requestedTool = selectedTool;
     if (value.length === 0 || busy || requestedTool === undefined) return;
-    const inputIds = turnInputIds(requestedTool, selectedAssetId);
+    const inputIds = turnInputIds(requestedTool, selectedAssetIds);
     const startedAt = performance.now();
     setPrompt("");
     setError(undefined);
@@ -258,7 +333,7 @@ export function EffectToolConsole() {
     setToolMenuOpen(false);
     setEntries((current) => [...current, {
       id: crypto.randomUUID(), role: "user", content: value, tool: requestedTool,
-      ...(selectedAsset === undefined || Object.keys(inputIds).length === 0 ? {} : { asset: selectedAsset })
+      ...(selectedAssets.length === 0 || Object.keys(inputIds).length === 0 ? {} : { assets: selectedAssets })
     }]);
     try {
       const turn = await selectedEffectToolApi.turn({
@@ -282,6 +357,11 @@ export function EffectToolConsole() {
 
   const selectTool = (tool: SelectedEffectToolView) => {
     setSelectedToolName(tool.toolName);
+    setSelectedAssetIds((current) => reconcileSelectedAssetIds(
+      tool,
+      current,
+      imageAssets.map((asset) => asset.assetId)
+    ));
     setToolMenuOpen(false);
     setToolQuery("");
   };
@@ -327,7 +407,7 @@ export function EffectToolConsole() {
           {entries.length === 0 && !loading && <div className="empty-state"><div className="empty-mark"><span>›</span><i>_</i></div><h1>想要制作什么视频特效？</h1><p>选择一个工具并描述需求。服务器只会向 Doubao 提供该工具的参数定义。</p><div className="starter-prompts"><button type="button" onClick={() => setPrompt("让效果更明显一些，生成 5 秒视频")}>生成所选特效</button><button type="button" onClick={() => setPrompt("这个工具有哪些参数？")}>询问参数</button></div></div>}
           {loading && <div className="empty-state compact"><LoaderCircle className="spin" size={23} /><p>正在连接服务器</p></div>}
           {entries.map((entry) => entry.role === "user" ? (
-            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>{entry.tool.displayName} · {entry.tool.toolName}</span></div>{entry.asset && <div className="user-assets"><span className="user-file"><FileImage size={13} />{entry.asset.displayName}</span></div>}</div></article>
+            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>{entry.tool.displayName} · {entry.tool.toolName}</span></div>{entry.assets && <div className="user-assets">{entry.assets.map((asset) => <span className="user-file" key={asset.assetId}><FileImage size={13} />{asset.displayName}</span>)}</div>}</div></article>
           ) : (
             <article key={entry.id} className="message agent-message"><div className="agent-avatar">AE</div><div className="agent-content"><div className="turn-duration"><Clock3 size={13} /><span>{entry.tool.displayName} · 已思考 <b>{formatElapsed(entry.elapsedMs)}</b></span></div>{entry.showThinking && entry.turn.reasoningContent && <details className="process-section" open><summary><span className="section-icon thinking-icon" /><strong>深度思考</strong><span className="process-summary">理解需求并判断是否调用 {entry.tool.toolName}</span><ChevronDown className="process-chevron" size={13} /></summary><div className="process-timeline"><div className="thinking-row completed"><span className="thinking-dot" /><p>{entry.turn.reasoningContent}</p><small>完成</small></div></div></details>}{entry.turn.kind === "tool_call" && <ToolResult turn={entry.turn} tool={entry.tool} />}{entry.turn.content && <section className="final-response"><div className="section-heading"><span className="section-icon final-icon"><Check size={12} /></span><strong>{entry.turn.kind === "tool_call" ? "最终回复" : "回复"}</strong></div><div className="assistant-text markdown-body"><p>{entry.turn.content}</p></div></section>}</div></article>
           ))}
@@ -338,11 +418,12 @@ export function EffectToolConsole() {
           <form className="composer-shell" onSubmit={(event) => void submit(event)}>
             <div className="selected-tool-tray">
               {selectedTool && <span><Wrench size={12} /><b>{selectedTool.displayName}</b><code>{selectedTool.toolName}</code></span>}
-              {selectedAsset && <button type="button" title="切换服务器图片" onClick={() => fileInput.current?.click()}><FileImage size={12} />{selectedAsset.displayName}</button>}
+              {selectedAssets.map((asset) => <button type="button" title="移除图片" key={asset.assetId} onClick={() => setSelectedAssetIds((current) => current.filter((assetId) => assetId !== asset.assetId))}><FileImage size={12} />{asset.displayName}<X size={11} /></button>)}
+              {uploadRequirement.max > 0 && <span className="asset-count">图片 {selectedAssetIds.length}/{uploadRequirement.max}</span>}
             </div>
             <textarea rows={1} maxLength={4_000} placeholder="描述视频特效需求" value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={onComposerKeyDown} />
             <div className="composer-toolbar">
-              <label className="attach-button" title="上传图片"><input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/avif,image/svg+xml" aria-label="上传图片" onChange={(event) => void upload(event)} />{uploading ? <LoaderCircle className="spin" size={16} /> : <Paperclip size={17} />}</label>
+              <label className={`attach-button ${uploadDisabled ? "is-disabled" : ""}`} title={uploadRequirement.max === 0 ? "当前特效不需要图片" : `上传图片（最多 ${uploadRequirement.max} 张）`}><input ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/avif,image/svg+xml" aria-label="上传图片" disabled={uploadDisabled} onChange={(event) => void upload(event)} />{uploading ? <LoaderCircle className="spin" size={16} /> : <Paperclip size={17} />}</label>
               <label className="thinking-toggle"><input type="checkbox" checked={thinking} onChange={(event) => setThinking(event.target.checked)} /><span>深度思考</span></label>
               <div className="composer-actions-right">
                 <span className="model-label">Doubao 2.0 Lite</span>
