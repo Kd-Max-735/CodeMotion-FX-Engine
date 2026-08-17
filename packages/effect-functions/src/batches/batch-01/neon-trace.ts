@@ -48,8 +48,10 @@ export const NEON_TRACE_DEFINITION: EffectToolDefinition<NeonTraceParams> = {
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
     const path = readPath(context, "trace_path");
-    const start = clamp(params.progress - params.trailLength, 0, 1);
-    const points = slicePath(path, start, params.progress, 4);
+    const revealProgress = clamp(context.time / 1.4, 0, 1);
+    const traceProgress = params.progress * revealProgress;
+    const start = clamp(traceProgress - params.trailLength, 0, 1);
+    const points = traceProgress <= Number.EPSILON ? [] : slicePath(path, start, traceProgress, 4);
     const pulse = params.pulseRate === 0 ? 1 : 0.82 + 0.18 * Math.sin(context.time * params.pulseRate * Math.PI * 2);
     const layers = [1, 0.5, 0.22].map((scale, index) => ({
       radius: round(params.glowRadius * scale),
@@ -62,7 +64,8 @@ export const NEON_TRACE_DEFINITION: EffectToolDefinition<NeonTraceParams> = {
       coreWidth: round(params.coreWidth),
       coreIntensity: round(params.intensity * pulse),
       hue: round(params.hue),
-      glowLayers: layers
+      glowLayers: layers,
+      revealProgress: round(revealProgress)
     });
   }
 };

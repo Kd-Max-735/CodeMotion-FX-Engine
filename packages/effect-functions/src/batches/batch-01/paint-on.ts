@@ -1,7 +1,7 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
 import {
-  SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, effectResult, enumField,
+  SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, clamp, effectResult, enumField,
   numberField, parameterSchema, pathLength, readImageDimensions, readStrokePlan,
   resamplePath, round
 } from "./common.js";
@@ -60,7 +60,9 @@ export const PAINT_ON_DEFINITION: EffectToolDefinition<PaintOnParams> = {
       strokes = strokes.map((stroke, index) => index % 2 === 0 ? stroke : { ...stroke, points: [...stroke.points].reverse() });
     }
     const lengths = strokes.map((stroke) => pathLength(stroke.points, stroke.closed));
-    const targetLength = lengths.reduce((sum, length) => sum + length, 0) * params.coverage;
+    const revealProgress = clamp(context.time / 1.6, 0, 1);
+    const effectiveCoverage = params.coverage * revealProgress;
+    const targetLength = lengths.reduce((sum, length) => sum + length, 0) * effectiveCoverage;
     let consumed = 0;
     const dabs: { x: number; y: number; angle: number; width: number; height: number }[] = [];
     for (let strokeIndex = 0; strokeIndex < strokes.length && consumed < targetLength; strokeIndex += 1) {
@@ -87,9 +89,11 @@ export const PAINT_ON_DEFINITION: EffectToolDefinition<PaintOnParams> = {
       sourceWidth: source.width,
       sourceHeight: source.height,
       dabs,
+      brushShape: params.brushShape,
       hardness: round(params.hardness),
       feather: round(params.feather),
-      coverage: round(params.coverage)
+      coverage: round(effectiveCoverage),
+      revealProgress: round(revealProgress)
     });
   }
 };

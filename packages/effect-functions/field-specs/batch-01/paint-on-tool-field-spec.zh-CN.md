@@ -2,13 +2,15 @@
 
 按服务端提供的笔画计划逐步生成笔刷显现蒙版，并作用于已授权源图或 Logo。源素材和笔画不进入模型参数。只输出 JSON，不要附加解释、Markdown 或代码块：
 
+当前 AE Agent 只需上传一张源图；服务器从同一份已授权图像派生笔画计划，并在视频前 1.6 秒逐步绘制到 `coverage` 指定的目标比例。
+
 ```json
 {"type":"paint_on","data":{"coverage":1,"strokeOrder":"forward","brushShape":"round","brushSize":36,"hardness":0.7,"spacing":0.25,"feather":4}}
 ```
 
 | `data` 字段 | 必填 | 取值 | 选择策略 |
 | --- | --- | --- | --- |
-| `coverage` | 否 | `0..1`，默认 `1` | 已绘制笔画总长度比例 |
+| `coverage` | 否 | `0..1`，默认 `1` | 绘制动画的目标总长度比例 |
 | `strokeOrder` | 否 | `forward/reverse/alternating`，默认 `forward` | 原顺序、反顺序或相邻笔画交替方向 |
 | `brushShape` | 否 | `round/flat`，默认 `round` | 圆头或扁平笔头几何，不是纹理 |
 | `brushSize` | 否 | `1..400` px，默认 `36` | 显现笔刷尺寸 |

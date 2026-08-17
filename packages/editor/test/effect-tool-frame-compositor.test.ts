@@ -69,7 +69,10 @@ describe("effect tool frame compositor", () => {
       .toEqual([250, 0, 0, 128]);
   });
 
-  it.each(["blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke"])(
+  it.each([
+    "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke",
+    "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on"
+  ])(
     "does not add the generic moving scanline to %s",
     (toolName) => {
       const source = solidSource();
@@ -110,6 +113,42 @@ describe("effect tool frame compositor", () => {
     const source = solidSource();
     const output = composeEffectToolFrame(metadata(value), detailedRequest, toolName, source);
     expect(changedPixelCount(source, output)).toBeGreaterThan(80);
+  });
+
+  it.each([
+    ["shape_boolean_animate", {
+      width: 4, height: 3,
+      alpha: [0, 0.3, 0.8, 0, 0.2, 1, 1, 0.25, 0, 0.45, 0.7, 0],
+      shapeA: [{ x: 12, y: 12 }, { x: 54, y: 10 }, { x: 48, y: 48 }, { x: 15, y: 50 }],
+      shapeB: [{ x: 38, y: 8 }, { x: 84, y: 22 }, { x: 70, y: 56 }, { x: 34, y: 43 }],
+      operation: "xor", progress: 0.65
+    }],
+    ["volumetric_ray", {
+      width: 4, height: 3,
+      radiance: [0.05, 0.4, 1.2, 0.3, 0.02, 0.28, 0.92, 0.2, 0, 0.12, 0.5, 0.08],
+      lightX: 0.72, lightY: 0.08
+    }],
+    ["wave_path", {
+      sourcePoints: [{ x: 8, y: 34 }, { x: 30, y: 30 }, { x: 55, y: 35 }, { x: 88, y: 28 }],
+      points: [{ x: 8, y: 34 }, { x: 30, y: 14 }, { x: 55, y: 51 }, { x: 88, y: 28 }],
+      amplitude: 28
+    }],
+    ["neon_trace", {
+      points: [{ x: 10, y: 42 }, { x: 26, y: 15 }, { x: 51, y: 48 }, { x: 78, y: 18 }, { x: 90, y: 32 }],
+      coreWidth: 3, coreIntensity: 2.4, hue: 310,
+      glowLayers: [{ radius: 24, intensity: 0.4 }, { radius: 12, intensity: 0.9 }, { radius: 5, intensity: 1.7 }]
+    }],
+    ["paint_on", {
+      dabs: [
+        { x: 18, y: 22, width: 34, height: 34, angle: 0.15 },
+        { x: 45, y: 31, width: 34, height: 34, angle: -0.1 },
+        { x: 73, y: 42, width: 34, height: 34, angle: 0.2 }
+      ], brushShape: "round", hardness: 0.72, feather: 4, coverage: 0.6
+    }]
+  ] as const)("renders the reported %s output as a full visual rather than generic geometry", (toolName, value) => {
+    const source = solidSource();
+    const output = composeEffectToolFrame(metadata(value), detailedRequest, toolName, source);
+    expect(changedPixelCount(source, output)).toBeGreaterThan(160);
   });
 
   it.each([

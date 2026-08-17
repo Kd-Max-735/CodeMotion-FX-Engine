@@ -195,6 +195,69 @@ describe("batch-01 effect definitions", () => {
       .toEqual([0, 0.5, 1]);
   });
 
+  it.each([
+    ["shape_boolean_animate", "progress", 1.4],
+    ["neon_trace", "revealProgress", 1.4],
+    ["paint_on", "revealProgress", 1.6]
+  ] as const)("animates %s toward its requested target over server render time", async (
+    toolName,
+    progressKey,
+    duration
+  ) => {
+    const definition = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === toolName)!;
+    const renderAt = (time: number) => executeSelectedEffectTool(
+      definition,
+      definition.toolName,
+      { type: definition.toolName, data: {} },
+      contextFor(definition, 173, time)
+    );
+    const start = (await renderAt(0)).output as Record<string, unknown>;
+    const middle = (await renderAt(duration / 2)).output as Record<string, unknown>;
+    const end = (await renderAt(duration)).output as Record<string, unknown>;
+    expect(start[progressKey]).toBe(0);
+    expect(middle[progressKey]).toBe(0.5);
+    expect(end[progressKey]).toBe(1);
+    expect(middle).not.toEqual(start);
+    expect(end).not.toEqual(middle);
+    if (toolName === "neon_trace") {
+      expect(start.points).toEqual([]);
+      expect((end.points as readonly unknown[]).length).toBeGreaterThan(2);
+    }
+    if (toolName === "paint_on") {
+      expect(start.dabs).toEqual([]);
+      expect((end.dabs as readonly unknown[]).length).toBeGreaterThan(2);
+    }
+  });
+
+  it.each([
+    ["shape_boolean_animate", ["union", "intersect", "subtract", "xor"].map((operation) => ({ operation }))],
+    ["volumetric_ray", [
+      { density: 0.35, exposure: 0.4, weight: 0.1, lightX: 0.2, lightY: 0 },
+      { density: 0.75, exposure: 1.1, weight: 0.22, lightX: 0.5, lightY: 0.1 },
+      { density: 1.2, exposure: 2.2, weight: 0.34, lightX: 0.85, lightY: -0.15 }
+    ]],
+    ["wave_path", [
+      { amplitude: 10, wavelength: 260, speed: 0.2 },
+      { amplitude: 36, wavelength: 180, speed: 0.5 },
+      { amplitude: 18, wavelength: 72, speed: -1.2 }
+    ]]
+  ] as const)("produces visibly distinct structured output for reported %s parameter variants", async (
+    toolName,
+    variants
+  ) => {
+    const definition = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === toolName)!;
+    const outputs = await Promise.all(variants.map(async (variant) => {
+      const result = await executeSelectedEffectTool(
+        definition,
+        definition.toolName,
+        { type: definition.toolName, data: { ...definition.defaults, ...variant } },
+        contextFor(definition, 173, 1.6)
+      );
+      return JSON.stringify(result.output);
+    }));
+    expect(new Set(outputs).size).toBe(variants.length);
+  });
+
   it.each(BATCH_01_DEFINITIONS)("rejects unknown and invalid $toolName parameters", (definition) => {
     expect(() => validateAndNormalizeEffectEnvelope(
       definition,

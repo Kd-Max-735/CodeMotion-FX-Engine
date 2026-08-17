@@ -746,7 +746,11 @@ describe("server single effect-tool service", () => {
       ["dash_flow", "source_path", 32, true],
       ["electric_arc", "terminals", 4, false],
       ["lightning_trace", "guide_path", 11, false],
-      ["marker_stroke", "stroke_path", 11, false]
+      ["marker_stroke", "stroke_path", 11, false],
+      ["shape_boolean_animate", "shape_a", 32, true],
+      ["shape_boolean_animate", "shape_b", 32, true],
+      ["wave_path", "source_path", 11, false],
+      ["neon_trace", "trace_path", 32, true]
     ] as const;
     for (const [toolName, slotName, pointCount, closed] of geometryCases) {
       const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
@@ -766,6 +770,27 @@ describe("server single effect-tool service", () => {
       expect(binding.points.every((point) => point.x >= 0 && point.x < width
         && point.y >= 0 && point.y < height)).toBe(true);
     }
+
+    const depthDefinition = EFFECT_TOOL_REGISTRY.getByToolName("depth_of_field")!;
+    const depthInputs = await resolver.resolve(principal, depthDefinition, {
+      source_frame: media.asset.id
+    }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
+    const depthBinding = (depthInputs.depth_field as { binding: {
+      width: number; height: number; data: readonly number[];
+    } }).binding;
+    expect([depthBinding.width, depthBinding.height, depthBinding.data.length])
+      .toEqual([width, height, width * height]);
+    expect(depthBinding.data.every((value) => value >= 0 && value <= 1)).toBe(true);
+
+    const paintDefinition = EFFECT_TOOL_REGISTRY.getByToolName("paint_on")!;
+    const paintInputs = await resolver.resolve(principal, paintDefinition, {
+      source_image: media.asset.id
+    }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
+    const paintBinding = (paintInputs.stroke_plan as { binding: {
+      strokes: readonly { points: readonly { x: number; y: number }[] }[];
+    } }).binding;
+    expect(paintBinding.strokes.length).toBeGreaterThanOrEqual(9);
+    expect(paintBinding.strokes.every((stroke) => stroke.points.length >= 2)).toBe(true);
     expect(decode).toHaveBeenCalled();
   });
 
@@ -911,7 +936,7 @@ describe("server single effect-tool service", () => {
     });
   });
 
-  it("exposes the strict 120-tool v3 catalog and binds each required preview input to a distinct image", async () => {
+  it("exposes the strict 120-tool v3 catalog and keeps server-derived inputs off the upload count", async () => {
     const provider = new NativeRecordingProvider();
     const video = await testVideoService();
     const service = new EffectToolService(provider, new TestInputResolver(), EFFECT_TOOL_REGISTRY, video.service);
@@ -935,7 +960,13 @@ describe("server single effect-tool service", () => {
         configured: true,
         inputRequirements: [
           { name: "source_frame", kind: "image", required: true, acceptsUploadedImage: true },
-          { name: "depth_field", kind: "depth-map", required: true, acceptsUploadedImage: true }
+          { name: "depth_field", kind: "depth-map", required: true, acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "paint_on")).toMatchObject({
+        inputRequirements: [
+          { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },
+          { name: "stroke_plan", kind: "data", required: true, acceptsUploadedImage: false }
         ]
       });
 
@@ -975,8 +1006,7 @@ describe("server single effect-tool service", () => {
           toolName: "depth_of_field",
           prompt: "生成景深视频",
           inputIds: {
-            source_frame: "asset_imageabcdefgh",
-            depth_field: "asset_imageijklmnop"
+            source_frame: "asset_imageabcdefgh"
           }
         })
       });

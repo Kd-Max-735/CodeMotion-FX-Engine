@@ -63,8 +63,12 @@ export const WAVE_PATH_DEFINITION: EffectToolDefinition<WavePathParams> = {
     return effectResult("metadata", {
       algorithm: "arc_length_normal_wave",
       points: output,
+      sourcePoints: points,
       closed: source.closed,
-      phaseRadians: round(phase)
+      phaseRadians: round(phase),
+      amplitude: round(params.amplitude),
+      wavelength: round(params.wavelength),
+      taper: round(params.taper)
     });
   }
 };

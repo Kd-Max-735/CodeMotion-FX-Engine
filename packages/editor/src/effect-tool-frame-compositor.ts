@@ -9,7 +9,8 @@ const TEXT_OVERLAY_TOOLS = new Set([
 ]);
 
 const POLISHED_STRUCTURED_TOOLS = new Set([
-  "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke"
+  "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke",
+  "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on"
 ]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -296,6 +297,80 @@ function drawMarkerDab(
   }
 }
 
+function numericGrid(
+  value: Record<string, unknown>,
+  key: string
+): { readonly width: number; readonly height: number; readonly values: readonly number[] } | undefined {
+  const width = typeof value.width === "number" && Number.isInteger(value.width) ? value.width : 0;
+  const height = typeof value.height === "number" && Number.isInteger(value.height) ? value.height : 0;
+  const values = value[key];
+  if (width < 1 || height < 1 || !Array.isArray(values) || values.length !== width * height
+    || values.some((entry) => typeof entry !== "number" || !Number.isFinite(entry))) return undefined;
+  return { width, height, values: values as number[] };
+}
+
+function hueColor(hue: number): readonly [number, number, number, number] {
+  const section = (((hue % 360) + 360) % 360) / 60;
+  const chroma = 1;
+  const x = chroma * (1 - Math.abs(section % 2 - 1));
+  const colors: readonly (readonly [number, number, number])[] = [
+    [chroma, x, 0], [x, chroma, 0], [0, chroma, x],
+    [0, x, chroma], [x, 0, chroma], [chroma, 0, x]
+  ];
+  const color = colors[Math.floor(section) % 6]!;
+  return [clampByte(color[0] * 255), clampByte(color[1] * 255), clampByte(color[2] * 255), 255];
+}
+
+function revealSourceDab(
+  output: Uint8ClampedArray,
+  source: Uint8Array,
+  request: FrameRequest,
+  dab: Record<string, unknown>,
+  brushShape: string,
+  hardness: number,
+  feather: number
+): void {
+  const center = finitePoint(dab);
+  const width = typeof dab.width === "number" ? Math.max(1, Math.min(400, dab.width)) : 1;
+  const height = typeof dab.height === "number" ? Math.max(1, Math.min(400, dab.height)) : width;
+  const angle = typeof dab.angle === "number" && Number.isFinite(dab.angle) ? dab.angle : 0;
+  if (center === undefined) return;
+  const pixel = pointToPixel(center, request.width, request.height);
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  const halfAlong = width * 0.5 + feather;
+  const halfAcross = height * 0.5 + feather;
+  const radius = Math.ceil(Math.hypot(halfAlong, halfAcross));
+  const softness = Math.max(0.02, Math.min(0.9,
+    (1 - hardness) * 0.5 + feather / Math.max(1, Math.max(width, height))));
+  for (let dy = -radius; dy <= radius; dy += 1) {
+    const y = Math.round(pixel[1] + dy);
+    if (y < 0 || y >= request.height) continue;
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      const x = Math.round(pixel[0] + dx);
+      if (x < 0 || x >= request.width) continue;
+      const along = dx * cosine + dy * sine;
+      const across = -dx * sine + dy * cosine;
+      const normalizedAlong = Math.abs(along) / Math.max(1, halfAlong);
+      const normalizedAcross = Math.abs(across) / Math.max(1, halfAcross);
+      const edge = brushShape === "flat"
+        ? Math.max(normalizedAlong, normalizedAcross)
+        : Math.hypot(normalizedAlong, normalizedAcross);
+      if (edge > 1) continue;
+      const feathered = edge <= 1 - softness ? 1 : (1 - edge) / softness;
+      const grain = brushShape === "flat"
+        ? 0.74 + 0.26 * (0.5 + 0.5 * Math.sin(x * 1.13 + y * 0.47)) : 1;
+      const alpha = Math.max(0, Math.min(1, feathered * grain));
+      const offset = (y * request.width + x) * 4;
+      for (let channel = 0; channel < 4; channel += 1) {
+        output[offset + channel] = clampByte(
+          output[offset + channel]! * (1 - alpha) + source[offset + channel]! * alpha
+        );
+      }
+    }
+  }
+}
+
 function drawGeometry(
   output: Uint8ClampedArray,
   value: unknown,
@@ -447,8 +522,146 @@ function polishedStructuredFrame(
   output: Uint8ClampedArray,
   value: Record<string, unknown>,
   request: FrameRequest,
-  toolName: string
+  toolName: string,
+  source?: Uint8Array
 ): boolean {
+  if (toolName === "shape_boolean_animate") {
+    const grid = numericGrid(value, "alpha");
+    if (grid === undefined) return false;
+    const operation = typeof value.operation === "string" ? value.operation : "union";
+    const palette = operation === "intersect" ? [255, 76, 190, 255]
+      : operation === "subtract" ? [255, 104, 62, 255]
+        : operation === "xor" ? [76, 158, 255, 255] : [42, 232, 180, 255];
+    const progress = typeof value.progress === "number" ? Math.max(0, Math.min(1, value.progress)) : 1;
+    for (let y = 0; y < request.height; y += 1) {
+      const gridY = Math.min(grid.height - 1, Math.floor(y / request.height * grid.height));
+      for (let x = 0; x < request.width; x += 1) {
+        const gridX = Math.min(grid.width - 1, Math.floor(x / request.width * grid.width));
+        const index = gridY * grid.width + gridX;
+        const alpha = Math.max(0, Math.min(1, grid.values[index]!));
+        if (alpha <= 0.001) continue;
+        const right = grid.values[gridY * grid.width + Math.min(grid.width - 1, gridX + 1)]!;
+        const down = grid.values[Math.min(grid.height - 1, gridY + 1) * grid.width + gridX]!;
+        const boundary = Math.max(Math.abs(alpha - right), Math.abs(alpha - down));
+        blendPixel(output, request.width, request.height, x, y, palette,
+          alpha * (0.28 + progress * 0.48));
+        if (boundary > 0.12) {
+          blendPixel(output, request.width, request.height, x, y, [244, 255, 252, 255],
+            Math.min(0.9, boundary * 1.6));
+        }
+      }
+    }
+    const shapeA = pointArray(value.shapeA);
+    const shapeB = pointArray(value.shapeB);
+    drawPolyline(output, shapeA, request, [106, 255, 218, 255], 0.34, 2.8, true);
+    drawPolyline(output, shapeB, request, operation === "subtract"
+      ? [255, 116, 82, 255] : [255, 116, 214, 255], 0.32 + progress * 0.2, 2.4, true);
+    return true;
+  }
+
+  if (toolName === "volumetric_ray") {
+    const grid = numericGrid(value, "radiance");
+    if (grid === undefined) return false;
+    const maximum = grid.values.reduce((current, entry) => Math.max(current, entry), 0);
+    if (maximum <= Number.EPSILON) return true;
+    for (let y = 0; y < request.height; y += 1) {
+      const gridY = Math.min(grid.height - 1, Math.floor(y / request.height * grid.height));
+      for (let x = 0; x < request.width; x += 1) {
+        const gridX = Math.min(grid.width - 1, Math.floor(x / request.width * grid.width));
+        const radiance = Math.max(0, grid.values[gridY * grid.width + gridX]!);
+        const tone = 1 - Math.exp(-radiance * 0.42);
+        if (tone <= 0.001) continue;
+        const dust = 0.9 + 0.1 * Math.sin(x * 0.071 + y * 0.043 + request.time * 3.1);
+        const warmth = y / Math.max(1, request.height - 1);
+        blendPixel(output, request.width, request.height, x, y,
+          [255, 238 - warmth * 24, 178 - warmth * 36, 255], Math.min(0.86, tone * dust * 0.78));
+      }
+    }
+    const lightX = typeof value.lightX === "number" ? value.lightX * request.width : request.width * 0.5;
+    const lightY = typeof value.lightY === "number" ? value.lightY * request.height : request.height * 0.2;
+    drawDisc(output, request.width, request.height, lightX, lightY,
+      Math.min(request.width, request.height) * 0.075, [255, 248, 218, 255], 0.32);
+    return true;
+  }
+
+  if (toolName === "wave_path") {
+    const points = pointArray(value.points);
+    const sourcePoints = pointArray(value.sourcePoints);
+    const amplitude = typeof value.amplitude === "number" ? Math.max(0, value.amplitude) : 0;
+    if (points.length < 2) return false;
+    if (amplitude <= Number.EPSILON) return true;
+    if (sourcePoints.length === points.length && sourcePoints.length >= 2) {
+      fillPolygon(output, [...sourcePoints, ...[...points].reverse()], request);
+      drawPolyline(output, sourcePoints, request, [42, 116, 132, 255], 0.26, 2.2);
+    }
+    const ribbonWidth = Math.min(18, 4 + amplitude * 0.16);
+    drawPolyline(output, points, request, [4, 34, 58, 255], 0.3, ribbonWidth + 5);
+    drawPolyline(output, points, request, [34, 216, 196, 255], 0.52, ribbonWidth);
+    drawPolyline(output, points, request, [104, 236, 255, 255], 0.72, Math.max(2.2, ribbonWidth * 0.42));
+    drawPolyline(output, points, request, [237, 255, 252, 255], 0.84, 0.9);
+    const stride = Math.max(4, Math.floor(points.length / 12));
+    points.forEach((point, index) => {
+      if (index % stride !== 0) return;
+      const pixel = pointToPixel(point, request.width, request.height);
+      const pulse = 0.12 + 0.06 * (0.5 + 0.5 * Math.sin(request.time * 4 + index));
+      drawDisc(output, request.width, request.height, pixel[0], pixel[1], 4.5,
+        [145, 255, 229, 255], pulse);
+    });
+    return true;
+  }
+
+  if (toolName === "neon_trace") {
+    const points = pointArray(value.points);
+    const coreIntensity = typeof value.coreIntensity === "number" ? Math.max(0, value.coreIntensity) : 0;
+    if (coreIntensity <= Number.EPSILON || points.length < 2) return true;
+    const hue = typeof value.hue === "number" ? value.hue : 190;
+    const color = hueColor(hue);
+    const glowLayers = Array.isArray(value.glowLayers) ? value.glowLayers : [];
+    glowLayers.forEach((entry) => {
+      const layer = record(entry);
+      const radius = typeof layer?.radius === "number" ? Math.max(0, layer.radius) : 0;
+      const intensity = typeof layer?.intensity === "number" ? Math.max(0, layer.intensity) : 0;
+      if (radius > 0 && intensity > 0) {
+        drawPolyline(output, points, request, color, Math.min(0.42, intensity * 0.12), Math.max(1.5, radius * 0.56));
+      }
+    });
+    const coreWidth = typeof value.coreWidth === "number" ? Math.max(0.5, value.coreWidth) : 2;
+    drawPolyline(output, points, request, color, Math.min(0.92, coreIntensity * 0.28), coreWidth * 2.2);
+    drawPolyline(output, points, request, [248, 255, 255, 255], Math.min(1, coreIntensity * 0.48), coreWidth * 0.62);
+    const head = points[points.length - 1]!;
+    const pixel = pointToPixel(head, request.width, request.height);
+    const outerRadius = Math.max(6, Math.min(28, coreWidth * 3.5));
+    drawDisc(output, request.width, request.height, pixel[0], pixel[1], outerRadius, color, 0.34);
+    drawDisc(output, request.width, request.height, pixel[0], pixel[1], 2.4, [255, 255, 255, 255], 1);
+    return true;
+  }
+
+  if (toolName === "paint_on") {
+    if (source === undefined || source.length !== output.length) return false;
+    for (let offset = 0; offset < output.length; offset += 4) {
+      output[offset] = clampByte(source[offset]! * 0.13 + 8);
+      output[offset + 1] = clampByte(source[offset + 1]! * 0.13 + 10);
+      output[offset + 2] = clampByte(source[offset + 2]! * 0.13 + 13);
+      output[offset + 3] = source[offset + 3]!;
+    }
+    const dabs = Array.isArray(value.dabs) ? value.dabs : [];
+    const brushShape = typeof value.brushShape === "string" ? value.brushShape : "round";
+    const hardness = typeof value.hardness === "number" ? Math.max(0, Math.min(1, value.hardness)) : 0.7;
+    const feather = typeof value.feather === "number" ? Math.max(0, value.feather) : 4;
+    dabs.forEach((entry) => {
+      const dab = record(entry);
+      if (dab !== undefined) revealSourceDab(output, source, request, dab, brushShape, hardness, feather);
+    });
+    const tip = record(dabs[dabs.length - 1]);
+    const tipPoint = finitePoint(tip);
+    if (tipPoint !== undefined) {
+      const pixel = pointToPixel(tipPoint, request.width, request.height);
+      drawDisc(output, request.width, request.height, pixel[0], pixel[1], 4.2,
+        [255, 218, 154, 255], 0.24);
+    }
+    return true;
+  }
+
   if (toolName === "blob_morph") {
     const points = pointArray(value.points);
     if (points.length < 3) return false;
@@ -920,7 +1133,7 @@ export function composeEffectToolFrame(
   const output = sourceFrame(source, request, toolName);
   const value = result === undefined ? undefined : record(result.output);
   if (value !== undefined) {
-    const polished = polishedStructuredFrame(output, value, request, toolName);
+    const polished = polishedStructuredFrame(output, value, request, toolName, source);
     if (!polished) {
       operationFrame(output, source, value, request);
       const fieldRendered = scalarField(output, value, request);

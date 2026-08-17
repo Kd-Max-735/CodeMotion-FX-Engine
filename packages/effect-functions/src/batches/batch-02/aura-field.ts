@@ -34,20 +34,39 @@ export const AURA_FIELD_DEFINITION: Batch02Definition<AuraFieldParams> = {
   validateParams: () => VALID_PARAMS,
   render(context, params) {
     const frame = frameInput(context); const output: number[] = [];
-    const pulse = params.pulseRate === 0 ? 1 : 0.82 + 0.18 * Math.sin(context.time * params.pulseRate * Math.PI * 2);
+    const phase = context.time * params.pulseRate * Math.PI * 2;
+    const pulse = params.pulseRate === 0 ? 1 : 0.7 + 0.3 * Math.sin(phase);
+    const drift = params.pulseRate === 0 ? 0 : params.radius * 0.12;
+    const centerX = params.centerX + Math.cos(phase * 0.73) * drift;
+    const centerY = params.centerY + Math.sin(phase * 0.61) * drift / Math.max(0.5, params.ellipticity);
+    const secondaryX = centerX + Math.cos(phase * 0.43 + 1.7) * params.radius * 0.28;
+    const secondaryY = centerY + Math.sin(phase * 0.37 + 1.7) * params.radius * 0.22;
+    const hueDelta = ((params.secondaryHue - params.hue + 540) % 360) - 180;
     for (let y = 0; y < frame.height; y += 1) for (let x = 0; x < frame.width; x += 1) {
-      const nx = x / Math.max(1, frame.width - 1) - params.centerX;
-      const ny = (y / Math.max(1, frame.height - 1) - params.centerY) * params.ellipticity;
+      const u = x / Math.max(1, frame.width - 1);
+      const v = y / Math.max(1, frame.height - 1);
+      const nx = u - centerX;
+      const ny = (v - centerY) * params.ellipticity;
       const distance = Math.sqrt(nx * nx + ny * ny);
       const normalized = distance / params.radius;
       const field = Math.exp(-Math.pow(normalized / params.softness, 2));
       const ring = Math.exp(-Math.pow((normalized - 0.72) / Math.max(0.08, params.softness * 0.45), 2));
-      const angle = Math.atan2(ny, nx) / (Math.PI * 2) + 0.5;
-      const hue = params.hue + (params.secondaryHue - params.hue) * clamp(angle);
-      const color = hsvToRgb(hue, 0.62, clamp(0.55 + ring * 0.45));
-      const amount = clamp((field * 0.65 + ring * 0.35) * params.intensity * pulse);
+      const secondaryNx = u - secondaryX;
+      const secondaryNy = (v - secondaryY) * params.ellipticity;
+      const secondaryDistance = Math.hypot(secondaryNx, secondaryNy) / Math.max(0.001, params.radius * 0.72);
+      const secondaryField = Math.exp(-Math.pow(secondaryDistance / Math.max(0.12, params.softness * 0.82), 2));
+      const angle = Math.atan2(ny, nx) + phase * 0.11;
+      const colorMix = 0.5 + 0.5 * Math.sin(angle);
+      const hue = params.hue + hueDelta * colorMix;
+      const color = hsvToRgb(hue, 0.68, clamp(0.5 + ring * 0.36 + secondaryField * 0.24));
+      const amount = clamp((field * 0.52 + ring * 0.3 + secondaryField * 0.38) * params.intensity * pulse);
       const base = pixelAt(frame, x, y);
-      output.push(byte(base[0]! + color[0]! * amount * 0.72), byte(base[1]! + color[1]! * amount * 0.72), byte(base[2]! + color[2]! * amount * 0.72), base[3]!);
+      output.push(
+        byte(base[0]! + (255 - base[0]!) * color[0]! / 255 * amount * 0.78),
+        byte(base[1]! + (255 - base[1]!) * color[1]! / 255 * amount * 0.78),
+        byte(base[2]! + (255 - base[2]!) * color[2]! / 255 * amount * 0.78),
+        base[3]!
+      );
     }
     return frameResult(AURA_FIELD_DEFINITION, frame, output);
   }

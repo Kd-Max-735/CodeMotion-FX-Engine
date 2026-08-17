@@ -88,6 +88,28 @@ describe("120-tool selector helpers", () => {
     expect(turnInputIds(stack, stackIds)).toEqual({ source_images: stackIds });
   });
 
+  it("requires one upload when the server derives depth or stroke geometry", () => {
+    const depth = tool({
+      toolName: "depth_of_field",
+      inputRequirements: [
+        input("source_frame", "image"),
+        input("depth_field", "depth-map", true, false)
+      ]
+    });
+    const paint = tool({
+      toolName: "paint_on",
+      inputRequirements: [
+        input("source_image", "image"),
+        input("stroke_plan", "data", true, false)
+      ]
+    });
+    for (const derived of [depth, paint]) {
+      expect(imageUploadRequirement(derived)).toEqual({ min: 1, max: 1 });
+      expect(turnInputIds(derived, ["asset_imageabcdefgh"]))
+        .toEqual({ [derived.inputRequirements[0]!.name]: "asset_imageabcdefgh" });
+    }
+  });
+
   it("preserves available selections, truncates excess, and fills the required minimum", () => {
     const transition = tool({
       inputRequirements: [input("source_frame", "image"), input("target_frame", "image")]

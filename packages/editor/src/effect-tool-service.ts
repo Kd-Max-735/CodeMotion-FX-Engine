@@ -281,7 +281,8 @@ function validateSelectedInputIds(
     throw new TypeError("inputIds contains an unknown slot.");
   }
   const missing = definition.inputSlots
-    .filter((slot) => slot.required && raw[slot.name] === undefined)
+    .filter((slot) => slot.required && raw[slot.name] === undefined
+      && !isServerDerivedVisualSlot(definition, slot))
     .map((slot) => requirementView(definition, slot));
   if (requireRequired && missing.length > 0) throw new MissingEffectToolInputError(missing);
   const normalized: Record<string, string | readonly string[]> = {};
@@ -323,10 +324,19 @@ function authorizedInputSummary(
   }));
 }
 
-function acceptsUploadedImage(
-  _definition: EffectToolDefinition,
-  _slot: EffectInputSlotDefinition
+function isServerDerivedVisualSlot(
+  definition: EffectToolDefinition,
+  slot: EffectInputSlotDefinition
 ): boolean {
+  return definition.toolName === "depth_of_field" && slot.name === "depth_field"
+    || definition.toolName === "paint_on" && slot.name === "stroke_plan";
+}
+
+function acceptsUploadedImage(
+  definition: EffectToolDefinition,
+  slot: EffectInputSlotDefinition
+): boolean {
+  if (isServerDerivedVisualSlot(definition, slot)) return false;
   return true;
 }
 
@@ -810,6 +820,56 @@ function derivedFeaturePath(
   }));
 }
 
+function transformedContour(
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings,
+  scale: number,
+  shiftX: number,
+  rotation: number
+): readonly Readonly<{ x: number; y: number }>[] {
+  const contour = pixelContour(pixels, render);
+  const centerX = contour.reduce((sum, point) => sum + point.x, 0) / contour.length;
+  const centerY = contour.reduce((sum, point) => sum + point.y, 0) / contour.length;
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  return Object.freeze(contour.map((point) => {
+    const dx = (point.x - centerX) * scale;
+    const dy = (point.y - centerY) * scale;
+    return Object.freeze({
+      x: centerX + dx * cosine - dy * sine + render.width * shiftX,
+      y: centerY + dx * sine + dy * cosine
+    });
+  }));
+}
+
+function derivedPaintStrokes(
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings
+): readonly Readonly<{
+  points: readonly Readonly<{ x: number; y: number }>[];
+  closed: boolean;
+}>[] {
+  const rowCount = Math.max(8, Math.min(24, Math.ceil(render.height / 18)));
+  const rows = Array.from({ length: rowCount }, (_, row) => {
+    const progress = row / Math.max(1, rowCount - 1);
+    const baseY = 0.08 + progress * 0.84;
+    const points = Array.from({ length: 9 }, (_, column) => {
+      const forward = row % 2 === 0;
+      const u = 0.06 + (forward ? column : 8 - column) / 8 * 0.88;
+      const detail = (sourceLuminance(pixels, render, u, baseY) - 0.5) * 0.035;
+      return Object.freeze({
+        x: u * (render.width - 1),
+        y: Math.max(0, Math.min(1, baseY + detail)) * (render.height - 1)
+      });
+    });
+    return Object.freeze({ points: Object.freeze(points), closed: false });
+  });
+  return Object.freeze([
+    ...rows,
+    Object.freeze({ points: pixelContour(pixels, render), closed: true })
+  ]);
+}
+
 function derivedVectorRasterSource(
   pixels: Uint8Array,
   render: EffectToolRenderSettings
@@ -858,6 +918,21 @@ function previewDataBinding(
   }
   if (definition.toolName === "marker_stroke" && slot.name === "stroke_path") {
     return { points: derivedFeaturePath(pixels, render), closed: false };
+  }
+  if (definition.toolName === "shape_boolean_animate" && slot.name === "shape_a") {
+    return { points: transformedContour(pixels, render, 0.86, -0.08, -0.08), closed: true };
+  }
+  if (definition.toolName === "shape_boolean_animate" && slot.name === "shape_b") {
+    return { points: transformedContour(pixels, render, 0.68, 0.12, 0.38), closed: true };
+  }
+  if (definition.toolName === "wave_path" && slot.name === "source_path") {
+    return { points: derivedFeaturePath(pixels, render), closed: false };
+  }
+  if (definition.toolName === "neon_trace" && slot.name === "trace_path") {
+    return { points: pixelContour(pixels, render), closed: true };
+  }
+  if (definition.toolName === "paint_on" && slot.name === "stroke_plan") {
+    return { strokes: derivedPaintStrokes(pixels, render) };
   }
   switch (slot.name) {
     case "audio_analysis": return previewAudioBinding(definition, render);

@@ -87,7 +87,13 @@ export const VOLUMETRIC_RAY_DEFINITION: EffectToolDefinition<VolumetricRayParams
       height: mask.height,
       colorSpace: "linear-srgb",
       hdr: radiance.some((value) => value > 1),
-      radiance
+      radiance,
+      density: round(params.density),
+      decay: round(params.decay),
+      exposure: round(params.exposure),
+      weight: round(params.weight),
+      lightX: round(params.lightX),
+      lightY: round(params.lightY)
     });
   }
 };

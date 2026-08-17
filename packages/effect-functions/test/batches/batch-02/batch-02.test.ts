@@ -12,6 +12,7 @@ import {
   validateAndNormalizeEffectEnvelope
 } from "../../../src/validation.js";
 import {
+  AURA_FIELD_DEFINITION,
   BATCH_02_DEFINITIONS,
   COLOR_GRADE_DEFINITION,
   DATAMOSH_DEFINITION,
@@ -62,7 +63,7 @@ function binding(slot: string, kind: "image" | "depth-map", value: unknown) {
   return { slot, kind, tenantId: "tenant-b02", userId: "user-b02", locked: true as const, binding: value };
 }
 
-function context(definition: EffectToolDefinition): ServerEffectRenderContext {
+function context(definition: EffectToolDefinition, time = 1.25): ServerEffectRenderContext {
   const entries = definition.inputSlots.map((slot) => {
     const value = slot.name === "previous_frame" ? previous : slot.name === "depth_field" ? depth : source;
     return [slot.name, binding(slot.name, slot.kind as "image" | "depth-map", value)] as const;
@@ -72,9 +73,9 @@ function context(definition: EffectToolDefinition): ServerEffectRenderContext {
     requestId: "request-b02",
     tenantId: "tenant-b02",
     userId: "user-b02",
-    time: 1.25,
+    time,
     deltaTime: 1 / 30,
-    frame: 9,
+    frame: Math.round(time * 30),
     fps: 30,
     width,
     height,
@@ -334,6 +335,33 @@ describe("batch-02 definitions", () => {
     expect(pixel(output, 5, 3)).toEqual(pixel(source, 5, 3));
     expect(pixel(output, 0, 3)).not.toEqual(pixel(source, 0, 3));
     expect(pixel(output, 11, 3)).not.toEqual(pixel(source, 11, 3));
+  });
+
+  it("animates aura motion, preserves pulseRate zero, and wraps red hues correctly", async () => {
+    const dynamicParams = {
+      ...AURA_FIELD_DEFINITION.defaults,
+      intensity: 0.82,
+      hue: 350,
+      secondaryHue: 10,
+      pulseRate: 1
+    };
+    const renderAuraAt = async (time: number, params: Record<string, unknown>) => {
+      const result = await executeSelectedEffectTool(
+        AURA_FIELD_DEFINITION,
+        AURA_FIELD_DEFINITION.toolName,
+        { type: AURA_FIELD_DEFINITION.toolName, data: params },
+        context(AURA_FIELD_DEFINITION, time)
+      ) as EffectRenderResult<RgbaFrame>;
+      return result.output;
+    };
+    const first = await renderAuraAt(0, dynamicParams);
+    const later = await renderAuraAt(0.25, dynamicParams);
+    expect(later.data).not.toEqual(first.data);
+
+    const staticParams = { ...dynamicParams, pulseRate: 0 };
+    expect(await renderAuraAt(1, staticParams)).toEqual(await renderAuraAt(0, staticParams));
+    const center = pixel(await renderAuraAt(0, staticParams), 6, 4);
+    expect(center[0]).toBeGreaterThan(center[1]!);
   });
 
   it("applies a real color transform and keeps its all-neutral grade unchanged", async () => {

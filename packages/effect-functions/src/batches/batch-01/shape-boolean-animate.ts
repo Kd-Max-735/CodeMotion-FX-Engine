@@ -62,9 +62,11 @@ export const SHAPE_BOOLEAN_ANIMATE_DEFINITION: EffectToolDefinition<ShapeBoolean
     const shapeB = readPath(context, "shape_b", 3);
     const gridWidth = params.resolution;
     const gridHeight = clamp(Math.round(params.resolution * context.height / context.width), 16, 128);
-    const eased = params.easing === "smooth"
-      ? params.progress * params.progress * (3 - 2 * params.progress)
-      : params.progress;
+    const timeline = clamp(context.time / 1.4, 0, 1);
+    const easedTimeline = params.easing === "smooth"
+      ? timeline * timeline * (3 - 2 * timeline)
+      : timeline;
+    const eased = params.progress * easedTimeline;
     const alpha: number[] = [];
     for (let y = 0; y < gridHeight; y += 1) {
       for (let x = 0; x < gridWidth; x += 1) {
@@ -81,8 +83,11 @@ export const SHAPE_BOOLEAN_ANIMATE_DEFINITION: EffectToolDefinition<ShapeBoolean
       width: gridWidth,
       height: gridHeight,
       alpha,
+      shapeA: shapeA.points,
+      shapeB: shapeB.points,
       operation: params.operation,
-      progress: round(eased)
+      progress: round(eased),
+      feather: round(params.feather)
     });
   }
 };
