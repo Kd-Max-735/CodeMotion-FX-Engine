@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   EFFECT_TOOL_REGISTRY,
   EffectToolRegistry,
+  executeSelectedEffectTool,
   type AuthorizedEffectInputs,
   type EffectToolDefinition
 } from "@codemotion/effect-functions";
@@ -558,6 +559,91 @@ describe("server single effect-tool service", () => {
       rogue_slot: "asset_abcdefgh"
     }, { time: 0, fps: 30, width: 2, height: 2, seed: 1, quality: "preview" }))
       .rejects.toThrow(/unknown slot/u);
+  });
+
+  it("derives structured image previews for the four reported existing tools", async () => {
+    const width = 24;
+    const height = 16;
+    const pixels = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const offset = (y * width + x) * 4;
+        pixels[offset] = x * 9;
+        pixels[offset + 1] = y * 15;
+        pixels[offset + 2] = (x + y) % 2 === 0 ? 224 : 32;
+        pixels[offset + 3] = 255;
+      }
+    }
+    const media: VerifiedStoredMedia = {
+      asset: {
+        id: "asset_imageabcdefgh",
+        type: "image",
+        uri: "media://reported-preview.png",
+        hash: "sha256:reported-preview",
+        metadata: { mime: "image/png", width, height, codec: "png" }
+      },
+      descriptor: {
+        id: "asset_imageabcdefgh",
+        type: "media/image",
+        cacheKey: "reported-preview",
+        metadata: {}
+      },
+      storedPath: "D:\\authorized-media\\reported-preview.png",
+      arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: false, reason: "test" },
+      trustedBytes: pixels.byteLength
+    };
+    const decode = vi.fn(async () => pixels);
+    const resolver = new TenantMediaEffectToolInputResolver(
+      { resolve: vi.fn(async () => media) } as never,
+      undefined,
+      decode as never
+    );
+    const cases = [
+      ["character_cascade", "text_raster", "text"],
+      ["kinetic_typography", "text_raster", "text"],
+      ["path_trim", "vector_source", "shape"],
+      ["path_morph", "vector_source", "shape"]
+    ] as const;
+
+    for (const [toolName, primarySlot, sourceKind] of cases) {
+      const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
+      const inputs = await resolver.resolve(principal, definition, {
+        [primarySlot]: media.asset.id
+      }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
+      const primary = inputs[primarySlot];
+      expect(primary).toBeDefined();
+      expect(Array.isArray(primary)).toBe(false);
+      const binding = (primary as { binding: { rasterInput: { source: { kind: string } } } }).binding;
+      expect(binding.rasterInput.source.kind).toBe(sourceKind);
+      const renderAt = (time: number) => executeSelectedEffectTool(
+        definition, toolName, { type: toolName, data: definition.defaults }, {
+          environment: "server",
+          requestId: `reported-${toolName}-${time}`,
+          tenantId: principal.tenantId,
+          userId: principal.userId,
+          time,
+          deltaTime: 1 / 30,
+          frame: Math.floor(time * 30),
+          fps: 30,
+          width,
+          height,
+          seed: 20260817,
+          quality: "preview",
+          backend: definition.primaryBackend,
+          inputs
+        }
+      );
+      const early = await renderAt(0.1);
+      const later = await renderAt(0.65);
+      expect([early.kind, later.kind]).toEqual(["frame", "frame"]);
+      const earlyOutput = early.output as { width: number; height: number; data: Uint8Array };
+      const laterOutput = later.output as { width: number; height: number; data: Uint8Array };
+      expect([laterOutput.width, laterOutput.height, laterOutput.data.length])
+        .toEqual([width, height, pixels.length]);
+      expect(Buffer.from(laterOutput.data).equals(Buffer.from(pixels)), `${toolName} applies effect`).toBe(false);
+      expect(Buffer.from(laterOutput.data).equals(Buffer.from(earlyOutput.data)), `${toolName} animates`).toBe(false);
+    }
+    expect(decode).toHaveBeenCalled();
   });
 
   it("exposes versioned authenticated list, parameter, execute, and owner-scoped result routes", async () => {

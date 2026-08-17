@@ -532,6 +532,15 @@ function glyphCell(
 ): { index: number; localX: number; localY: number } {
   const raster = options.rasterInput.source;
   if (raster.kind !== "text") throw new TypeError("Text effect requires text raster provenance.");
+  if (raster.font.fontId === "codemotion.server-derived-grid-v1") {
+    const columns = Math.max(1, Math.min(12, options.rasterInput.target.width));
+    const rows = Math.max(1, Math.ceil(raster.glyphs.length / columns));
+    const column = Math.min(columns - 1, Math.floor(x / options.rasterInput.target.width * columns));
+    const row = Math.min(rows - 1, Math.floor(y / options.rasterInput.target.height * rows));
+    const localX = x / options.rasterInput.target.width * columns - column;
+    const localY = y / options.rasterInput.target.height * rows - row;
+    return { index: row * columns + column, localX, localY };
+  }
   for (const glyph of raster.glyphs) {
     const left = glyph.bounds.x + glyph.offsetX;
     const top = glyph.bounds.y + glyph.offsetY;

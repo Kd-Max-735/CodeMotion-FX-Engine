@@ -37,7 +37,12 @@ import {
   type TenantMediaStore,
   type VerifiedStoredMedia
 } from "@codemotion/exporter";
-import type { LayerRasterizationInput } from "@codemotion/renderer-api";
+import type {
+  LayerRasterizationInput,
+  TextRasterSource,
+  VectorPathCommand,
+  VectorRasterSource
+} from "@codemotion/renderer-api";
 import { AuthHttpError, type AuthSessionService } from "./auth-session-service.js";
 import {
   EffectToolVideoService,
@@ -51,6 +56,8 @@ const EXISTING_BACKEND = "effect-functions-existing-cpu-v1";
 const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
 const HAN_TEXT = /\p{Script=Han}/u;
 const SENSITIVE_PATH = /(?:https?:\/\/|file:\/\/|[a-z]:\\|\/(?:home|tmp|var|etc|users)\/)/iu;
+const IMAGE_DERIVED_TEXT_TOOLS = new Set(["character_cascade", "kinetic_typography"]);
+const IMAGE_DERIVED_VECTOR_TOOLS = new Set(["path_trim", "path_morph"]);
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
 export interface EffectToolPrincipal {
@@ -603,6 +610,141 @@ function previewPath(render: EffectToolRenderSettings) {
   ];
 }
 
+function derivedTextRasterSource(
+  media: VerifiedStoredMedia,
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings
+): TextRasterSource {
+  const columns = Math.max(1, Math.min(12, render.width));
+  const rows = Math.max(1, Math.min(4, render.height));
+  const glyphs = Array.from({ length: columns * rows }, (_, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const left = Math.floor(column * render.width / columns);
+    const right = Math.floor((column + 1) * render.width / columns);
+    const top = Math.floor(row * render.height / rows);
+    const bottom = Math.floor((row + 1) * render.height / rows);
+    const width = Math.max(1, right - left);
+    const height = Math.max(1, bottom - top);
+    const coverage = new Uint8Array(width * height);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const sourceOffset = ((top + y) * render.width + left + x) * 4;
+        coverage[y * width + x] = pixels[sourceOffset + 3]!;
+      }
+    }
+    return Object.freeze({
+      glyphId: index + 1,
+      cluster: index,
+      advance: width,
+      offsetX: 0,
+      offsetY: 0,
+      bounds: Object.freeze({ x: left, y: top, width, height }),
+      coverage: Object.freeze({
+        width,
+        height,
+        data: coverage,
+        rowOrder: "top-to-bottom" as const
+      })
+    });
+  });
+  return Object.freeze({
+    kind: "text",
+    text: "X".repeat(glyphs.length),
+    font: Object.freeze({
+      fontId: "codemotion.server-derived-grid-v1",
+      assetId: `server-derived:${media.asset.id}`,
+      assetHash: media.asset.hash ?? "sha256:server-derived-grid-v1",
+      family: "CodeMotion Server Derived Grid",
+      style: "normal",
+      weight: 500,
+      unitsPerEm: 1000,
+      missingGlyphPolicy: "error" as const
+    }),
+    glyphs: Object.freeze(glyphs)
+  });
+}
+
+function sourceLuminance(
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings,
+  u: number,
+  v: number
+): number {
+  const x = Math.max(0, Math.min(render.width - 1, Math.round(u * (render.width - 1))));
+  const y = Math.max(0, Math.min(render.height - 1, Math.round(v * (render.height - 1))));
+  const offset = (y * render.width + x) * 4;
+  const alpha = pixels[offset + 3]! / 255;
+  return alpha * (pixels[offset]! * 0.2126 + pixels[offset + 1]! * 0.7152
+    + pixels[offset + 2]! * 0.0722) / 255;
+}
+
+function derivedVisualContour(
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings
+): readonly Readonly<{ x: number; y: number }>[] {
+  const count = 32;
+  const radii = Array.from({ length: count }, (_, index) => {
+    const angle = -Math.PI / 2 + index / count * Math.PI * 2;
+    let radius = 0.32;
+    let strongest = -1;
+    for (let step = 4; step <= 22; step += 1) {
+      const candidate = 0.1 + step / 22 * 0.38;
+      const outer = Math.min(0.49, candidate + 0.018);
+      const innerValue = sourceLuminance(
+        pixels,
+        render,
+        0.5 + Math.cos(angle) * candidate,
+        0.5 + Math.sin(angle) * candidate
+      );
+      const outerValue = sourceLuminance(
+        pixels,
+        render,
+        0.5 + Math.cos(angle) * outer,
+        0.5 + Math.sin(angle) * outer
+      );
+      const score = Math.abs(innerValue - outerValue);
+      if (score > strongest) {
+        strongest = score;
+        radius = candidate;
+      }
+    }
+    return strongest < 0.025 ? 0.34 + Math.sin(angle * 3) * 0.035 : radius;
+  });
+  return Object.freeze(radii.map((radius, index) => {
+    const previous = radii[(index + count - 1) % count]!;
+    const next = radii[(index + 1) % count]!;
+    const smoothed = previous * 0.2 + radius * 0.6 + next * 0.2;
+    const angle = -Math.PI / 2 + index / count * Math.PI * 2;
+    return Object.freeze({
+      x: 0.5 + Math.cos(angle) * smoothed,
+      y: 0.5 + Math.sin(angle) * smoothed
+    });
+  }));
+}
+
+function derivedVectorRasterSource(
+  pixels: Uint8Array,
+  render: EffectToolRenderSettings
+): VectorRasterSource {
+  const points = derivedVisualContour(pixels, render);
+  const commands: VectorPathCommand[] = points.map((point, index) => index === 0
+    ? { op: "move", x: point.x, y: point.y }
+    : { op: "line", x: point.x, y: point.y });
+  commands.push({ op: "close" });
+  return Object.freeze({
+    kind: "shape",
+    viewport: Object.freeze({ x: 0, y: 0, width: 1, height: 1 }),
+    paths: Object.freeze([Object.freeze({
+      commands: Object.freeze(commands),
+      fillRule: "nonzero" as const,
+      fill: null,
+      stroke: "#42c8ff",
+      strokeWidth: 0.03
+    })])
+  });
+}
+
 function previewDataBinding(
   definition: EffectToolDefinition,
   slot: EffectInputSlotDefinition,
@@ -636,8 +778,8 @@ function previewDataBinding(
       ? { path: "M 48 240 C 180 48 420 312 592 120" }
       : { points: path, closed: false };
     case "morph_paths": return {
-      fromPath: "M 160 72 L 480 72 L 480 288 L 160 288 Z",
-      toPath: "M 320 48 L 560 180 L 320 312 L 80 180 Z"
+      fromPath: "M 0.18 0.22 L 0.82 0.22 L 0.82 0.78 L 0.18 0.78 Z",
+      toPath: "M 0.5 0.08 C 0.86 0.08 0.92 0.38 0.92 0.5 C 0.92 0.78 0.72 0.92 0.5 0.92 C 0.2 0.92 0.08 0.7 0.08 0.5 C 0.08 0.2 0.28 0.08 0.5 0.08 Z"
     };
     case "stroke_plan": return { strokes: [{ points: path, closed: false }] };
     case "vector_field": return {
@@ -672,23 +814,30 @@ function legacyRasterBinding(
 ) {
   const kind = visualKind(media.asset)!;
   const layerId = `single-tool:${slot.name}:${media.asset.id}`;
+  const derivedText = slot.name === "text_raster" && IMAGE_DERIVED_TEXT_TOOLS.has(definition.toolName);
+  const derivedVector = slot.name === "vector_source" && IMAGE_DERIVED_VECTOR_TOOLS.has(definition.toolName);
+  const source = derivedText
+    ? derivedTextRasterSource(media, pixels, render)
+    : derivedVector
+      ? derivedVectorRasterSource(pixels, render)
+      : {
+          kind,
+          assetId: media.asset.id,
+          assetHash: media.asset.hash ?? "",
+          frameTime: render.time,
+          pixels: {
+            width: render.width,
+            height: render.height,
+            data: pixels,
+            colorSpace: "srgb" as const,
+            alphaMode: "straight" as const,
+            rowOrder: "top-to-bottom" as const
+          }
+        };
   const rasterInput: LayerRasterizationInput = {
     layerId,
-    layerType: kind,
-    source: {
-      kind,
-      assetId: media.asset.id,
-      assetHash: media.asset.hash ?? "",
-      frameTime: render.time,
-      pixels: {
-        width: render.width,
-        height: render.height,
-        data: pixels,
-        colorSpace: "srgb",
-        alphaMode: "straight",
-        rowOrder: "top-to-bottom"
-      }
-    },
+    layerType: source.kind,
+    source,
     time: {
       contractVersion: "1.1.0",
       layerId,
@@ -733,7 +882,8 @@ interface EffectToolResolveCache {
 export class TenantMediaEffectToolInputResolver implements EffectToolInputResolver {
   constructor(
     private readonly media: TenantMediaStore,
-    private readonly serverResources?: EffectToolServerResourceResolver
+    private readonly serverResources?: EffectToolServerResourceResolver,
+    private readonly decodeFrame: typeof decodeMediaFrame = decodeMediaFrame
   ) {}
 
   async resolve(
@@ -824,7 +974,7 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     ]);
     let pixelsPromise = cache?.pixels.get(pixelCacheKey);
     if (pixelsPromise === undefined) {
-      pixelsPromise = decodeMediaFrame(media, {
+      pixelsPromise = this.decodeFrame(media, {
         frame: Math.floor(render.time * render.fps),
         time: render.time,
         deltaTime: 1 / render.fps,
