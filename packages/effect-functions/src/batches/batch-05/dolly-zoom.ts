@@ -60,7 +60,7 @@ export const DOLLY_ZOOM_DEFINITION: EffectToolDefinition<DollyZoomParams> = {
   ],
   inputSlots: [
     { name: "source_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized source video or rendered scene stream." },
-    { name: "camera_target", kind: "data", required: true, cardinality: "one", description: "Server-authorized subject target used for projection compensation." }
+    { name: "camera_target", kind: "data", required: true, cardinality: "one", description: "Server-derived locked subject target used for projection compensation." }
   ],
   primaryBackend: CAMERA_BACKEND,
   fallbackStrategy: { kind: "reject", reason: "Synchronized camera translation and projection compensation are required." },

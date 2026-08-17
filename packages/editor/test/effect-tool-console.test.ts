@@ -145,6 +145,41 @@ describe("120-tool selector helpers", () => {
       .toEqual({ [slotName]: "asset_imageabcdefgh" });
   });
 
+  it("keeps camera targets, match masks, and preview depth server-derived", () => {
+    const dollyZoom = tool({
+      toolName: "dolly_zoom",
+      inputRequirements: [
+        input("source_video", "video"),
+        input("camera_target", "data", true, false)
+      ]
+    });
+    const objectMatch = tool({
+      toolName: "object_match_cut",
+      inputRequirements: [
+        input("from_video", "video"), input("to_video", "video"),
+        input("from_match_mask", "mask", true, false), input("to_match_mask", "mask", true, false)
+      ]
+    });
+    const parallax = tool({
+      toolName: "parallax_layers",
+      inputRequirements: [
+        input("source_video", "video"),
+        input("depth_map", "depth-map", true, false),
+        input("camera_target", "data", false, false)
+      ]
+    });
+
+    expect(imageUploadRequirement(dollyZoom)).toEqual({ min: 1, max: 1 });
+    expect(turnInputIds(dollyZoom, ["asset_imageabcdefgh"]))
+      .toEqual({ source_video: "asset_imageabcdefgh" });
+    expect(imageUploadRequirement(objectMatch)).toEqual({ min: 2, max: 2 });
+    expect(turnInputIds(objectMatch, ["asset_imageabcdefgh", "asset_imageijklmnop"]))
+      .toEqual({ from_video: "asset_imageabcdefgh", to_video: "asset_imageijklmnop" });
+    expect(imageUploadRequirement(parallax)).toEqual({ min: 1, max: 1 });
+    expect(turnInputIds(parallax, ["asset_imageabcdefgh"]))
+      .toEqual({ source_video: "asset_imageabcdefgh" });
+  });
+
   it("preserves available selections, truncates excess, and fills the required minimum", () => {
     const transition = tool({
       inputRequirements: [input("source_frame", "image"), input("target_frame", "image")]

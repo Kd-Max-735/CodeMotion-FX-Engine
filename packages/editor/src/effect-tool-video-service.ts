@@ -227,6 +227,23 @@ function mayUsePreviewFallback(error: unknown): boolean {
   return value.code === "BATCH_06_ADAPTER_REQUIRED" || value.name === "Batch06AdapterRequiredError";
 }
 
+function authorizedInputFrameData(inputs: AuthorizedEffectInputs): Readonly<Record<string, Uint8Array>> {
+  const frames: Record<string, Uint8Array> = {};
+  for (const [slot, value] of Object.entries(inputs)) {
+    const input = Array.isArray(value) ? value[0] : value;
+    if (input === undefined || typeof input.binding !== "object" || input.binding === null) continue;
+    const data = (input.binding as { readonly data?: unknown }).data;
+    if (data instanceof Uint8Array || data instanceof Uint8ClampedArray) {
+      frames[slot] = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    } else if (Array.isArray(data) && data.every((entry) => typeof entry === "number" && Number.isFinite(entry))) {
+      const normalized = data.every((entry) => entry >= 0 && entry <= 1);
+      frames[slot] = Uint8Array.from(data, (entry) => Math.max(0, Math.min(255,
+        Math.round(normalized ? entry * 255 : entry))));
+    }
+  }
+  return Object.freeze(frames);
+}
+
 export class EffectToolVideoService {
   private readonly tasks = new Map<string, StoredVideoTask>();
   private queue: Promise<void> = Promise.resolve();
@@ -483,6 +500,8 @@ export class EffectToolVideoService {
         task.view.video.fps
       );
       let sourcePixels: Uint8Array | undefined;
+      const preparedInputFrames = task.prepared === undefined
+        ? undefined : authorizedInputFrameData(task.prepared.inputs);
       if (task.prepared === undefined) {
         if (initialMedia === undefined || task.sourceAssetIds.length !== 1) {
           throw new Error("The source image binding is unavailable.");
@@ -582,7 +601,13 @@ export class EffectToolVideoService {
               progress: Math.min(1, completedFrames / metadata.frameCount)
             }
           });
-          return composeEffectToolFrame(result, request, definition.toolName, sourcePixels);
+          return composeEffectToolFrame(
+            result,
+            request,
+            definition.toolName,
+            sourcePixels,
+            preparedInputFrames
+          );
         }
       });
       const bytes = (await stat(task.outputPath)).size;

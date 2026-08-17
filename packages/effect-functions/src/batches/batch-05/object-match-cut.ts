@@ -78,8 +78,8 @@ export const OBJECT_MATCH_CUT_DEFINITION: EffectToolDefinition<ObjectMatchCutPar
   inputSlots: [
     { name: "from_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized outgoing video." },
     { name: "to_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized incoming video." },
-    { name: "from_match_mask", kind: "mask", required: true, cardinality: "one", description: "Server-authorized outgoing object mask." },
-    { name: "to_match_mask", kind: "mask", required: true, cardinality: "one", description: "Server-authorized incoming object mask." }
+    { name: "from_match_mask", kind: "mask", required: true, cardinality: "one", description: "Server-derived locked outgoing object preview mask." },
+    { name: "to_match_mask", kind: "mask", required: true, cardinality: "one", description: "Server-derived locked incoming object preview mask." }
   ],
   primaryBackend: TRANSITION_BACKEND,
   fallbackStrategy: { kind: "reject", reason: "Object correspondence requires paired authorized masks and server GPU compositing." },

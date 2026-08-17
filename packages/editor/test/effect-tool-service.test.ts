@@ -808,6 +808,32 @@ describe("server single effect-tool service", () => {
     } }).binding;
     expect(paintBinding.strokes.length).toBeGreaterThanOrEqual(9);
     expect(paintBinding.strokes.every((stroke) => stroke.points.length >= 2)).toBe(true);
+
+    const dollyZoomDefinition = EFFECT_TOOL_REGISTRY.getByToolName("dolly_zoom")!;
+    const dollyZoomInputs = await resolver.resolve(principal, dollyZoomDefinition, {
+      source_video: media.asset.id
+    }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
+    expect(dollyZoomInputs).toHaveProperty("source_video");
+    expect(dollyZoomInputs).toHaveProperty("camera_target");
+
+    const parallaxDefinition = EFFECT_TOOL_REGISTRY.getByToolName("parallax_layers")!;
+    const parallaxInputs = await resolver.resolve(principal, parallaxDefinition, {
+      source_video: media.asset.id
+    }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
+    const parallaxDepth = (parallaxInputs.depth_map as { binding: { data: Uint8Array } }).binding.data;
+    expect(parallaxDepth).toHaveLength(width * height);
+
+    const matchDefinition = EFFECT_TOOL_REGISTRY.getByToolName("object_match_cut")!;
+    const matchInputs = await resolver.resolve(principal, matchDefinition, {
+      from_video: media.asset.id,
+      to_video: "asset_imageijklmnop"
+    }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
+    expect(matchInputs).toHaveProperty("from_match_mask");
+    expect(matchInputs).toHaveProperty("to_match_mask");
+    expect((matchInputs.from_match_mask as { binding: { data: Uint8Array } }).binding.data)
+      .toHaveLength(width * height);
+    expect((matchInputs.to_match_mask as { binding: { data: Uint8Array } }).binding.data)
+      .toHaveLength(width * height);
     expect(decode).toHaveBeenCalled();
   });
 
@@ -984,6 +1010,27 @@ describe("server single effect-tool service", () => {
         inputRequirements: [
           { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },
           { name: "stroke_plan", kind: "data", required: true, acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "dolly_zoom")).toMatchObject({
+        inputRequirements: [
+          { name: "source_video", required: true, acceptsUploadedImage: true },
+          { name: "camera_target", required: true, acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "object_match_cut")).toMatchObject({
+        inputRequirements: [
+          { name: "from_video", required: true, acceptsUploadedImage: true },
+          { name: "to_video", required: true, acceptsUploadedImage: true },
+          { name: "from_match_mask", required: true, acceptsUploadedImage: false },
+          { name: "to_match_mask", required: true, acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "parallax_layers")).toMatchObject({
+        inputRequirements: [
+          { name: "source_video", required: true, acceptsUploadedImage: true },
+          { name: "depth_map", required: true, acceptsUploadedImage: false },
+          { name: "camera_target", required: false, acceptsUploadedImage: false }
         ]
       });
 

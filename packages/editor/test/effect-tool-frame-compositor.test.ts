@@ -51,6 +51,20 @@ function solidSource(): Uint8Array {
   return source;
 }
 
+function gradientSource(redBias = 0, blueBias = 0): Uint8Array {
+  const source = new Uint8Array(detailedRequest.width * detailedRequest.height * 4);
+  for (let y = 0; y < detailedRequest.height; y += 1) {
+    for (let x = 0; x < detailedRequest.width; x += 1) {
+      const offset = (y * detailedRequest.width + x) * 4;
+      source[offset] = Math.min(255, redBias + x * 2);
+      source[offset + 1] = Math.min(255, 24 + y * 3);
+      source[offset + 2] = Math.min(255, blueBias + (x + y) % 64);
+      source[offset + 3] = 255;
+    }
+  }
+  return source;
+}
+
 function changedPixelCount(source: Uint8Array, output: Uint8Array): number {
   let count = 0;
   for (let offset = 0; offset < source.length; offset += 4) {
@@ -75,7 +89,9 @@ describe("effect tool frame compositor", () => {
     "particle_dissolve", "particle_logo_assemble", "particle_snow_rain", "particle_spark",
     "particle_trail", "particle_emitter", "particle_flow_field", "particle_orbit_field",
     "sim_boids", "sim_cloth", "sim_collision_shatter", "sim_fluid_lite",
-    "sim_rigid_body_2d", "sim_rope", "sim_soft_body", "sim_spring"
+    "sim_rigid_body_2d", "sim_rope", "sim_soft_body", "sim_spring",
+    "dolly", "dolly_zoom", "handheld", "object_match_cut", "orbit", "page_turn",
+    "pan_tilt", "parallax_layers", "portal", "zoom_tunnel", "unpolished_example"
   ])(
     "does not add the generic moving scanline to %s",
     (toolName) => {
@@ -263,5 +279,102 @@ describe("effect tool frame compositor", () => {
       return output[offset]! + output[offset + 1]! + output[offset + 2]!;
     };
     expect(brightnessAt(48, 46)).toBeGreaterThan(brightnessAt(48, 12));
+  });
+
+  it("renders forward and backward dolly movement in opposite visual directions", () => {
+    const source = gradientSource();
+    const forward = composeEffectToolFrame(metadata({
+      operation: "camera_linear_dolly", position: { x: 0, y: 0, z: -6 },
+      rotationDegrees: { x: 0, y: 0, z: 0 }, progress: 0.8
+    }), detailedRequest, "dolly", source, { source_video: source });
+    const backward = composeEffectToolFrame(metadata({
+      operation: "camera_linear_dolly", position: { x: 0, y: 0, z: 6 },
+      rotationDegrees: { x: 0, y: 0, z: 0 }, progress: 0.8
+    }), detailedRequest, "dolly", source, { source_video: source });
+    expect(forward).not.toEqual(backward);
+    expect(changedPixelCount(source, forward)).toBeGreaterThan(500);
+    expect(changedPixelCount(source, backward)).toBeGreaterThan(500);
+  });
+
+  it.each([
+    ["dolly_zoom", {
+      operation: "camera_dolly_zoom", position: { x: 0, y: 0, z: 6 },
+      rotationDegrees: { x: 0, y: 0, z: 0 }, progress: 0.75, verticalFovDegrees: 28
+    }],
+    ["handheld", {
+      operation: "deterministic_handheld_camera", position: { x: 0.08, y: -0.05, z: 0.02 },
+      rotationDegrees: { x: 1.2, y: -0.8, z: 1.7 }, progress: 1
+    }],
+    ["pan_tilt", {
+      operation: "camera_pan_tilt", position: { x: 0, y: 0, z: 0 },
+      rotationDegrees: { x: 24, y: -42, z: 0 }, progress: 0.7
+    }],
+    ["orbit", {
+      operation: "camera_target_orbit", position: { x: 5, y: 1.2, z: -4 },
+      rotationDegrees: { x: -12, y: 85, z: 0 }, progress: 0.8
+    }]
+  ] as const)("renders a dedicated camera treatment for %s", (toolName, value) => {
+    const source = gradientSource();
+    const output = composeEffectToolFrame(metadata(value), detailedRequest, toolName, source, {
+      source_video: source
+    });
+    expect(changedPixelCount(source, output)).toBeGreaterThan(500);
+  });
+
+  it("uses the derived depth map to produce layered parallax from one source image", () => {
+    const source = gradientSource();
+    const depth = new Uint8Array(detailedRequest.width * detailedRequest.height);
+    for (let y = 0; y < detailedRequest.height; y += 1) {
+      for (let x = 0; x < detailedRequest.width; x += 1) {
+        depth[y * detailedRequest.width + x] = Math.round(x / (detailedRequest.width - 1) * 255);
+      }
+    }
+    const output = composeEffectToolFrame(metadata({
+      operation: "depth_map_parallax_layers", position: { x: 5, y: -2, z: 7 },
+      rotationDegrees: { x: 0, y: 0, z: 0 }, progress: 0.8
+    }), detailedRequest, "parallax_layers", source, { source_video: source, depth_map: depth });
+    expect(changedPixelCount(source, output)).toBeGreaterThan(500);
+  });
+
+  it.each([
+    ["page_turn", {
+      operation: "page_turn_mesh", progress: 0.52,
+      sheet: { rotationYDegrees: -94, shadowOpacity: 0.45 }
+    }],
+    ["portal", {
+      operation: "radial_portal_wipe", progress: 0.55,
+      aperture: { radius: 0.52, featherWidth: 0.08, rotationDegrees: 160, glowStrength: 0.8 }
+    }],
+    ["zoom_tunnel", {
+      operation: "perspective_zoom_tunnel", progress: 0.5,
+      outgoing: { scale: 2.1, opacity: 0.5 }, incoming: { scale: 0.55, opacity: 0.5 },
+      twistDegrees: 50, motionBlur: 0.7
+    }],
+    ["object_match_cut", {
+      operation: "masked_object_match_cut", progress: 0.5, blend: 0.5,
+      outgoing: { scaleCorrection: 1.1, rotationCorrectionDegrees: 4 },
+      incoming: { scaleCorrection: 0.9, rotationCorrectionDegrees: -4 }
+    }]
+  ] as const)("composites both authorized images for %s", (toolName, value) => {
+    const outgoing = gradientSource(80, 0);
+    const incoming = gradientSource(0, 120);
+    const mask = new Uint8Array(detailedRequest.width * detailedRequest.height);
+    for (let index = 0; index < mask.length; index += 1) mask[index] = index % detailedRequest.width * 2;
+    const output = composeEffectToolFrame(metadata(value), detailedRequest, toolName, outgoing, {
+      from_video: outgoing,
+      to_video: incoming,
+      from_match_mask: mask,
+      to_match_mask: Uint8Array.from(mask, (entry) => 255 - entry)
+    });
+    let red = 0;
+    let blue = 0;
+    for (let offset = 0; offset < output.length; offset += 4) {
+      red += output[offset]!;
+      blue += output[offset + 2]!;
+    }
+    expect(red).toBeGreaterThan(output.length * 3);
+    expect(blue).toBeGreaterThan(output.length * 3);
+    expect(output).not.toEqual(outgoing);
+    expect(output).not.toEqual(incoming);
   });
 });

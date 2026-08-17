@@ -282,7 +282,7 @@ function validateSelectedInputIds(
   }
   const missing = definition.inputSlots
     .filter((slot) => slot.required && raw[slot.name] === undefined
-      && !isServerDerivedVisualSlot(definition, slot))
+      && !isServerDerivedInputSlot(definition, slot))
     .map((slot) => requirementView(definition, slot));
   if (requireRequired && missing.length > 0) throw new MissingEffectToolInputError(missing);
   const normalized: Record<string, string | readonly string[]> = {};
@@ -324,20 +324,39 @@ function authorizedInputSummary(
   }));
 }
 
-function isServerDerivedVisualSlot(
+function isServerDerivedInputSlot(
   definition: EffectToolDefinition,
   slot: EffectInputSlotDefinition
 ): boolean {
   return definition.toolName === "depth_of_field" && slot.name === "depth_field"
-    || definition.toolName === "paint_on" && slot.name === "stroke_plan";
+    || definition.toolName === "paint_on" && slot.name === "stroke_plan"
+    || ["dolly", "dolly_zoom", "orbit", "pan_tilt", "parallax_layers"].includes(definition.toolName)
+      && slot.name === "camera_target"
+    || definition.toolName === "parallax_layers" && slot.name === "depth_map"
+    || definition.toolName === "object_match_cut"
+      && (slot.name === "from_match_mask" || slot.name === "to_match_mask");
 }
 
 function acceptsUploadedImage(
   definition: EffectToolDefinition,
   slot: EffectInputSlotDefinition
 ): boolean {
-  if (isServerDerivedVisualSlot(definition, slot)) return false;
+  if (isServerDerivedInputSlot(definition, slot)) return false;
   return true;
+}
+
+function derivedInputResourceId(
+  definition: EffectToolDefinition,
+  slot: EffectInputSlotDefinition,
+  inputIds: Readonly<Record<string, unknown>>
+): string | undefined {
+  if (!isServerDerivedInputSlot(definition, slot)) return undefined;
+  const sourceSlot = definition.toolName === "object_match_cut"
+    ? slot.name === "to_match_mask" ? "to_video" : "from_video"
+    : definition.toolName === "depth_of_field" ? "source_frame"
+      : definition.toolName === "paint_on" ? "source_image" : "source_video";
+  const value = inputIds[sourceSlot];
+  return typeof value === "string" && RESOURCE_ID.test(value) ? value : undefined;
 }
 
 function requirementView(
@@ -1089,7 +1108,8 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
       typeof value === "string" ? [value] : Array.isArray(value) ? value : [])
       .find((value): value is string => typeof value === "string" && RESOURCE_ID.test(value));
     for (const slot of definition.inputSlots) {
-      const value = raw[slot.name] ?? (slot.required && previewResourceId !== undefined
+      const derivedResourceId = derivedInputResourceId(definition, slot, raw);
+      const value = raw[slot.name] ?? derivedResourceId ?? (slot.required && previewResourceId !== undefined
         ? slot.cardinality === "many" ? [previewResourceId] : previewResourceId
         : undefined);
       if (value === undefined) {

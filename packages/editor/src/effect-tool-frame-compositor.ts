@@ -15,7 +15,9 @@ const POLISHED_STRUCTURED_TOOLS = new Set([
   "particle_trail", "particle_emitter",
   "particle_flow_field", "particle_orbit_field", "sim_boids", "sim_cloth",
   "sim_collision_shatter", "sim_fluid_lite", "sim_rigid_body_2d", "sim_rope",
-  "sim_soft_body", "sim_spring"
+  "sim_soft_body", "sim_spring",
+  "dolly", "dolly_zoom", "handheld", "object_match_cut", "orbit", "page_turn",
+  "pan_tilt", "parallax_layers", "portal", "zoom_tunnel"
 ]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -1087,8 +1089,10 @@ function polishedStructuredFrame(
   value: Record<string, unknown>,
   request: FrameRequest,
   toolName: string,
-  source?: Uint8Array
+  source?: Uint8Array,
+  inputFrames?: Readonly<Record<string, Uint8Array>>
 ): boolean {
+  if (batch05Frame(output, value, request, toolName, source, inputFrames)) return true;
   if (simulationFrame(output, value, request, toolName, source)) return true;
   if (toolName === "shape_boolean_animate") {
     const grid = numericGrid(value, "alpha");
@@ -1411,6 +1415,522 @@ function resampleSource(
   }
 }
 
+function rgbaInputFrame(
+  inputFrames: Readonly<Record<string, Uint8Array>> | undefined,
+  slot: string,
+  fallback: Uint8Array | undefined,
+  request: FrameRequest
+): Uint8Array | undefined {
+  const candidate = inputFrames?.[slot];
+  const expectedLength = request.width * request.height * 4;
+  if (candidate?.length === expectedLength) return candidate;
+  return fallback?.length === expectedLength ? fallback : undefined;
+}
+
+function sampledChannel(
+  source: Uint8Array,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  channel: number
+): number {
+  const safeX = Math.max(0, Math.min(width - 1, x));
+  const safeY = Math.max(0, Math.min(height - 1, y));
+  const x0 = Math.floor(safeX);
+  const y0 = Math.floor(safeY);
+  const x1 = Math.min(width - 1, x0 + 1);
+  const y1 = Math.min(height - 1, y0 + 1);
+  const tx = safeX - x0;
+  const ty = safeY - y0;
+  const top = source[(y0 * width + x0) * 4 + channel]! * (1 - tx)
+    + source[(y0 * width + x1) * 4 + channel]! * tx;
+  const bottom = source[(y1 * width + x0) * 4 + channel]! * (1 - tx)
+    + source[(y1 * width + x1) * 4 + channel]! * tx;
+  return top * (1 - ty) + bottom * ty;
+}
+
+function renderAffineSource(
+  source: Uint8Array,
+  output: Uint8ClampedArray,
+  request: FrameRequest,
+  scale: number,
+  translateX: number,
+  translateY: number,
+  rotationDegrees = 0
+): void {
+  const safeScale = Math.max(0.3, Math.min(4, scale));
+  const radians = rotationDegrees * Math.PI / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const centerX = (request.width - 1) / 2;
+  const centerY = (request.height - 1) / 2;
+  for (let y = 0; y < request.height; y += 1) {
+    for (let x = 0; x < request.width; x += 1) {
+      const dx = x - centerX - translateX;
+      const dy = y - centerY - translateY;
+      const sourceX = (cosine * dx + sine * dy) / safeScale + centerX;
+      const sourceY = (-sine * dx + cosine * dy) / safeScale + centerY;
+      const offset = (y * request.width + x) * 4;
+      for (let channel = 0; channel < 4; channel += 1) {
+        output[offset + channel] = clampByte(sampledChannel(
+          source, request.width, request.height, sourceX, sourceY, channel
+        ));
+      }
+    }
+  }
+}
+
+function copyRgbaFrame(source: Uint8Array, output: Uint8ClampedArray): void {
+  output.set(source);
+}
+
+function smoothUnit(value: number): number {
+  const progress = Math.max(0, Math.min(1, value));
+  return progress * progress * (3 - 2 * progress);
+}
+
+function maskSample(
+  mask: Uint8Array | undefined,
+  source: Uint8Array,
+  pixelIndex: number,
+  pixelCount: number
+): number {
+  if (mask?.length === pixelCount) return mask[pixelIndex]! / 255;
+  if (mask?.length === pixelCount * 4) {
+    const offset = pixelIndex * 4;
+    return (mask[offset]! * 0.2126 + mask[offset + 1]! * 0.7152 + mask[offset + 2]! * 0.0722) / 255;
+  }
+  const offset = pixelIndex * 4;
+  return (source[offset]! * 0.2126 + source[offset + 1]! * 0.7152 + source[offset + 2]! * 0.0722) / 255;
+}
+
+function batch05CameraFrame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  toolName: string,
+  source: Uint8Array
+): boolean {
+  const position = record(value.position) ?? {};
+  const rotation = record(value.rotationDegrees) ?? {};
+  const positionX = typeof position.x === "number" ? position.x : 0;
+  const positionY = typeof position.y === "number" ? position.y : 0;
+  const positionZ = typeof position.z === "number" ? position.z : 0;
+  const pitch = typeof rotation.x === "number" ? rotation.x : 0;
+  const yaw = typeof rotation.y === "number" ? rotation.y : 0;
+  const roll = typeof rotation.z === "number" ? rotation.z : 0;
+
+  if (toolName === "dolly") {
+    const strength = Math.min(0.58, Math.abs(positionZ) * 0.055);
+    const scale = positionZ <= 0 ? 1 + strength : 1 / (1 + strength);
+    renderAffineSource(source, output, request, scale, 0, -positionY * request.height * 0.035);
+    return true;
+  }
+
+  if (toolName === "dolly_zoom") {
+    const strength = Math.min(0.48, Math.abs(positionZ) * 0.055);
+    if (strength <= Number.EPSILON) {
+      copyRgbaFrame(source, output);
+      return true;
+    }
+    const forward = positionZ < 0;
+    const centerX = (request.width - 1) / 2;
+    const centerY = (request.height - 1) / 2;
+    const maximumRadius = Math.max(1, Math.hypot(centerX, centerY));
+    for (let y = 0; y < request.height; y += 1) {
+      for (let x = 0; x < request.width; x += 1) {
+        const dx = x - centerX;
+        const dy = y - centerY;
+        const radial = Math.min(1, Math.hypot(dx, dy) / maximumRadius);
+        const subjectHold = smoothUnit(Math.max(0, (radial - 0.18) / 0.82));
+        const localScale = 1 + (forward ? -1 : 1) * strength * subjectHold;
+        const sourceX = centerX + dx / Math.max(0.42, localScale);
+        const sourceY = centerY + dy / Math.max(0.42, localScale);
+        const offset = (y * request.width + x) * 4;
+        for (let channel = 0; channel < 4; channel += 1) {
+          output[offset + channel] = clampByte(sampledChannel(
+            source, request.width, request.height, sourceX, sourceY, channel
+          ));
+        }
+      }
+    }
+    return true;
+  }
+
+  if (toolName === "handheld") {
+    const movement = Math.abs(positionX) + Math.abs(positionY) + Math.abs(positionZ)
+      + Math.abs(pitch) + Math.abs(yaw) + Math.abs(roll);
+    if (movement <= Number.EPSILON) {
+      copyRgbaFrame(source, output);
+      return true;
+    }
+    renderAffineSource(
+      source,
+      output,
+      request,
+      1.025 + Math.min(0.04, movement * 0.002),
+      positionX * request.width * 0.13 + yaw * request.width * 0.0012,
+      -positionY * request.height * 0.13 - pitch * request.height * 0.0015,
+      roll
+    );
+    return true;
+  }
+
+  if (toolName === "pan_tilt") {
+    const amount = Math.abs(pitch) + Math.abs(yaw);
+    if (amount <= Number.EPSILON) {
+      copyRgbaFrame(source, output);
+      return true;
+    }
+    renderAffineSource(
+      source,
+      output,
+      request,
+      1.06 + Math.min(0.12, amount / 900),
+      -yaw / 180 * request.width * 0.68,
+      pitch / 90 * request.height * 0.42
+    );
+    return true;
+  }
+
+  if (toolName === "orbit") {
+    const amount = Math.abs(positionX) + Math.abs(positionY) + Math.abs(positionZ)
+      + Math.abs(pitch) + Math.abs(yaw);
+    if (amount <= Number.EPSILON) {
+      copyRgbaFrame(source, output);
+      return true;
+    }
+    const centerX = (request.width - 1) / 2;
+    const centerY = (request.height - 1) / 2;
+    const orbitSine = Math.sin(yaw * Math.PI / 180);
+    const elevation = Math.sin(-pitch * Math.PI / 180);
+    for (let y = 0; y < request.height; y += 1) {
+      for (let x = 0; x < request.width; x += 1) {
+        const pixel = y * request.width + x;
+        const offset = pixel * 4;
+        const luminance = (source[offset]! * 0.2126 + source[offset + 1]! * 0.7152
+          + source[offset + 2]! * 0.0722) / 255;
+        const depthDisparity = luminance - 0.5;
+        const normalizedX = (x - centerX) / Math.max(1, centerX);
+        const curve = Math.sin(normalizedX * Math.PI / 2);
+        const sourceX = x + orbitSine * request.width * (depthDisparity * 0.2 + curve * 0.055);
+        const sourceY = y - elevation * request.height * depthDisparity * 0.16;
+        for (let channel = 0; channel < 4; channel += 1) {
+          output[offset + channel] = clampByte(sampledChannel(
+            source, request.width, request.height, sourceX, sourceY, channel
+          ));
+        }
+      }
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function parallaxFrame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  source: Uint8Array,
+  inputFrames: Readonly<Record<string, Uint8Array>> | undefined
+): void {
+  const position = record(value.position) ?? {};
+  const moveX = typeof position.x === "number" ? position.x : 0;
+  const moveY = typeof position.y === "number" ? position.y : 0;
+  const moveZ = typeof position.z === "number" ? position.z : 0;
+  if (Math.abs(moveX) + Math.abs(moveY) + Math.abs(moveZ) <= Number.EPSILON) {
+    copyRgbaFrame(source, output);
+    return;
+  }
+  const depthMap = inputFrames?.depth_map;
+  const pixelCount = request.width * request.height;
+  const centerX = (request.width - 1) / 2;
+  const centerY = (request.height - 1) / 2;
+  for (let y = 0; y < request.height; y += 1) {
+    for (let x = 0; x < request.width; x += 1) {
+      const pixel = y * request.width + x;
+      const depth = maskSample(depthMap, source, pixel, pixelCount);
+      const disparity = 1 - depth;
+      const scale = Math.max(0.55, 1 + moveZ * disparity * 0.018);
+      const sourceX = centerX + (x - centerX) / scale + moveX * disparity * request.width * 0.025;
+      const sourceY = centerY + (y - centerY) / scale - moveY * disparity * request.height * 0.025;
+      const offset = pixel * 4;
+      for (let channel = 0; channel < 4; channel += 1) {
+        output[offset + channel] = clampByte(sampledChannel(
+          source, request.width, request.height, sourceX, sourceY, channel
+        ));
+      }
+    }
+  }
+}
+
+function pageTurnFrame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  outgoing: Uint8Array,
+  incoming: Uint8Array
+): void {
+  const progress = Math.max(0, Math.min(1, typeof value.progress === "number" ? value.progress : 0));
+  if (progress <= 0) {
+    copyRgbaFrame(outgoing, output);
+    return;
+  }
+  if (progress >= 1) {
+    copyRgbaFrame(incoming, output);
+    return;
+  }
+  copyRgbaFrame(incoming, output);
+  const sheet = record(value.sheet) ?? {};
+  const rotation = typeof sheet.rotationYDegrees === "number" ? sheet.rotationYDegrees : -180 * progress;
+  const turnsLeft = rotation < 0;
+  const fold = request.width * (1 - progress);
+  const curlWidth = Math.max(2, request.width * (0.035 + 0.16 * Math.sin(Math.PI * progress)));
+  const shadowOpacity = typeof sheet.shadowOpacity === "number" ? sheet.shadowOpacity : 0.4;
+  for (let y = 0; y < request.height; y += 1) {
+    for (let x = 0; x < request.width; x += 1) {
+      const canonicalX = turnsLeft ? x : request.width - 1 - x;
+      const offset = (y * request.width + x) * 4;
+      if (canonicalX < fold) {
+        const sourceX = turnsLeft ? canonicalX : request.width - 1 - canonicalX;
+        const sourceOffset = (y * request.width + Math.max(0, Math.min(request.width - 1, Math.round(sourceX)))) * 4;
+        output.set(outgoing.subarray(sourceOffset, sourceOffset + 4), offset);
+      } else if (canonicalX < fold + curlWidth) {
+        const curl = (canonicalX - fold) / curlWidth;
+        const sourceCanonicalX = fold + curl * (request.width - fold);
+        const sourceX = turnsLeft ? sourceCanonicalX : request.width - 1 - sourceCanonicalX;
+        const shade = 0.48 + 0.46 * Math.abs(Math.cos(curl * Math.PI));
+        for (let channel = 0; channel < 3; channel += 1) {
+          const page = sampledChannel(outgoing, request.width, request.height, sourceX, y, channel);
+          const paper = 236 - channel * 7;
+          output[offset + channel] = clampByte(page * shade * 0.78 + paper * (1 - shade) * 0.22);
+        }
+        output[offset + 3] = 255;
+      }
+      const distanceToFold = Math.abs(canonicalX - fold);
+      if (distanceToFold < curlWidth * 1.35) {
+        const shadow = (1 - distanceToFold / (curlWidth * 1.35)) * shadowOpacity * 0.62;
+        for (let channel = 0; channel < 3; channel += 1) {
+          output[offset + channel] = clampByte(output[offset + channel]! * (1 - shadow));
+        }
+      }
+    }
+  }
+}
+
+function portalFrame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  outgoing: Uint8Array,
+  incoming: Uint8Array
+): void {
+  const progress = Math.max(0, Math.min(1, typeof value.progress === "number" ? value.progress : 0));
+  if (progress <= 0) {
+    copyRgbaFrame(outgoing, output);
+    return;
+  }
+  if (progress >= 1) {
+    copyRgbaFrame(incoming, output);
+    return;
+  }
+  const aperture = record(value.aperture) ?? {};
+  const radiusValue = typeof aperture.radius === "number" ? aperture.radius : progress;
+  const featherValue = typeof aperture.featherWidth === "number" ? aperture.featherWidth : 0.06;
+  const rotation = typeof aperture.rotationDegrees === "number" ? aperture.rotationDegrees : 0;
+  const glow = typeof aperture.glowStrength === "number" ? aperture.glowStrength : 0.5;
+  const centerX = (request.width - 1) / 2;
+  const centerY = (request.height - 1) / 2;
+  const unitRadius = Math.hypot(centerX, centerY);
+  const radius = Math.max(1, radiusValue * unitRadius);
+  const feather = Math.max(1, featherValue * unitRadius);
+  const glowWidth = Math.max(3, Math.min(28, 5 + glow * 18));
+  for (let y = 0; y < request.height; y += 1) {
+    for (let x = 0; x < request.width; x += 1) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const distance = Math.hypot(dx, dy);
+      const edgeMix = 1 - smoothUnit((distance - (radius - feather)) / feather);
+      const angle = Math.atan2(dy, dx) - rotation * Math.PI / 180
+        * Math.max(0, 1 - distance / radius) * 0.28;
+      const sourceX = centerX + Math.cos(angle) * distance;
+      const sourceY = centerY + Math.sin(angle) * distance;
+      const offset = (y * request.width + x) * 4;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const from = outgoing[offset + channel]!;
+        const to = sampledChannel(incoming, request.width, request.height, sourceX, sourceY, channel);
+        output[offset + channel] = clampByte(from * (1 - edgeMix) + to * edgeMix);
+      }
+      output[offset + 3] = 255;
+      const edgeDistance = Math.abs(distance - radius);
+      if (edgeDistance < glowWidth) {
+        const light = (1 - edgeDistance / glowWidth) * glow;
+        output[offset] = clampByte(output[offset]! * (1 - light * 0.45) + 76 * light * 0.45);
+        output[offset + 1] = clampByte(output[offset + 1]! * (1 - light * 0.58) + 224 * light * 0.58);
+        output[offset + 2] = clampByte(output[offset + 2]! * (1 - light * 0.72) + 255 * light * 0.72);
+      }
+    }
+  }
+  for (let spark = 0; spark < 28; spark += 1) {
+    const angle = spark * 2.399963 + request.time * (0.3 + spark % 4 * 0.08);
+    const spread = radius + Math.sin(spark * 4.17 + request.time * 5) * glowWidth * 1.4;
+    drawDisc(output, request.width, request.height,
+      centerX + Math.cos(angle) * spread, centerY + Math.sin(angle) * spread,
+      1.2 + spark % 3, spark % 2 === 0 ? [104, 236, 255, 255] : [196, 112, 255, 255],
+      0.18 + glow * 0.28);
+  }
+}
+
+function zoomTunnelFrame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  outgoing: Uint8Array,
+  incoming: Uint8Array
+): void {
+  const progress = Math.max(0, Math.min(1, typeof value.progress === "number" ? value.progress : 0));
+  if (progress <= 0) {
+    copyRgbaFrame(outgoing, output);
+    return;
+  }
+  if (progress >= 1) {
+    copyRgbaFrame(incoming, output);
+    return;
+  }
+  const outgoingState = record(value.outgoing) ?? {};
+  const incomingState = record(value.incoming) ?? {};
+  const outgoingScale = typeof outgoingState.scale === "number" ? outgoingState.scale : 1 + progress * 2;
+  const incomingScale = typeof incomingState.scale === "number" ? incomingState.scale : 0.25 + progress * 0.75;
+  const outgoingOpacity = typeof outgoingState.opacity === "number" ? outgoingState.opacity : 1 - progress;
+  const incomingOpacity = typeof incomingState.opacity === "number" ? incomingState.opacity : progress;
+  const twist = typeof value.twistDegrees === "number" ? value.twistDegrees : 0;
+  const motionBlur = typeof value.motionBlur === "number" ? value.motionBlur : 0;
+  const centerX = (request.width - 1) / 2;
+  const centerY = (request.height - 1) / 2;
+  const outgoingRadians = -twist * 0.35 * Math.PI / 180;
+  const incomingRadians = twist * 0.65 * Math.PI / 180;
+  const outgoingCosine = Math.cos(outgoingRadians);
+  const outgoingSine = Math.sin(outgoingRadians);
+  const incomingCosine = Math.cos(incomingRadians);
+  const incomingSine = Math.sin(incomingRadians);
+  const totalOpacity = Math.max(0.001, outgoingOpacity + incomingOpacity);
+  const maximumRadius = Math.max(1, Math.hypot(centerX, centerY));
+  for (let y = 0; y < request.height; y += 1) {
+    for (let x = 0; x < request.width; x += 1) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const outgoingX = centerX + (outgoingCosine * dx + outgoingSine * dy) / outgoingScale;
+      const outgoingY = centerY + (-outgoingSine * dx + outgoingCosine * dy) / outgoingScale;
+      const incomingX = centerX + (incomingCosine * dx + incomingSine * dy) / incomingScale;
+      const incomingY = centerY + (-incomingSine * dx + incomingCosine * dy) / incomingScale;
+      const offset = (y * request.width + x) * 4;
+      for (let channel = 0; channel < 3; channel += 1) {
+        output[offset + channel] = clampByte((
+          sampledChannel(outgoing, request.width, request.height, outgoingX, outgoingY, channel) * outgoingOpacity
+          + sampledChannel(incoming, request.width, request.height, incomingX, incomingY, channel) * incomingOpacity
+        ) / totalOpacity);
+      }
+      const radial = Math.hypot(dx, dy) / maximumRadius;
+      const streak = Math.max(0, Math.cos(Math.atan2(dy, dx) * 14 + request.time * 6)) ** 18
+        * radial * radial * motionBlur * 0.42;
+      output[offset] = clampByte(output[offset]! + 72 * streak);
+      output[offset + 1] = clampByte(output[offset + 1]! + 168 * streak);
+      output[offset + 2] = clampByte(output[offset + 2]! + 224 * streak);
+      output[offset + 3] = 255;
+    }
+  }
+}
+
+function objectMatchFrame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  outgoing: Uint8Array,
+  incoming: Uint8Array,
+  inputFrames: Readonly<Record<string, Uint8Array>> | undefined
+): void {
+  const blend = Math.max(0, Math.min(1, typeof value.blend === "number" ? value.blend : 0));
+  if (blend <= 0) {
+    copyRgbaFrame(outgoing, output);
+    return;
+  }
+  if (blend >= 1) {
+    copyRgbaFrame(incoming, output);
+    return;
+  }
+  const outgoingState = record(value.outgoing) ?? {};
+  const incomingState = record(value.incoming) ?? {};
+  const outgoingScale = typeof outgoingState.scaleCorrection === "number" ? outgoingState.scaleCorrection : 1;
+  const incomingScale = typeof incomingState.scaleCorrection === "number" ? incomingState.scaleCorrection : 1;
+  const outgoingRotation = (typeof outgoingState.rotationCorrectionDegrees === "number"
+    ? outgoingState.rotationCorrectionDegrees : 0) * Math.PI / 180;
+  const incomingRotation = (typeof incomingState.rotationCorrectionDegrees === "number"
+    ? incomingState.rotationCorrectionDegrees : 0) * Math.PI / 180;
+  const outgoingCosine = Math.cos(outgoingRotation);
+  const outgoingSine = Math.sin(outgoingRotation);
+  const incomingCosine = Math.cos(incomingRotation);
+  const incomingSine = Math.sin(incomingRotation);
+  const centerX = (request.width - 1) / 2;
+  const centerY = (request.height - 1) / 2;
+  const pixelCount = request.width * request.height;
+  const fromMask = inputFrames?.from_match_mask;
+  const toMask = inputFrames?.to_match_mask;
+  const activeAlignment = Math.sin(Math.PI * blend);
+  for (let y = 0; y < request.height; y += 1) {
+    for (let x = 0; x < request.width; x += 1) {
+      const pixel = y * request.width + x;
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const outgoingX = centerX + (outgoingCosine * dx + outgoingSine * dy) / outgoingScale;
+      const outgoingY = centerY + (-outgoingSine * dx + outgoingCosine * dy) / outgoingScale;
+      const incomingX = centerX + (incomingCosine * dx + incomingSine * dy) / incomingScale;
+      const incomingY = centerY + (-incomingSine * dx + incomingCosine * dy) / incomingScale;
+      const maskDelta = maskSample(toMask, incoming, pixel, pixelCount)
+        - maskSample(fromMask, outgoing, pixel, pixelCount);
+      const localBlend = Math.max(0, Math.min(1, blend + maskDelta * activeAlignment * 0.22));
+      const offset = pixel * 4;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const from = sampledChannel(outgoing, request.width, request.height, outgoingX, outgoingY, channel);
+        const to = sampledChannel(incoming, request.width, request.height, incomingX, incomingY, channel);
+        output[offset + channel] = clampByte(from * (1 - localBlend) + to * localBlend);
+      }
+      output[offset + 3] = 255;
+    }
+  }
+}
+
+function batch05Frame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  toolName: string,
+  fallbackSource: Uint8Array | undefined,
+  inputFrames: Readonly<Record<string, Uint8Array>> | undefined
+): boolean {
+  if (!["dolly", "dolly_zoom", "handheld", "object_match_cut", "orbit", "page_turn",
+    "pan_tilt", "parallax_layers", "portal", "zoom_tunnel"].includes(toolName)) return false;
+  const sourceSlot = toolName === "object_match_cut" || toolName === "page_turn"
+    || toolName === "portal" || toolName === "zoom_tunnel" ? "from_video" : "source_video";
+  const source = rgbaInputFrame(inputFrames, sourceSlot, fallbackSource, request);
+  if (source === undefined) return false;
+  if (["dolly", "dolly_zoom", "handheld", "orbit", "pan_tilt"].includes(toolName)) {
+    return batch05CameraFrame(output, value, request, toolName, source);
+  }
+  if (toolName === "parallax_layers") {
+    parallaxFrame(output, value, request, source, inputFrames);
+    return true;
+  }
+  const incoming = rgbaInputFrame(inputFrames, "to_video", undefined, request);
+  if (incoming === undefined) return false;
+  if (toolName === "page_turn") pageTurnFrame(output, value, request, source, incoming);
+  else if (toolName === "portal") portalFrame(output, value, request, source, incoming);
+  else if (toolName === "zoom_tunnel") zoomTunnelFrame(output, value, request, source, incoming);
+  else objectMatchFrame(output, value, request, source, incoming, inputFrames);
+  return true;
+}
+
 function operationFrame(
   output: Uint8ClampedArray,
   source: Uint8Array | undefined,
@@ -1672,21 +2192,14 @@ function adapterPreview(
       }
     }
   }
-  if (!POLISHED_STRUCTURED_TOOLS.has(toolName)) {
-    const scanline = Math.floor(((request.time * 90) % (request.height + 40)) - 20);
-    for (let y = Math.max(0, scanline - 2); y <= Math.min(request.height - 1, scanline + 2); y += 1) {
-      for (let x = 0; x < request.width; x += 1) {
-        blendPixel(output, request.width, request.height, x, y, [96, 220, 255, 255], 0.22);
-      }
-    }
-  }
 }
 
 export function composeEffectToolFrame(
   result: EffectRenderResult | undefined,
   request: FrameRequest,
   toolName: string,
-  source: Uint8Array | undefined
+  source: Uint8Array | undefined,
+  inputFrames?: Readonly<Record<string, Uint8Array>>
 ): Uint8Array {
   if (result !== undefined) {
     const exact = exactFrame(result, request);
@@ -1699,7 +2212,7 @@ export function composeEffectToolFrame(
   const output = sourceFrame(source, request, toolName);
   const value = result === undefined ? undefined : record(result.output);
   if (value !== undefined) {
-    const polished = polishedStructuredFrame(output, value, request, toolName, source);
+    const polished = polishedStructuredFrame(output, value, request, toolName, source, inputFrames);
     if (!polished) {
       operationFrame(output, source, value, request);
       const fieldRendered = scalarField(output, value, request);

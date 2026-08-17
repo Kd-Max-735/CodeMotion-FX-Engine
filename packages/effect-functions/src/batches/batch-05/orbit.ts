@@ -62,7 +62,7 @@ export const ORBIT_DEFINITION: EffectToolDefinition<OrbitParams> = {
   ],
   inputSlots: [
     { name: "source_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized source video or rendered scene stream." },
-    { name: "camera_target", kind: "data", required: true, cardinality: "one", description: "Server-authorized orbit target binding." }
+    { name: "camera_target", kind: "data", required: true, cardinality: "one", description: "Server-derived locked orbit target binding." }
   ],
   primaryBackend: CAMERA_BACKEND,
   fallbackStrategy: { kind: "reject", reason: "Target-relative server-side camera orbit is required." },

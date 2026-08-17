@@ -74,7 +74,7 @@ export const PARALLAX_LAYERS_DEFINITION: EffectToolDefinition<ParallaxLayersPara
   ],
   inputSlots: [
     { name: "source_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized source video." },
-    { name: "depth_map", kind: "depth-map", required: true, cardinality: "one", description: "Server-authorized depth map used to construct spatial layers." },
+    { name: "depth_map", kind: "depth-map", required: true, cardinality: "one", description: "Server-derived locked preview depth map used to construct spatial layers." },
     { name: "camera_target", kind: "data", required: false, cardinality: "one", description: "Optional server-authorized convergence target." }
   ],
   primaryBackend: CAMERA_BACKEND,
