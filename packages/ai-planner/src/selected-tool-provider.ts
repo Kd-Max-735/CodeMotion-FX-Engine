@@ -8,6 +8,14 @@ const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
 export const SELECTED_TOOL_DEFAULT_DURATION_SECONDS = 5;
 export const SELECTED_TOOL_MIN_DURATION_SECONDS = 1;
 export const SELECTED_TOOL_MAX_DURATION_SECONDS = 60;
+export const VIDEO_GENERATION_MODES = ["fast", "standard", "fine"] as const;
+export type VideoGenerationMode = typeof VIDEO_GENERATION_MODES[number];
+export const DEFAULT_VIDEO_GENERATION_MODE: VideoGenerationMode = "standard";
+export const VIDEO_GENERATION_MODE_FPS: Readonly<Record<VideoGenerationMode, number>> = Object.freeze({
+  fast: 15,
+  standard: 30,
+  fine: 60
+});
 
 export interface SelectedToolParameterRequest {
   readonly requestId: string;
@@ -163,7 +171,7 @@ function conversationParameterSchema(parameterSchema: JsonSchema): JsonSchema {
       output: {
         type: "object",
         additionalProperties: false,
-        required: ["durationSeconds"],
+        required: ["durationSeconds", "generationMode"],
         properties: {
           durationSeconds: {
             type: "number",
@@ -171,6 +179,11 @@ function conversationParameterSchema(parameterSchema: JsonSchema): JsonSchema {
             maximum: SELECTED_TOOL_MAX_DURATION_SECONDS,
             multipleOf: 0.1,
             default: SELECTED_TOOL_DEFAULT_DURATION_SECONDS
+          },
+          generationMode: {
+            type: "string",
+            enum: [...VIDEO_GENERATION_MODES],
+            default: DEFAULT_VIDEO_GENERATION_MODE
           }
         }
       }
@@ -182,11 +195,13 @@ function systemContent(request: SelectedToolParameterRequest): string {
   return [
     "你是 CodeMotion FX 的单工具助手。当前唯一可用工具由用户在界面中预先选择。",
     "当用户要求实际生成或修改效果时调用该工具；当用户只是咨询参数、能力或使用方式时直接用简洁中文回答，不调用工具。",
-    "工具 arguments 顶层必须严格包含 effectParams 与 output：effectParams 遵循当前特效字段；output 只包含 durationSeconds。",
-    `未提及时 durationSeconds=${SELECTED_TOOL_DEFAULT_DURATION_SECONDS}。明确时长优先；“长一点/久一点”在明确时长或默认时长上加 2 秒；“短一点/快一点”减 2 秒。`,
+    "工具 arguments 顶层必须严格包含 effectParams 与 output：effectParams 遵循当前特效字段；output 只包含 durationSeconds 与 generationMode。",
+    `未提及时 durationSeconds=${SELECTED_TOOL_DEFAULT_DURATION_SECONDS}。明确时长优先；“长一点/久一点”在明确时长或默认时长上加 2 秒；“短一点/视频短一点”减 2 秒。`,
     "没有明确基准的“长视频/较长视频”使用 8 秒，“短视频/较短视频”使用 3 秒；最终限制在 1–60 秒并保留至多一位小数。",
-    "不得在参数中输出素材、路径、URL、资源 ID、帧率、编码器或除 durationSeconds 之外的导出设置。",
-    "工具结果回传后必须用简洁中文给出最终正文，说明已采用的效果和视频时长，不得再次调用工具。",
+    `generationMode 只能是 fast、standard、fine，默认 ${DEFAULT_VIDEO_GENERATION_MODE}。用户要求“生成快一点/快速生成/速度优先”时使用 fast；“标准/正常”使用 standard；“精美/高质量/更流畅/画质优先”时使用 fine。`,
+    "“生成快一点”只改变 generationMode，不缩短 durationSeconds；“视频短一点”只改变 durationSeconds。",
+    "不得在参数中输出素材、路径、URL、资源 ID、直接帧率、编码器或除 durationSeconds、generationMode 之外的导出设置。",
+    "工具结果回传后必须用简洁中文给出最终正文，说明已采用的效果、视频时长和生成模式，不得再次调用工具。",
     `当前唯一工具：${request.toolName}`,
     "当前工具字段说明（其中标准 JSON 的 data 字段仅对应 effectParams）：",
     request.fieldSpec
@@ -198,7 +213,7 @@ function finalSystemContent(request: SelectedToolParameterRequest): string {
     "你是 CodeMotion FX 的单工具助手。",
     `当前工具 ${request.toolName} 已由服务器执行并返回了安全结果。`,
     "必须根据用户原始需求和工具结果输出一段简洁、自然的中文最终正文。",
-    "正文应说明采用的效果和视频时长；任务仍在队列中时应明确说正在生成，不得声称已经完成。",
+    "正文应说明采用的效果、视频时长和生成模式；任务仍在队列中时应明确说正在生成，不得声称已经完成。",
     "不要输出 JSON、Markdown 代码块、资源 ID、文件路径或内部实现信息，不得再次调用工具。"
   ].join("\n");
 }

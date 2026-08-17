@@ -2,6 +2,7 @@ import { constants as fsConstants, type ReadStream } from "node:fs";
 import { mkdir, open, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import {
   executeSelectedEffectTool,
   type AuthorizedEffectInputs,
@@ -24,8 +25,28 @@ const DEFAULT_VIDEO_DURATION_SECONDS = 5;
 const DEFAULT_VIDEO_FPS = 30;
 const MAX_VIDEO_DURATION_SECONDS = 3_600;
 const MAX_EFFECT_DIMENSION = 4_096;
+const DEFAULT_GPU_SAMPLE_INTERVAL_MS = 1_000;
+const GPU_QUERY_TIMEOUT_MS = 2_000;
 
 export type EffectToolVideoTaskStatus = "queued" | "running" | "completed" | "failed";
+
+export interface NvidiaGpuSample {
+  readonly name: string;
+  readonly memoryUsedMiB: number;
+  readonly memoryTotalMiB: number;
+  readonly utilizationPercent: number;
+}
+
+export interface EffectToolGpuTelemetryView {
+  readonly available: boolean;
+  readonly name?: string;
+  readonly memoryUsedMiB?: number;
+  readonly memoryTotalMiB?: number;
+  readonly utilizationPercent?: number;
+  readonly peakMemoryUsedMiB?: number;
+  readonly sampledAt?: string;
+  readonly message?: string;
+}
 
 export interface EffectToolVideoExecutionView {
   readonly id: string;
@@ -51,6 +72,7 @@ export interface EffectToolVideoExecutionView {
     readonly bytes?: number;
     readonly downloadName?: string;
   };
+  readonly gpu: EffectToolGpuTelemetryView;
   readonly failure?: {
     readonly code: "VIDEO_RENDER_FAILED";
     readonly message: string;
@@ -85,6 +107,8 @@ export interface EffectToolVideoServiceOptions {
   readonly decodeFrame?: typeof decodeMediaFrame;
   readonly durationSeconds?: number;
   readonly fps?: number;
+  readonly gpuSampler?: () => Promise<NvidiaGpuSample>;
+  readonly gpuSampleIntervalMs?: number;
 }
 
 function taskKey(owner: OwnerContext, id: string): string {
@@ -96,6 +120,52 @@ function safeNumber(value: unknown, label: string): number {
     throw new RangeError(`${label} is invalid.`);
   }
   return value;
+}
+
+function parseGpuNumber(value: string, label: string): number {
+  const parsed = Number(value.trim());
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`NVIDIA ${label} is invalid.`);
+  return parsed;
+}
+
+export function sampleNvidiaGpu(): Promise<NvidiaGpuSample> {
+  return new Promise((resolveSample, rejectSample) => {
+    execFile("nvidia-smi", [
+      "--query-gpu=name,memory.used,memory.total,utilization.gpu",
+      "--format=csv,noheader,nounits"
+    ], {
+      encoding: "utf8",
+      timeout: GPU_QUERY_TIMEOUT_MS,
+      windowsHide: true,
+      maxBuffer: 16 * 1024
+    }, (error, stdout) => {
+      if (error !== null) {
+        rejectSample(new Error("NVIDIA GPU telemetry is unavailable."));
+        return;
+      }
+      try {
+        const devices = stdout.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean).map((line) => {
+          const columns = line.split(",").map((column) => column.trim());
+          if (columns.length !== 4 || columns[0]!.length === 0) throw new Error("NVIDIA GPU output is invalid.");
+          return {
+            name: columns[0]!,
+            memoryUsedMiB: parseGpuNumber(columns[1]!, "memory usage"),
+            memoryTotalMiB: parseGpuNumber(columns[2]!, "memory total"),
+            utilizationPercent: parseGpuNumber(columns[3]!, "utilization")
+          };
+        });
+        if (devices.length === 0) throw new Error("No NVIDIA GPU was reported.");
+        resolveSample(Object.freeze({
+          name: devices.map((device) => device.name).join(" + "),
+          memoryUsedMiB: devices.reduce((total, device) => total + device.memoryUsedMiB, 0),
+          memoryTotalMiB: devices.reduce((total, device) => total + device.memoryTotalMiB, 0),
+          utilizationPercent: Math.max(...devices.map((device) => device.utilizationPercent))
+        }));
+      } catch (cause) {
+        rejectSample(cause);
+      }
+    });
+  });
 }
 
 function outputMetadata(media: VerifiedStoredMedia, durationSeconds: number, fps: number) {
@@ -166,6 +236,8 @@ export class EffectToolVideoService {
   private readonly decodeFrame: typeof decodeMediaFrame;
   private readonly durationSeconds: number;
   private readonly fps: number;
+  private readonly gpuSampler: () => Promise<NvidiaGpuSample>;
+  private readonly gpuSampleIntervalMs: number;
 
   constructor(private readonly options: EffectToolVideoServiceOptions) {
     this.outputRoot = resolve(options.outputRoot);
@@ -173,6 +245,11 @@ export class EffectToolVideoService {
     this.decodeFrame = options.decodeFrame ?? decodeMediaFrame;
     this.durationSeconds = safeNumber(options.durationSeconds ?? DEFAULT_VIDEO_DURATION_SECONDS, "Video duration");
     this.fps = safeNumber(options.fps ?? DEFAULT_VIDEO_FPS, "Video frame rate");
+    this.gpuSampler = options.gpuSampler ?? sampleNvidiaGpu;
+    this.gpuSampleIntervalMs = safeNumber(
+      options.gpuSampleIntervalMs ?? DEFAULT_GPU_SAMPLE_INTERVAL_MS,
+      "GPU sample interval"
+    );
     if (this.durationSeconds > MAX_VIDEO_DURATION_SECONDS || !Number.isInteger(this.fps) || this.fps > 120) {
       throw new RangeError("Video output settings exceed the effect render limit.");
     }
@@ -184,15 +261,18 @@ export class EffectToolVideoService {
     definition: EffectToolDefinition,
     envelope: EffectParameterEnvelope,
     seed: number,
-    durationSeconds = this.durationSeconds
+    durationSeconds = this.durationSeconds,
+    fps = this.fps
   ): Promise<EffectToolVideoExecutionView> {
     if (this.closing) throw new Error("Effect video service is closing.");
     safeNumber(durationSeconds, "Video duration");
     if (durationSeconds > MAX_VIDEO_DURATION_SECONDS) {
       throw new RangeError("Video duration exceeds the effect render limit.");
     }
+    safeNumber(fps, "Video frame rate");
+    if (!Number.isInteger(fps) || fps > 120) throw new RangeError("Video frame rate exceeds the render limit.");
     const media = await this.options.media.resolve(owner, sourceAssetId);
-    const metadata = outputMetadata(media, durationSeconds, this.fps);
+    const metadata = outputMetadata(media, durationSeconds, fps);
     const id = randomUUID();
     const directory = join(this.outputRoot, id);
     const outputPath = join(directory, "output.mp4");
@@ -215,7 +295,8 @@ export class EffectToolVideoService {
           ...metadata,
           completedFrames: 0,
           progress: 0
-        }
+        },
+        gpu: { available: false, message: "等待视频任务开始后采样。" }
       }
     };
     this.tasks.set(taskKey(owner, id), task);
@@ -233,11 +314,14 @@ export class EffectToolVideoService {
     durationSeconds = this.durationSeconds,
     width = 640,
     height = 360,
-    sourceImageId?: string
+    sourceImageId?: string,
+    fps = this.fps
   ): Promise<EffectToolVideoExecutionView> {
     if (this.closing) throw new Error("Effect video service is closing.");
     safeNumber(durationSeconds, "Video duration");
-    const metadata = preparedOutputMetadata(width, height, durationSeconds, this.fps);
+    safeNumber(fps, "Video frame rate");
+    if (!Number.isInteger(fps) || fps > 120) throw new RangeError("Video frame rate exceeds the render limit.");
+    const metadata = preparedOutputMetadata(width, height, durationSeconds, fps);
     const id = randomUUID();
     const directory = join(this.outputRoot, id);
     const outputPath = join(directory, "output.mp4");
@@ -263,7 +347,8 @@ export class EffectToolVideoService {
           ...metadata,
           completedFrames: 0,
           progress: 0
-        }
+        },
+        gpu: { available: false, message: "等待视频任务开始后采样。" }
       }
     };
     this.tasks.set(taskKey(owner, id), task);
@@ -322,6 +407,62 @@ export class EffectToolVideoService {
     await this.queue.catch(() => undefined);
   }
 
+  private startGpuSampling(task: StoredVideoTask): () => void {
+    let stopped = false;
+    let inFlight = false;
+    let unavailableLogged = false;
+    const collect = async (): Promise<void> => {
+      if (stopped || inFlight) return;
+      inFlight = true;
+      try {
+        const sample = await this.gpuSampler();
+        if (stopped) return;
+        const sampledAt = new Date().toISOString();
+        const peakMemoryUsedMiB = Math.max(task.view.gpu.peakMemoryUsedMiB ?? 0, sample.memoryUsedMiB);
+        task.view = Object.freeze({
+          ...task.view,
+          updatedAt: sampledAt,
+          gpu: Object.freeze({
+            available: true,
+            ...sample,
+            peakMemoryUsedMiB,
+            sampledAt
+          })
+        });
+        console.info(
+          `[AE Agent GPU] task=${task.view.id} used=${sample.memoryUsedMiB}MiB `
+          + `peak=${peakMemoryUsedMiB}MiB total=${sample.memoryTotalMiB}MiB utilization=${sample.utilizationPercent}%`
+        );
+      } catch {
+        if (stopped) return;
+        const sampledAt = new Date().toISOString();
+        const previous = task.view.gpu;
+        task.view = Object.freeze({
+          ...task.view,
+          updatedAt: sampledAt,
+          gpu: previous.available ? previous : Object.freeze({
+            available: false,
+            sampledAt,
+            message: "无法读取 NVIDIA 显存信息。"
+          })
+        });
+        if (!unavailableLogged) {
+          console.info(`[AE Agent GPU] task=${task.view.id} telemetry=unavailable`);
+          unavailableLogged = true;
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void collect();
+    const timer = setInterval(() => void collect(), this.gpuSampleIntervalMs);
+    timer.unref();
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }
+
   private async run(
     task: StoredVideoTask,
     initialMedia: VerifiedStoredMedia | undefined,
@@ -332,6 +473,7 @@ export class EffectToolVideoService {
     if (this.closing || task.controller.signal.aborted) return;
     const update = (view: EffectToolVideoExecutionView): void => { task.view = Object.freeze(view); };
     update({ ...task.view, status: "running", updatedAt: new Date().toISOString() });
+    const stopGpuSampling = this.startGpuSampling(task);
     try {
       await mkdir(join(this.outputRoot, task.view.id), { recursive: true });
       let metadata = preparedOutputMetadata(
@@ -464,6 +606,8 @@ export class EffectToolVideoService {
         updatedAt: new Date().toISOString(),
         failure: { code: "VIDEO_RENDER_FAILED", message: safeFailureMessage(error) }
       });
+    } finally {
+      stopGpuSampling();
     }
   }
 }

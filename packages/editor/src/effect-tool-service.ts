@@ -17,13 +17,17 @@ import {
   type ServerEffectRenderContext
 } from "@codemotion/effect-functions";
 import {
+  DEFAULT_VIDEO_GENERATION_MODE,
   ProviderError,
   SELECTED_TOOL_MAX_DURATION_SECONDS,
   SELECTED_TOOL_MIN_DURATION_SECONDS,
+  VIDEO_GENERATION_MODE_FPS,
+  VIDEO_GENERATION_MODES,
   VolcengineArkSelectedToolProvider,
   type SelectedToolConversationProvider,
   type SelectedToolModelTurn,
-  type SelectedToolParameterProvider
+  type SelectedToolParameterProvider,
+  type VideoGenerationMode
 } from "@codemotion/ai-planner";
 import {
   OwnedTaskStore,
@@ -144,6 +148,7 @@ export interface EffectToolExecutionInputView {
   readonly effectParams: Readonly<Record<string, unknown>>;
   readonly output: {
     readonly durationSeconds: number;
+    readonly generationMode: VideoGenerationMode;
     readonly fps: number;
     readonly format: "mp4";
   };
@@ -171,6 +176,7 @@ export interface SelectedEffectToolExecutionInputView {
   readonly effectParams: Readonly<Record<string, unknown>>;
   readonly output: {
     readonly durationSeconds: number;
+    readonly generationMode: VideoGenerationMode;
     readonly fps: number;
     readonly format: "mp4";
   };
@@ -333,12 +339,13 @@ function toolIdentity(definition: EffectToolDefinition): EffectToolListItem {
 function nativeConversationArguments(value: unknown): {
   readonly effectParams: Readonly<Record<string, unknown>>;
   readonly durationSeconds: number;
+  readonly generationMode: VideoGenerationMode;
 } {
   const argumentsObject = exactObject(value, "tool arguments");
   exactKeys(argumentsObject, ["effectParams", "output"], "tool arguments");
   const effectParams = exactObject(argumentsObject.effectParams, "effectParams");
   const output = exactObject(argumentsObject.output, "output");
-  exactKeys(output, ["durationSeconds"], "output");
+  exactKeys(output, ["durationSeconds", "generationMode"], "output");
   const durationSeconds = output.durationSeconds;
   if (typeof durationSeconds !== "number" || !Number.isFinite(durationSeconds)
     || durationSeconds < SELECTED_TOOL_MIN_DURATION_SECONDS
@@ -346,7 +353,11 @@ function nativeConversationArguments(value: unknown): {
     || Math.abs(durationSeconds * 10 - Math.round(durationSeconds * 10)) > 1e-8) {
     throw new RangeError("Tool output duration is outside the server limits.");
   }
-  return { effectParams, durationSeconds };
+  const generationMode = output.generationMode ?? DEFAULT_VIDEO_GENERATION_MODE;
+  if (typeof generationMode !== "string" || !VIDEO_GENERATION_MODES.includes(generationMode as VideoGenerationMode)) {
+    throw new TypeError("Tool output generation mode is invalid.");
+  }
+  return { effectParams, durationSeconds, generationMode: generationMode as VideoGenerationMode };
 }
 
 function renderSettings(value: unknown): EffectToolRenderSettings {
@@ -1054,11 +1065,15 @@ export class EffectToolService {
         definition,
         envelope,
         20260814,
-        nativeArguments.durationSeconds
+        nativeArguments.durationSeconds,
+        VIDEO_GENERATION_MODE_FPS[nativeArguments.generationMode]
       );
       const normalizedArguments = Object.freeze({
         effectParams: structuredClone(envelope.data),
-        output: Object.freeze({ durationSeconds: nativeArguments.durationSeconds })
+        output: Object.freeze({
+          durationSeconds: nativeArguments.durationSeconds,
+          generationMode: nativeArguments.generationMode
+        })
       });
       const normalizedCall = Object.freeze({
         id: modelTurn.toolCall.id,
@@ -1071,6 +1086,7 @@ export class EffectToolService {
           format: execution.video.format,
           mime: execution.video.mime,
           durationSeconds: execution.video.durationSeconds,
+          generationMode: nativeArguments.generationMode,
           fps: execution.video.fps,
           width: execution.video.width,
           height: execution.video.height
@@ -1097,6 +1113,7 @@ export class EffectToolService {
           effectParams: structuredClone(envelope.data),
           output: Object.freeze({
             durationSeconds: execution.video.durationSeconds,
+            generationMode: nativeArguments.generationMode,
             fps: execution.video.fps,
             format: "mp4" as const
           })
@@ -1180,11 +1197,15 @@ export class EffectToolService {
         nativeArguments.durationSeconds,
         render.width,
         render.height,
-        sourceImageId
+        sourceImageId,
+        VIDEO_GENERATION_MODE_FPS[nativeArguments.generationMode]
       );
       const normalizedArguments = Object.freeze({
         effectParams: structuredClone(envelope.data),
-        output: Object.freeze({ durationSeconds: nativeArguments.durationSeconds })
+        output: Object.freeze({
+          durationSeconds: nativeArguments.durationSeconds,
+          generationMode: nativeArguments.generationMode
+        })
       });
       const normalizedCall = Object.freeze({
         id: modelTurn.toolCall.id,
@@ -1197,6 +1218,7 @@ export class EffectToolService {
           format: execution.video.format,
           mime: execution.video.mime,
           durationSeconds: execution.video.durationSeconds,
+          generationMode: nativeArguments.generationMode,
           fps: execution.video.fps,
           width: execution.video.width,
           height: execution.video.height
@@ -1224,6 +1246,7 @@ export class EffectToolService {
           effectParams: structuredClone(envelope.data),
           output: Object.freeze({
             durationSeconds: execution.video.durationSeconds,
+            generationMode: nativeArguments.generationMode,
             fps: execution.video.fps,
             format: "mp4" as const
           })

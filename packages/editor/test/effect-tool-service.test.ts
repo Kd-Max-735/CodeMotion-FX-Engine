@@ -152,7 +152,13 @@ async function testVideoService() {
     exportFrames: exportFrames as never,
     decodeFrame: decodeFrame as never,
     durationSeconds: 1 / 30,
-    fps: 30
+    fps: 30,
+    gpuSampler: vi.fn(async () => ({
+      name: "Test NVIDIA GPU",
+      memoryUsedMiB: 256,
+      memoryTotalMiB: 8_192,
+      utilizationPercent: 42
+    }))
   });
   return { service, exportFrames, decodeFrame };
 }
@@ -399,7 +405,7 @@ describe("server single effect-tool service", () => {
             response: "shadows",
             temporal: 0.8
           },
-          output: { durationSeconds: 1 }
+          output: { durationSeconds: 1, generationMode: "fast" }
         }
       }
     };
@@ -415,7 +421,7 @@ describe("server single effect-tool service", () => {
           name: "film_grain",
           arguments: {
             effectParams: { amount: 0.32, size: 4, response: "shadows" },
-            output: { durationSeconds: 1 }
+            output: { durationSeconds: 1, generationMode: "fast" }
           }
         }
       },
@@ -423,19 +429,20 @@ describe("server single effect-tool service", () => {
       executionInput: {
         source_image: "asset_imageabcdefgh",
         effectParams: { amount: 0.32, size: 4, response: "shadows" },
-        output: { durationSeconds: 1, fps: 30, format: "mp4" }
+        output: { durationSeconds: 1, generationMode: "fast", fps: 15, format: "mp4" }
       },
       execution: {
         toolName: "film_grain",
         source: { kind: "image", assetId: "asset_imageabcdefgh" },
-        video: { format: "mp4", mime: "video/mp4", width: 2, height: 2, frameCount: 30 }
+        video: { format: "mp4", mime: "video/mp4", width: 2, height: 2, fps: 15, frameCount: 15 }
       }
     });
     if (turn.kind !== "tool_call") throw new Error("Expected a tool call.");
     await waitFor(() => service.videoExecution(principal, turn.execution.id).status === "completed");
     expect(service.videoExecution(principal, turn.execution.id)).toMatchObject({
       status: "completed",
-      video: { progress: 1, completedFrames: 30, bytes: 15 }
+      video: { progress: 1, completedFrames: 15, bytes: 15 },
+      gpu: { available: true, memoryUsedMiB: 256, peakMemoryUsedMiB: 256 }
     });
     expect(provider.requests).toHaveLength(2);
     expect(provider.requests.every((request) => request.toolName === "film_grain")).toBe(true);
@@ -445,8 +452,11 @@ describe("server single effect-tool service", () => {
     expect(video.decodeFrame).toHaveBeenCalledOnce();
     expect(provider.finalizations).toHaveLength(1);
     expect(provider.finalizations[0]).toMatchObject({
-      call: { name: "film_grain", arguments: { output: { durationSeconds: 1 } } },
-      result: { status: "queued", output: { durationSeconds: 1, format: "mp4" } }
+      call: { name: "film_grain", arguments: { output: { durationSeconds: 1, generationMode: "fast" } } },
+      result: {
+        status: "queued",
+        output: { durationSeconds: 1, generationMode: "fast", fps: 15, format: "mp4" }
+      }
     });
   });
 

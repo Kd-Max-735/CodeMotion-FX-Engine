@@ -3,6 +3,19 @@
 import { csrfToken } from "./browser-security.js";
 import { BrowserApiError } from "./media-asset-client.js";
 
+export type VideoGenerationMode = "fast" | "standard" | "fine";
+
+export interface GpuTelemetryView {
+  readonly available: boolean;
+  readonly name?: string;
+  readonly memoryUsedMiB?: number;
+  readonly memoryTotalMiB?: number;
+  readonly utilizationPercent?: number;
+  readonly peakMemoryUsedMiB?: number;
+  readonly sampledAt?: string;
+  readonly message?: string;
+}
+
 export interface NativeEffectToolView {
   readonly toolName: "film_grain";
   readonly displayName: string;
@@ -58,6 +71,7 @@ export interface NativeExecutionView {
     readonly bytes?: number;
     readonly downloadName?: string;
   };
+  readonly gpu: GpuTelemetryView;
   readonly failure?: { readonly code: "VIDEO_RENDER_FAILED"; readonly message: string };
 }
 
@@ -66,6 +80,7 @@ export interface NativeExecutionInputView {
   readonly effectParams: Readonly<Record<string, unknown>>;
   readonly output: {
     readonly durationSeconds: number;
+    readonly generationMode: VideoGenerationMode;
     readonly fps: number;
     readonly format: "mp4";
   };
@@ -79,6 +94,7 @@ export interface SelectedExecutionView {
   readonly updatedAt: string;
   readonly source?: { readonly kind: "image"; readonly assetId: string };
   readonly video: NativeExecutionView["video"];
+  readonly gpu: GpuTelemetryView;
   readonly failure?: NativeExecutionView["failure"];
 }
 
@@ -91,6 +107,7 @@ export interface SelectedExecutionInputView {
   readonly effectParams: Readonly<Record<string, unknown>>;
   readonly output: {
     readonly durationSeconds: number;
+    readonly generationMode: VideoGenerationMode;
     readonly fps: number;
     readonly format: "mp4";
   };
@@ -190,6 +207,38 @@ function tool(value: unknown): NativeEffectToolView {
 }
 
 const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
+const VIDEO_GENERATION_MODES = new Set<VideoGenerationMode>(["fast", "standard", "fine"]);
+
+function gpuTelemetry(value: unknown): GpuTelemetryView {
+  const raw = object(value);
+  if (typeof raw.available !== "boolean"
+    || (raw.sampledAt !== undefined && typeof raw.sampledAt !== "string")
+    || (raw.message !== undefined && typeof raw.message !== "string")) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  if (!raw.available) {
+    return {
+      available: false,
+      ...(raw.sampledAt === undefined ? {} : { sampledAt: raw.sampledAt as string }),
+      ...(raw.message === undefined ? {} : { message: raw.message as string })
+    };
+  }
+  if (typeof raw.name !== "string" || raw.name.length === 0
+    || ![raw.memoryUsedMiB, raw.memoryTotalMiB, raw.utilizationPercent, raw.peakMemoryUsedMiB]
+      .every((item) => typeof item === "number" && Number.isFinite(item) && item >= 0)
+    || typeof raw.sampledAt !== "string") {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  return {
+    available: true,
+    name: raw.name,
+    memoryUsedMiB: raw.memoryUsedMiB as number,
+    memoryTotalMiB: raw.memoryTotalMiB as number,
+    utilizationPercent: raw.utilizationPercent as number,
+    peakMemoryUsedMiB: raw.peakMemoryUsedMiB as number,
+    sampledAt: raw.sampledAt
+  };
+}
 const INPUT_KINDS = new Set([
   "image", "video", "audio", "mask", "lut", "depth-map", "font", "model", "texture", "data"
 ]);
@@ -237,6 +286,7 @@ function execution(value: unknown): NativeExecutionView {
   const raw = object(value);
   const source = object(raw.source);
   const video = object(raw.video);
+  const gpu = gpuTelemetry(raw.gpu);
   const status = raw.status;
   if (typeof raw.id !== "string" || !["queued", "running", "completed", "failed"].includes(String(status))
     || raw.toolName !== "film_grain" || typeof raw.createdAt !== "string" || typeof raw.updatedAt !== "string"
@@ -274,6 +324,7 @@ function execution(value: unknown): NativeExecutionView {
       ...(video.bytes === undefined ? {} : { bytes: video.bytes as number }),
       ...(video.downloadName === undefined ? {} : { downloadName: video.downloadName as string })
     },
+    gpu,
     ...(failure === undefined ? {} : {
       failure: { code: "VIDEO_RENDER_FAILED", message: failure.message as string }
     })
@@ -283,6 +334,7 @@ function execution(value: unknown): NativeExecutionView {
 function selectedExecution(value: unknown, expectedToolName?: string): SelectedExecutionView {
   const raw = object(value);
   const video = object(raw.video);
+  const gpu = gpuTelemetry(raw.gpu);
   const status = raw.status;
   if (typeof raw.id !== "string" || !["queued", "running", "completed", "failed"].includes(String(status))
     || typeof raw.toolName !== "string" || !TOOL_NAME.test(raw.toolName)
@@ -325,6 +377,7 @@ function selectedExecution(value: unknown, expectedToolName?: string): SelectedE
       ...(video.bytes === undefined ? {} : { bytes: video.bytes as number }),
       ...(video.downloadName === undefined ? {} : { downloadName: video.downloadName as string })
     },
+    gpu,
     ...(failure === undefined ? {} : {
       failure: { code: "VIDEO_RENDER_FAILED" as const, message: failure.message as string }
     })
@@ -367,6 +420,7 @@ function turn(value: unknown): NativeEffectTurn {
   }
   if (typeof executionInput.source_image !== "string" || output.format !== "mp4"
     || typeof output.durationSeconds !== "number" || !Number.isFinite(output.durationSeconds)
+    || typeof output.generationMode !== "string" || !VIDEO_GENERATION_MODES.has(output.generationMode as VideoGenerationMode)
     || typeof output.fps !== "number" || !Number.isFinite(output.fps)) {
     throw new BrowserApiError(500, "INVALID_RESPONSE", false);
   }
@@ -384,6 +438,7 @@ function turn(value: unknown): NativeEffectTurn {
       effectParams: structuredClone(effectParams),
       output: {
         durationSeconds: output.durationSeconds,
+        generationMode: output.generationMode as VideoGenerationMode,
         fps: output.fps,
         format: "mp4"
       }
@@ -411,7 +466,9 @@ function selectedTurn(value: unknown, expectedToolName: string): SelectedEffectT
   if (!Array.isArray(executionInput.authorizedInputs)
     || typeof call.id !== "string" || call.type !== "function" || fn.name !== expectedToolName
     || output.format !== "mp4" || typeof output.durationSeconds !== "number"
-    || !Number.isFinite(output.durationSeconds) || typeof output.fps !== "number" || !Number.isFinite(output.fps)) {
+    || !Number.isFinite(output.durationSeconds)
+    || typeof output.generationMode !== "string" || !VIDEO_GENERATION_MODES.has(output.generationMode as VideoGenerationMode)
+    || typeof output.fps !== "number" || !Number.isFinite(output.fps)) {
     throw new BrowserApiError(500, "INVALID_RESPONSE", false);
   }
   const authorizedInputs = executionInput.authorizedInputs.map((value) => {
@@ -435,7 +492,12 @@ function selectedTurn(value: unknown, expectedToolName: string): SelectedEffectT
     executionInput: {
       authorizedInputs: Object.freeze(authorizedInputs),
       effectParams: structuredClone(effectParams),
-      output: { durationSeconds: output.durationSeconds, fps: output.fps, format: "mp4" }
+      output: {
+        durationSeconds: output.durationSeconds,
+        generationMode: output.generationMode as VideoGenerationMode,
+        fps: output.fps,
+        format: "mp4"
+      }
     },
     execution: selectedExecution(raw.execution, expectedToolName)
   };

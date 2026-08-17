@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { JsonSchema } from "@codemotion/core";
 import {
   ARK_V1_MODEL,
+  DEFAULT_VIDEO_GENERATION_MODE,
+  VIDEO_GENERATION_MODE_FPS,
   VolcengineArkSelectedToolProvider,
   type SelectedToolParameterRequest
 } from "../src/index.js";
@@ -44,6 +46,11 @@ function response(model: string = ARK_V1_MODEL): Response {
 }
 
 describe("selected-tool Ark Provider", () => {
+  it("defines deterministic fast, standard, and fine frame rates", () => {
+    expect(DEFAULT_VIDEO_GENERATION_MODE).toBe("standard");
+    expect(VIDEO_GENERATION_MODE_FPS).toEqual({ fast: 15, standard: 30, fine: 60 });
+  });
+
   it("sends only one native selected function tool and wraps its arguments as the internal envelope", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => response());
     const provider = new VolcengineArkSelectedToolProvider({
@@ -109,8 +116,18 @@ describe("selected-tool Ark Provider", () => {
       reasoningContent: "用户只询问参数含义，不需要执行。",
       content: "intensity 控制火花强度。"
     });
-    const body = JSON.parse(String(fetchImpl.mock.calls[0]![1]?.body)) as { tool_choice: unknown };
+    const body = JSON.parse(String(fetchImpl.mock.calls[0]![1]?.body)) as {
+      tool_choice: unknown;
+      messages: Array<{ content: string }>;
+      tools: Array<{ function: { parameters: { properties: { output: unknown } } } }>;
+    };
     expect(body.tool_choice).toBe("auto");
+    expect(body.messages[0]!.content).toContain("生成快一点");
+    expect(body.messages[0]!.content).toContain("generationMode");
+    expect(body.tools[0]!.function.parameters.properties.output).toMatchObject({
+      required: ["durationSeconds", "generationMode"],
+      properties: { generationMode: { enum: ["fast", "standard", "fine"], default: "standard" } }
+    });
   });
 
   it("rejects a second call or any function name other than the selected tool", async () => {

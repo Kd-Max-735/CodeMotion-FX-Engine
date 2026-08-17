@@ -10,7 +10,7 @@ This document is the authoritative architecture for the current CodeMotion FX En
 2. One request executes exactly one effect tool. There is no effect stack, tool composition, implicit selection, retrieval, ranking, recommendation, or model-selected fallback in this path.
 3. The model reads only the selected tool's Chinese Markdown instruction and its closed parameter contract. It does not receive another tool's definition or a tool catalog.
 4. The sole model provider remains the server-side Volcengine Ark model `doubao-seed-2-0-lite-260428`.
-5. The model returns one native selected-tool call. Its arguments contain the selected effect parameters plus the shared `output.durationSeconds`; it cannot emit project structure, layers, resource identities, file paths, URLs, renderer choices, other export settings, or a second tool call.
+5. The model returns one native selected-tool call. Its arguments contain the selected effect parameters plus shared `output.durationSeconds` and `output.generationMode`; it cannot emit project structure, layers, resource identities, file paths, URLs, renderer choices, arbitrary frame rates, other export settings, or a second tool call.
 6. Resources and runtime inputs are authenticated, owner-authorized, server-bound, and locked outside the model envelope.
 7. Preview, rendering, and export are server operations. No browser or DOM renderer is part of the current architecture.
 8. ReAct, Agent, multi-tool calls, multi-effect composition, and a front-end editor remain deferred until all 120 real effect functions are complete.
@@ -25,15 +25,16 @@ This document is the authoritative architecture for the current CodeMotion FX En
       "only": "fields declared by this tool's closed parameter Schema"
     },
     "output": {
-      "durationSeconds": 5
+      "durationSeconds": 5,
+      "generationMode": "standard"
     }
   }
 }
 ```
 
-The envelope contains exactly `type` and `data`. `type` is a server-supplied `const` equal to the user's selected `toolName`. `data` is a server-composed closed object containing closed `effectParams` and the shared closed `output` object. `output` currently permits only `durationSeconds` in the range 1–60 seconds at 0.1-second precision. No aliases, case folding, fuzzy matching, effect IDs, batch IDs, or model-selected tool names are accepted.
+The envelope contains exactly `type` and `data`. `type` is a server-supplied `const` equal to the user's selected `toolName`. `data` is a server-composed closed object containing closed `effectParams` and the shared closed `output` object. `output` permits `durationSeconds` in the range 1–60 seconds at 0.1-second precision and `generationMode` as the exact enum `fast | standard | fine`. No aliases, case folding, fuzzy matching, effect IDs, batch IDs, or model-selected tool names are accepted.
 
-Natural-language duration policy is shared rather than duplicated across 120 effect Markdown files: omitted duration is 5 seconds; relative longer/shorter requests adjust an explicit or default baseline by 2 seconds; vague long-video and short-video requests use reviewed common presets. An explicit duration is the baseline before any explicit relative adjustment. FPS, codec, format, and all other export settings remain server-owned.
+Natural-language duration and generation-mode policies are shared rather than duplicated across 120 effect Markdown files. Omitted duration is 5 seconds; relative longer/shorter requests adjust an explicit or default baseline by 2 seconds; vague long-video and short-video requests use reviewed common presets. An explicit duration is the baseline before any explicit relative adjustment. Omitted mode is `standard`; generation-speed requests select `fast`, normal or standard requests select `standard`, and high-quality or smoother requests select `fine`. The server maps these modes to 15, 30, and 60 FPS respectively. The model cannot emit an arbitrary FPS. Codec, format, and all other export settings remain server-owned.
 
 Every numeric value must be finite and satisfy its range and step constraints. Every enum must be an exact member. `null` is rejected unless the individual parameter Schema explicitly allows it and defines the same default behavior. Missing optional fields receive the server definition's matching default; required fields remain required. Raw parameters, defaulted parameters, and normalized parameters are all validated, and effect-specific validation runs both before and after normalization.
 
@@ -61,6 +62,7 @@ The two input channels are intentionally not assignable to one another:
 | --- | --- | --- | --- |
 | `EffectParameterEnvelope.data` | Ark model | Real effect values allowed by the selected tool Schema | Yes |
 | Shared native `output.durationSeconds` | Ark model | Requested video duration only | Yes |
+| Shared native `output.generationMode` | Ark model | Exact `fast`, `standard`, or `fine` mode | Yes |
 | `AuthorizedEffectInputs` | Authenticated server | Owner-scoped, locked image/video/audio/mask/LUT/depth/font/model/texture/data bindings | No |
 
 The package compiles with the ES server library and exposes no `Window`, `Document`, DOM node, canvas element, browser storage, or browser renderer type. The shared registry starts empty and imports no placeholder batch.
@@ -71,11 +73,11 @@ The package compiles with the ES server library and exposes no `Window`, `Docume
 2. Resolve the one user-selected `toolName` to one registered `EffectToolDefinition`; reject missing, ambiguous, unpublished, or stale definitions.
 3. Resolve the tool's declared `inputSlots` against owner-authorized server media/resource stores. Bind every resource to the authenticated tenant and user and lock it for this request.
 4. Load only that tool's reviewed Chinese Markdown and closed parameter Schema. Call only server-side Ark `doubao-seed-2-0-lite-260428`.
-5. Parse the one native tool call, reject extra argument fields, require exact selected function name, separate `effectParams` from shared `output.durationSeconds`, and reject non-finite or resource-bearing values.
-6. Validate raw effect parameters, apply only definition defaults to omitted optional fields, validate again, run `validateParams`, normalize, then revalidate Schema and `validateParams`; validate duration independently against the shared contract.
+5. Parse the one native tool call, reject extra argument fields, require exact selected function name, separate `effectParams` from shared `output.durationSeconds` and `output.generationMode`, and reject non-finite or resource-bearing values.
+6. Validate raw effect parameters, apply only definition defaults to omitted optional fields, validate again, run `validateParams`, normalize, then revalidate Schema and `validateParams`; validate duration and generation mode independently against the shared contract and map the mode to a server-owned FPS.
 7. Verify required input slots, cardinality, kind, owner, lock state, server context, and declared server backend.
 8. Execute the selected effect for each server-owned output frame. Validation or authorization failure cannot enter the renderer.
-9. Store preview/render/export outputs through the existing owner-scoped server lifecycle and safe download/export chain.
+9. Store preview/render/export outputs through the existing owner-scoped server lifecycle and safe download/export chain. While a video task runs, sample bounded NVIDIA whole-device VRAM telemetry server-side, retain the task peak, log safe numeric samples, and expose unavailable status without reporting a false zero.
 10. Return a safe tool-result summary to the same Ark conversation with `tool_choice: none`, require a non-empty final Chinese response, and never include resource IDs or server paths in that second model turn.
 
 ## Compatibility and migration

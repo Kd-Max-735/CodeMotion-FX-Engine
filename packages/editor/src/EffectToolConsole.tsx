@@ -11,6 +11,8 @@ import {
 } from "./effect-tool-client.js";
 import { BrowserApiError, mediaAssetApi, sessionApi, type BrowserAssetSummaryV1 } from "./media-asset-client.js";
 
+const GENERATION_MODE_LABELS = Object.freeze({ fast: "快速", standard: "标准", fine: "精美" });
+
 type ConversationEntry = Readonly<{
   id: string;
   role: "user";
@@ -71,6 +73,19 @@ function formatElapsed(milliseconds: number): string {
   return milliseconds < 1_000 ? `${milliseconds} 毫秒` : `${(milliseconds / 1_000).toFixed(1)} 秒`;
 }
 
+function GpuStatus({ gpu }: { gpu: Extract<SelectedEffectTurn, { kind: "tool_call" }>["execution"]["gpu"] }) {
+  return (
+    <div className={`gpu-status ${gpu.available ? "available" : "unavailable"}`} title={gpu.name}>
+      <span>NVIDIA 显存（整卡）</span>
+      {gpu.available ? (
+        <b>
+          当前 {gpu.memoryUsedMiB} / {gpu.memoryTotalMiB} MiB · 峰值 {gpu.peakMemoryUsedMiB} MiB · GPU {gpu.utilizationPercent}%
+        </b>
+      ) : <b>{gpu.message ?? "不可用"}</b>}
+    </div>
+  );
+}
+
 function VideoResult({
   initial,
   tool
@@ -101,20 +116,22 @@ function VideoResult({
   }, [execution.status, initial.id, tool.toolName]);
 
   if (execution.status === "failed") {
-    return <div className="artifact-error">{execution.failure?.message ?? "视频渲染失败。"}</div>;
+    return <><div className="artifact-error">{execution.failure?.message ?? "视频渲染失败。"}</div><GpuStatus gpu={execution.gpu} /></>;
   }
   if (execution.status !== "completed") {
     return (
       <div className="video-progress">
-        <div><i style={{ width: `${Math.round(execution.video.progress * 100)}%` }} /></div>
+        <div className="video-progress-bar"><i style={{ width: `${Math.round(execution.video.progress * 100)}%` }} /></div>
         <span>{execution.status === "queued" ? "等待视频渲染" : "正在逐帧渲染"}</span>
         <b>{execution.video.completedFrames} / {execution.video.frameCount}</b>
+        <GpuStatus gpu={execution.gpu} />
       </div>
     );
   }
   return (
     <div className="video-result">
       <video controls preload="metadata" src={selectedEffectToolApi.videoUrl(execution.id)} aria-label={`${tool.displayName}视频预览`} />
+      <GpuStatus gpu={execution.gpu} />
       <a className="video-download" href={selectedEffectToolApi.downloadUrl(execution.id)} download={execution.video.downloadName}>
         <Download size={14} />下载 MP4
       </a>
@@ -144,7 +161,7 @@ function ToolResult({
           <pre>{JSON.stringify(envelope, null, 2)}</pre>
           <span>服务器执行输入 · 资源已授权映射</span>
           <pre>{JSON.stringify(turn.executionInput, null, 2)}</pre>
-          <div className="execution-line"><b>H.264 MP4 · {turn.execution.video.width} × {turn.execution.video.height}</b><em>{turn.execution.video.durationSeconds} 秒 · {turn.execution.video.fps} FPS</em></div>
+          <div className="execution-line"><b>H.264 MP4 · {turn.execution.video.width} × {turn.execution.video.height}</b><em>{GENERATION_MODE_LABELS[turn.executionInput.output.generationMode]}模式 · {turn.execution.video.durationSeconds} 秒 · {turn.execution.video.fps} FPS</em></div>
         </div>
       </details>
       <section className="artifact-card">
