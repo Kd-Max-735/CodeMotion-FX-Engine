@@ -561,7 +561,7 @@ describe("server single effect-tool service", () => {
       .rejects.toThrow(/unknown slot/u);
   });
 
-  it("derives structured image previews for the four reported existing tools", async () => {
+  it("derives structured image previews for the reported existing tools", async () => {
     const width = 24;
     const height = 16;
     const pixels = new Uint8Array(width * height * 4);
@@ -601,8 +601,10 @@ describe("server single effect-tool service", () => {
     const cases = [
       ["character_cascade", "text_raster", "text"],
       ["kinetic_typography", "text_raster", "text"],
+      ["scramble_decode", "text_raster", "text"],
       ["path_trim", "vector_source", "shape"],
-      ["path_morph", "vector_source", "shape"]
+      ["path_morph", "vector_source", "shape"],
+      ["radial_burst", "vector_source", "shape"]
     ] as const;
 
     for (const [toolName, primarySlot, sourceKind] of cases) {

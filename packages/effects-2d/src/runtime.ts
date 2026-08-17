@@ -792,9 +792,10 @@ function coverageForVector(
     const rotation = numberParam(params, "angle", 0) / 360;
     const angle = fract((Math.atan2(v - 0.5, u - 0.5) / TAU + rotation) * count);
     const radius = Math.hypot(u - 0.5, v - 0.5);
+    const revealedRadius = numberParam(params, "radius", 0.42) * p;
     const thickness = numberParam(params, "thickness", 0.012);
     const outlineInfluence = smoothstep(0.12, 0.005, inputSample.distance);
-    return radius < numberParam(params, "radius", 0.42)
+    return radius < revealedRadius
       ? smoothstep(Math.min(0.48, thickness * count), 0.002, Math.min(angle, 1 - angle))
         * (0.55 + outlineInfluence * 0.45)
       : 0;

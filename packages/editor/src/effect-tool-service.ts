@@ -56,8 +56,10 @@ const EXISTING_BACKEND = "effect-functions-existing-cpu-v1";
 const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
 const HAN_TEXT = /\p{Script=Han}/u;
 const SENSITIVE_PATH = /(?:https?:\/\/|file:\/\/|[a-z]:\\|\/(?:home|tmp|var|etc|users)\/)/iu;
-const IMAGE_DERIVED_TEXT_TOOLS = new Set(["character_cascade", "kinetic_typography"]);
-const IMAGE_DERIVED_VECTOR_TOOLS = new Set(["path_trim", "path_morph"]);
+const IMAGE_DERIVED_TEXT_TOOLS = new Set([
+  "character_cascade", "kinetic_typography", "scramble_decode"
+]);
+const IMAGE_DERIVED_VECTOR_TOOLS = new Set(["path_trim", "path_morph", "radial_burst"]);
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
 export interface EffectToolPrincipal {
