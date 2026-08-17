@@ -261,11 +261,13 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   vec3 neon = vec3(fract(u_p0 * 3.1), fract(u_p0 * 5.3 + 0.3), fract(u_p0 * 7.7 + 0.6));
   vec4 neighbor = sampleAt(uv + u_texel * (1.0 + u_p1 * 18.0));
   float edge = abs(c.a - neighbor.a) + length(c.rgb - neighbor.rgb) * 0.5;
-  float flicker = 1.0 - u_p3 * hash(vec2(floor(p * 30.0), u_seed));
+  float flickerRate = 8.0 + u_p3 * 22.0;
+  float flickerNoise = hash(vec2(floor(u_time * flickerRate), u_seed));
+  float flicker = u_p3 <= 0.0 ? 1.0 : clamp(1.0 - u_p3 * (0.2 + flickerNoise * 0.8), 0.05, 1.0);
   c.rgb += neon * edge * u_p2 * 4.0 * flicker;`,
   L02: `
-  float angle = (u_p0 - 0.5) * 6.283;
-  float coordinate = dot(uv, vec2(cos(angle), sin(angle)));
+  float angle = (u_p0 - 0.5) * 12.56637061;
+  float coordinate = dot(uv, vec2(-sin(angle), cos(angle)));
   float center = fract(u_time * (-10.0 + u_p3 * 20.0));
   float distance = abs(fract(coordinate - center + 0.5) - 0.5);
   float beam = 1.0 - smoothstep(u_p1 * (1.0 - u_p2), u_p1 * (1.0 + u_p2) + 0.002, distance);
@@ -281,9 +283,17 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   L04: `
   vec2 center = vec2(u_p0, u_p1);
   float distance = length(uv - center);
-  float radius = u_p2 * (0.65 + p * 0.7);
-  float ring = exp(-abs(distance - radius) * (6.0 / (0.01 + u_p3)));
-  ring *= 0.65 + 0.35 * sin(distance * (1.0 + u_p4 * 31.0) * 60.0);
+  float pulseCount = 1.0 + floor(u_p4 * 31.0 + 0.5);
+  float pulseTime = p * pulseCount;
+  float ring = 0.0;
+  for (int i = 0; i < 32; i++) {
+    float enabled = 1.0 - step(pulseCount, float(i) + 0.5);
+    float phase = (pulseTime - float(i)) / 1.4;
+    float active = step(0.0, phase) * step(phase, 1.0) * enabled;
+    float envelope = pow(max(0.0, sin(3.14159265 * clamp(phase, 0.0, 1.0))), 0.35);
+    float pulseRadius = u_p2 * 2.0 * clamp(phase, 0.0, 1.0);
+    ring += exp(-abs(distance - pulseRadius) * (8.0 / max(0.001, u_p3))) * envelope * active;
+  }
   c.rgb += vec3(0.55, 0.3, 1.0) * ring;`,
   P01: `
   vec4 sum = vec4(0.0);
@@ -345,9 +355,9 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   c.rgb *= 0.65 + wipe * 0.35;
   c.a *= wipe;`,
   C02: `
-  float angle = fract(atan(uv.y - u_p1, uv.x - u_p0) / 6.283 - (u_p2 - 0.5) + 1.0);
+  float angle = fract(atan(uv.y - u_p1, uv.x - u_p0) / 6.283 - (u_p2 - 0.5) * 2.0 + 1.0);
   angle = mix(1.0 - angle, angle, u_p3);
-  float wipe = step(angle, u_p4);
+  float wipe = step(angle, p * u_p4);
   c.rgb *= 0.65 + wipe * 0.35;
   c.a *= wipe;`,
   C03: `
@@ -361,11 +371,16 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   C04: `
   float grid = 2.0 + u_p0 * 126.0;
   vec2 cell = floor(uv * grid);
+  vec2 cellUv = (cell + 0.5) / grid;
   float randomOrder = hash(cell + vec2(u_p2 * 997.0, u_p2 * 541.0));
-  float linearOrder = cell.x / grid;
-  float radialOrder = length(uv - 0.5) * 1.414;
+  float directionCode = floor(u_p2 * 100000.0 + 0.5);
+  float linearOrder = directionCode == 2.0 ? 1.0 - cellUv.x
+    : directionCode == 3.0 ? cellUv.y
+    : directionCode == 4.0 ? 1.0 - cellUv.y
+    : cellUv.x;
+  float radialOrder = length(cellUv - 0.5) * 1.414;
   float threshold = u_p1 < 0.34 ? randomOrder : u_p1 < 0.67 ? linearOrder : radialOrder;
-  float dissolve = step(threshold, u_p3);
+  float dissolve = step(threshold, p * u_p3);
   float cellEdge = min(fract(uv.x * grid), fract(uv.y * grid));
   c.rgb *= 0.53 + dissolve * 0.32 + step(cellEdge, 0.08) * u_p0 * 0.05
     + u_p0 * 0.04 + u_p2 * 0.06;

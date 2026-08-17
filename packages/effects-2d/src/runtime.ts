@@ -292,6 +292,9 @@ function effectProgress(
   const progressSpec = blueprint.parameters.find((spec) => spec.name === "progress");
   if (progressSpec?.kind !== "number") return options.time.progress;
   const parameter = numberParam(params, "progress", progressSpec.default);
+  if (blueprint.sourceId === "C02" || blueprint.sourceId === "C04") {
+    return clamp(options.time.progress * parameter);
+  }
   return clamp(options.time.progress + parameter - progressSpec.default);
 }
 
@@ -963,12 +966,22 @@ function renderLight(
         const sampleRadius = Math.max(1, Math.round(radius * Math.min(source.width, source.height)));
         const neighbor = read(source, x + sampleRadius, y + sampleRadius);
         const edge = Math.abs(base[3] - neighbor[3]) + Math.abs(base[0] - neighbor[0]);
-        const flicker = 1 - numberParam(params, "flicker", 0.12)
-          * effectRandom(options, "L01.flicker", x, y, 30);
+        const flickerAmount = numberParam(params, "flicker", 0.12);
+        const flicker = flickerAmount <= 0 ? 1 : clamp(
+          1 - flickerAmount * (0.2 + effectRandom(
+            options,
+            "L01.flicker",
+            0,
+            0,
+            8 + flickerAmount * 22
+          ) * 0.8),
+          0.05,
+          1
+        );
         light = clamp(edge * numberParam(params, "intensity", 1.8) * 4 * flicker);
       } else if (blueprint.sourceId === "L02") {
         const angle = numberParam(params, "angle", 18) * Math.PI / 180;
-        const coordinate = u * Math.cos(angle) + v * Math.sin(angle);
+        const coordinate = -u * Math.sin(angle) + v * Math.cos(angle);
         const center = fract(seconds * numberParam(params, "speed", 0.8));
         const distance = Math.abs(fract(coordinate - center + 0.5) - 0.5);
         const width = numberParam(params, "width", 0.12);
@@ -988,13 +1001,21 @@ function renderLight(
         color = [1, clamp(0.72 - chromatic * 0.4), clamp(0.32 + chromatic * 0.8)];
       } else {
         const center = vectorParam(params, "center", [0.5, 0.5]);
-        const radius = numberParam(params, "radius", 0.34)
-          * (0.65 + effectProgress(blueprint, params, options) * 0.7);
         const distance = Math.hypot(u - center[0], v - center[1]);
-        const rings = Math.max(1, numberParam(params, "rings", 4));
+        const radius = numberParam(params, "radius", 0.34);
+        const rings = Math.max(1, Math.round(numberParam(params, "rings", 4)));
         const falloff = numberParam(params, "falloff", 0.2);
-        light = Math.exp(-Math.abs(distance - radius) * (8 / Math.max(0.001, falloff)))
-          * (0.65 + 0.35 * Math.sin(distance * rings * 60));
+        const pulseTime = effectProgress(blueprint, params, options) * rings;
+        for (let ringIndex = 0; ringIndex < rings; ringIndex += 1) {
+          const phase = (pulseTime - ringIndex) / 1.4;
+          if (phase < 0 || phase > 1) continue;
+          const ringRadius = radius * phase;
+          const envelope = Math.sin(Math.PI * phase) ** 0.35;
+          light += Math.exp(
+            -Math.abs(distance - ringRadius) * (8 / Math.max(0.001, falloff))
+          ) * envelope;
+        }
+        light = clamp(light);
         color = [0.55, 0.3, 1];
       }
       write(output, x, y, [
@@ -1131,11 +1152,18 @@ function transitionCoverage(
     return smoothstep(progress - softness, progress + softness, 1 - edge);
   }
   const grid = Math.max(2, Math.round(numberParam(params, "grid", 20)));
-  const cellX = Math.floor(u * grid);
-  const cellY = Math.floor(v * grid);
+  const cellX = Math.min(grid - 1, Math.floor(u * grid));
+  const cellY = Math.min(grid - 1, Math.floor(v * grid));
   const order = stringParam(params, "order", "random");
-  const threshold = order === "linear" ? cellX / grid
-    : order === "radial" ? Math.hypot(u - 0.5, v - 0.5) * 1.414
+  const cellU = (cellX + 0.5) / grid;
+  const cellV = (cellY + 0.5) / grid;
+  const linearDirection = Math.round(numberParam(params, "seed", 1));
+  const linearThreshold = linearDirection === 2 ? 1 - cellU
+    : linearDirection === 3 ? cellV
+      : linearDirection === 4 ? 1 - cellV
+        : cellU;
+  const threshold = order === "linear" ? linearThreshold
+    : order === "radial" ? Math.hypot(cellU - 0.5, cellV - 0.5) * 1.414
       : effectRandom(
         options,
         "C04.order",

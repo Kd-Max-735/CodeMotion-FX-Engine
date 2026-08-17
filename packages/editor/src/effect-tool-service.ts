@@ -64,7 +64,8 @@ const IMAGE_DERIVED_TEXT_TOOLS = new Set([
   "text_extrude_3d", "text_path_reveal", "typewriter", "word_explode"
 ]);
 const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
-  "path_trim", "path_morph", "radial_burst", "shape_repeater", "brush_reveal", "chalk_stroke"
+  "path_trim", "path_morph", "radial_burst", "shape_repeater", "brush_reveal", "chalk_stroke",
+  "handwriting", "ink_spread"
 ]);
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
@@ -827,7 +828,7 @@ function previewDataBinding(
     case "camera_target": return { x: 0, y: 0, z: 0 };
     case "motion_path":
     case "stroke_path": return definition.primaryBackend.backendId === EXISTING_BACKEND
-      ? { path: definition.toolName === "text_path_reveal"
+      ? { path: definition.toolName === "text_path_reveal" || definition.toolName === "handwriting"
         ? "M 0.08 0.68 C 0.28 0.15 0.72 0.85 0.92 0.28"
         : "M 48 240 C 180 48 420 312 592 120" }
       : { points: path, closed: false };

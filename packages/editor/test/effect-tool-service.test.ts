@@ -664,6 +664,8 @@ describe("server single effect-tool service", () => {
       ["shape_repeater", "vector_source", "shape", false],
       ["brush_reveal", "vector_source", "shape", true],
       ["chalk_stroke", "vector_source", "shape", true],
+      ["handwriting", "vector_source", "shape", true],
+      ["ink_spread", "vector_source", "shape", true],
       ["blend", "source_layer", "image", false]
     ] as const;
 

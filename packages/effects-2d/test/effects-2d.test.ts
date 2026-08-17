@@ -1071,7 +1071,9 @@ describe("Group 2 P0 catalog", () => {
       );
       expect(effect.renderPixels(
         end.source.surface,
-        effect.defaultPreset,
+        effect.sourceId === "C02" || effect.sourceId === "C04"
+          ? { ...effect.defaultPreset, progress: 1 }
+          : effect.defaultPreset,
         end.options
       ).data).toEqual(end.secondary.surface.data);
     }
@@ -1512,5 +1514,125 @@ describe("typewriter first-glyph boundary", () => {
     const pass = createCatalogWebGLPass(blueprint, { ...effect.defaultPreset, cursor: false }, fixture.time, 7, "preview", 16, 9, fixture.source.input);
     expect(pass.fragmentSource).toContain("step(index + 1.0, revealedGlyphs)");
     expect(pass.fragmentSource).not.toContain("step(index, revealedGlyphs)");
+  });
+});
+
+describe("reported light and transition semantics", () => {
+  const solidSurface = (
+    width: number,
+    height: number,
+    rgba: readonly [number, number, number, number]
+  ): PixelSurface => {
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let offset = 0; offset < data.length; offset += 4) data.set(rgba, offset);
+    return { width, height, data, colorSpace: "srgb", alphaMode: "straight" };
+  };
+
+  const effectBySourceId = (sourceId: string) => GROUP_2_P0_EFFECTS.find(
+    (effect) => effect.sourceId === sourceId
+  )!;
+
+  it("emits the configured energy pulse count as successive expanding rings", () => {
+    const effect = effectBySourceId("L04");
+    const renderAt = (progress: number, rings: number) => {
+      const fixture = realFixture(effect, "reported.energy-pulse", progress, 48, 48);
+      return effect.renderPixels(
+        solidSurface(48, 48, [0, 0, 0, 255]),
+        { center: [0.5, 0.5], radius: 0.42, falloff: 0.08, rings },
+        fixture.options
+      );
+    };
+    expect(hashPixelSurface(renderAt(0.125, 4))).toBe(hashPixelSurface(renderAt(0.375, 4)));
+    expect(hashPixelSurface(renderAt(0.125, 1))).not.toBe(hashPixelSurface(renderAt(0.375, 1)));
+  });
+
+  it("uses one temporal neon intensity for the whole frame and keeps flicker zero stable", () => {
+    const effect = effectBySourceId("L01");
+    const renderAt = (progress: number, flicker: number) => {
+      const fixture = realFixture(effect, "reported.neon-flicker", progress, 48, 32);
+      return effect.renderPixels(fixture.source.surface, {
+        color: "#42C8FF", radius: 0.08, intensity: 2.5, flicker
+      }, fixture.options);
+    };
+    expect(hashPixelSurface(renderAt(0.2, 1))).not.toBe(hashPixelSurface(renderAt(0.27, 1)));
+    expect(hashPixelSurface(renderAt(0.2, 0))).toBe(hashPixelSurface(renderAt(0.27, 0)));
+  });
+
+  it("treats scan-beam angle as the visible beam orientation", () => {
+    const effect = effectBySourceId("L02");
+    const render = (angle: number) => {
+      const fixture = realFixture(effect, `reported.scan-beam.${angle}`, 0.5, 32, 32);
+      return effect.renderPixels(
+        solidSurface(32, 32, [0, 0, 0, 255]),
+        { angle, width: 0.04, softness: 0.1, speed: 0 },
+        fixture.options
+      );
+    };
+    const longestRuns = (surface: PixelSurface) => {
+      const rows = Array.from({ length: surface.height }, (_, y) =>
+        Array.from({ length: surface.width }, (_, x) => surface.data[(y * surface.width + x) * 4 + 2]! > 0)
+          .filter(Boolean).length);
+      const columns = Array.from({ length: surface.width }, (_, x) =>
+        Array.from({ length: surface.height }, (_, y) => surface.data[(y * surface.width + x) * 4 + 2]! > 0)
+          .filter(Boolean).length);
+      return [Math.max(...rows), Math.max(...columns)] as const;
+    };
+    const horizontal = longestRuns(render(0));
+    const vertical = longestRuns(render(90));
+    expect(horizontal[0]).toBeGreaterThan(horizontal[1]);
+    expect(vertical[1]).toBeGreaterThan(vertical[0]);
+  });
+
+  it("animates radial wipe to the requested final percentage", () => {
+    const effect = effectBySourceId("C02");
+    const fixture = realFixture(effect, "reported.radial-wipe", 1, 100, 100);
+    const output = effect.renderPixels(
+      solidSurface(100, 100, [0, 0, 0, 255]),
+      { center: [0.5, 0.5], startAngle: -90, clockwise: true, progress: 0.3 },
+      { ...fixture.options, secondary: solidSurface(100, 100, [255, 255, 255, 255]) }
+    );
+    const replaced = Array.from({ length: 10000 }, (_, index) => output.data[index * 4] === 255)
+      .filter(Boolean).length;
+    expect(replaced / 10000).toBeGreaterThan(0.28);
+    expect(replaced / 10000).toBeLessThan(0.32);
+  });
+
+  it("keeps radial dissolve block-shaped and supports all four linear directions", () => {
+    const effect = effectBySourceId("C04");
+    const render = (order: string, seed: number, progress = 0.5) => {
+      const fixture = realFixture(effect, `reported.pixel-dissolve.${order}.${seed}`, 1, 16, 16);
+      return effect.renderPixels(
+        solidSurface(16, 16, [0, 0, 0, 255]),
+        { grid: 4, order, seed, progress },
+        { ...fixture.options, secondary: solidSurface(16, 16, [255, 255, 255, 255]) }
+      );
+    };
+    const radial = render("radial", 1, 0.45);
+    for (let cellY = 0; cellY < 4; cellY += 1) {
+      for (let cellX = 0; cellX < 4; cellX += 1) {
+        const values = new Set<number>();
+        for (let y = cellY * 4; y < cellY * 4 + 4; y += 1) {
+          for (let x = cellX * 4; x < cellX * 4 + 4; x += 1) {
+            values.add(radial.data[(y * 16 + x) * 4]!);
+          }
+        }
+        expect(values.size).toBe(1);
+      }
+    }
+    const halfCoverage = (surface: PixelSurface, axis: "x" | "y", second: boolean) => {
+      let count = 0;
+      for (let y = 0; y < 16; y += 1) {
+        for (let x = 0; x < 16; x += 1) {
+          const coordinate = axis === "x" ? x : y;
+          if ((coordinate >= 8) === second && surface.data[(y * 16 + x) * 4]! > 0) count += 1;
+        }
+      }
+      return count;
+    };
+    const directions = [render("linear", 1), render("linear", 2), render("linear", 3), render("linear", 4)];
+    expect(halfCoverage(directions[0]!, "x", false)).toBeGreaterThan(halfCoverage(directions[0]!, "x", true));
+    expect(halfCoverage(directions[1]!, "x", true)).toBeGreaterThan(halfCoverage(directions[1]!, "x", false));
+    expect(halfCoverage(directions[2]!, "y", false)).toBeGreaterThan(halfCoverage(directions[2]!, "y", true));
+    expect(halfCoverage(directions[3]!, "y", true)).toBeGreaterThan(halfCoverage(directions[3]!, "y", false));
   });
 });
