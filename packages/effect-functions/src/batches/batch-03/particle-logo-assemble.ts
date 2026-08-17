@@ -61,9 +61,10 @@ export const PARTICLE_LOGO_ASSEMBLE_DEFINITION: EffectToolDefinition<ParticleLog
     const logo = rgbaInput(context, "logo_image", true)!;
     const targets = opaquePixelIndices(logo);
     const progress = clamp(context.time / params.duration, 0, 1);
-    const attracted = 1 - (1 - progress) ** (1 + params.attraction * 2);
+    const visible = progress * progress * (3 - 2 * progress);
+    const attracted = 1 - (1 - visible) ** (1 + params.attraction * 2);
     const settled = attracted * (0.6 + params.damping * 0.4) + progress * (0.4 - params.damping * 0.4);
-    const buffer = createParticleBuffer(context, params.particleCount, "disc");
+    const buffer = createParticleBuffer(context, params.particleCount, "disc", { glow: 0.55 });
     const scatterPixels = params.scatterRadius * Math.min(context.width, context.height);
     for (let index = 0; index < params.particleCount; index += 1) {
       const targetIndex = targets[Math.floor(seededUnit(context.seed, index * 5) * targets.length)]!;
@@ -82,7 +83,7 @@ export const PARTICLE_LOGO_ASSEMBLE_DEFINITION: EffectToolDefinition<ParticleLog
         vx: -offsetX * velocityScale,
         vy: -offsetY * velocityScale,
         size: params.particleSize,
-        opacity: clamp(0.25 + settled, 0, 1),
+        opacity: clamp(visible * (0.28 + settled * 0.72), 0, 1),
         color: pixelAtIndex(logo, targetIndex)
       });
     }

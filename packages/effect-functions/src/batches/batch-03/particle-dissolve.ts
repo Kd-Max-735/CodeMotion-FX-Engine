@@ -61,18 +61,32 @@ export const PARTICLE_DISSOLVE_DEFINITION: EffectToolDefinition<ParticleDissolve
     const target = rgbaInput(context, "target_image", true)!;
     const targetPixels = opaquePixelIndices(target);
     const direction = params.direction * Math.PI / 180;
-    const active: number[] = [];
+    const revealDuration = 1.5;
+    const timeline = Math.min(1, Math.max(0, context.time / revealDuration));
+    const effectiveProgress = params.progress * timeline;
+    const sourceMask = new Uint8Array(target.width * target.height);
+    for (let pixelIndex = 0; pixelIndex < sourceMask.length; pixelIndex += 1) {
+      sourceMask[pixelIndex] = seededUnit(context.seed, pixelIndex * 7 + 9_001) <= effectiveProgress ? 0 : 255;
+    }
+    const dissolvedPixels = targetPixels.filter((pixelIndex) => sourceMask[pixelIndex] === 0);
+    const active: { index: number; age: number }[] = [];
     for (let index = 0; index < params.particleCount; index += 1) {
-      if (seededUnit(context.seed, index * 4) <= params.progress) active.push(index);
+      const threshold = seededUnit(context.seed, index * 4);
+      if (threshold > effectiveProgress || params.progress <= Number.EPSILON) continue;
+      const birthTime = threshold / params.progress * revealDuration;
+      const age = Math.max(0, context.time - birthTime);
+      if (age <= params.lifetime) active.push({ index, age });
     }
     const buffer = createParticleBuffer(context, active.length, "disc", {
-      sourceComposite: { slot: "target_image", opacity: 1 - params.progress }
+      sourceComposite: { slot: "target_image", opacity: 1, mask: sourceMask },
+      glow: 0.45
     });
-    const age = Math.min(context.time, params.lifetime);
     for (let outputIndex = 0; outputIndex < active.length; outputIndex += 1) {
-      const particleIndex = active[outputIndex]!;
-      const pixelIndex = targetPixels[Math.floor(seededUnit(context.seed, particleIndex * 4 + 1)
-        * targetPixels.length)]!;
+      const particleIndex = active[outputIndex]!.index;
+      const age = active[outputIndex]!.age;
+      const origins = dissolvedPixels.length > 0 ? dissolvedPixels : targetPixels;
+      const pixelIndex = origins[Math.floor(seededUnit(context.seed, particleIndex * 4 + 1)
+        * origins.length)]!;
       const originX = pixelIndex % target.width;
       const originY = Math.floor(pixelIndex / target.width);
       const angle = direction + seededSigned(context.seed, particleIndex * 4 + 2)

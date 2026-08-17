@@ -10,7 +10,9 @@ const TEXT_OVERLAY_TOOLS = new Set([
 
 const POLISHED_STRUCTURED_TOOLS = new Set([
   "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke",
-  "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on"
+  "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on",
+  "particle_dissolve", "particle_logo_assemble", "particle_snow_rain", "particle_spark",
+  "particle_trail", "particle_emitter"
 ]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -459,19 +461,94 @@ function particleFrame(
   const sizes = value.sizes instanceof Float32Array ? value.sizes : undefined;
   const opacities = value.opacities instanceof Float32Array ? value.opacities : undefined;
   const colors = value.colors instanceof Uint8ClampedArray ? value.colors : undefined;
+  const velocities = value.velocities instanceof Float32Array ? value.velocities : undefined;
   const count = typeof value.count === "number" ? Math.max(0, Math.floor(value.count)) : 0;
-  if (positions === undefined || sizes === undefined || opacities === undefined || colors === undefined) return false;
-  const limit = Math.min(count, positions.length / 2, sizes.length, opacities.length, colors.length / 4);
+  if (positions === undefined || sizes === undefined || opacities === undefined
+    || colors === undefined || velocities === undefined) return false;
+  const sourceComposite = record(value.sourceComposite);
+  if (sourceComposite === undefined) {
+    for (let offset = 0; offset < output.length; offset += 4) {
+      output[offset] = 5;
+      output[offset + 1] = 8;
+      output[offset + 2] = 14;
+      output[offset + 3] = 255;
+    }
+  } else {
+    const opacity = typeof sourceComposite.opacity === "number"
+      ? Math.max(0, Math.min(1, sourceComposite.opacity)) : 1;
+    const mask = sourceComposite.mask instanceof Uint8Array
+      && sourceComposite.mask.length === request.width * request.height
+      ? sourceComposite.mask : undefined;
+    for (let pixelIndex = 0; pixelIndex < request.width * request.height; pixelIndex += 1) {
+      const amount = opacity * (mask === undefined ? 1 : mask[pixelIndex]! / 255);
+      const offset = pixelIndex * 4;
+      output[offset] = clampByte(output[offset]! * amount);
+      output[offset + 1] = clampByte(output[offset + 1]! * amount);
+      output[offset + 2] = clampByte(output[offset + 2]! * amount);
+      output[offset + 3] = clampByte(output[offset + 3]! * amount);
+    }
+  }
+  const limit = Math.min(count, positions.length / 2, velocities.length / 2,
+    sizes.length, opacities.length, colors.length / 4);
+  const primitive = value.primitive === "streak" ? "streak" : value.primitive === "sprite" ? "sprite" : "disc";
+  const glow = typeof value.glow === "number" ? Math.max(0, Math.min(5, value.glow)) : 0;
+  let estimatedCost = 0;
   for (let index = 0; index < limit; index += 1) {
+    const size = Math.max(0.25, Math.min(200, sizes[index]!));
+    if (primitive === "streak") {
+      const speed = Math.hypot(velocities[index * 2]!, velocities[index * 2 + 1]!);
+      const length = Math.min(64, Math.max(6, size * 2.4 + speed * 0.022));
+      const glowRadius = glow > 0 ? Math.min(32, Math.max(2, size * (1.3 + glow * 0.28))) : 0;
+      const coreRadius = Math.min(32, Math.max(0.75, size * 0.7));
+      const highlightRadius = Math.min(32, Math.max(0.45, size * 0.24));
+      estimatedCost += length * 4 * (glowRadius ** 2 + coreRadius ** 2 + highlightRadius ** 2);
+    } else {
+      const outerRadius = glow > 0 ? Math.min(32, size * (2.1 + glow * 0.32)) : 0;
+      const middleRadius = glow > 0 ? Math.min(32, size * 1.45) : 0;
+      estimatedCost += 4 * (outerRadius ** 2 + middleRadius ** 2
+        + Math.min(32, size) ** 2 + Math.min(32, Math.max(0.45, size * 0.3)) ** 2);
+    }
+  }
+  const drawStep = Math.max(1, Math.ceil(estimatedCost / 8_000_000));
+  for (let index = 0; index < limit; index += drawStep) {
     const rawX = positions[index * 2]!;
     const rawY = positions[index * 2 + 1]!;
-    const normalized = Math.abs(rawX) <= 2 && Math.abs(rawY) <= 2;
-    const x = normalized ? (rawX + 1) * 0.5 * (request.width - 1) : rawX;
-    const y = normalized ? (1 - (rawY + 1) * 0.5) * (request.height - 1) : rawY;
+    const x = rawX;
+    const y = rawY;
     const offset = index * 4;
-    drawDisc(output, request.width, request.height, x, y, sizes[index]!, [
+    const size = Math.max(0.25, Math.min(200, sizes[index]!));
+    const opacity = Math.min(1, Math.max(0, opacities[index]!) * Math.sqrt(drawStep))
+      * colors[offset + 3]! / 255;
+    if (opacity <= 0.001 || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const color = [
       colors[offset]!, colors[offset + 1]!, colors[offset + 2]!, colors[offset + 3]!
-    ], opacities[index]!);
+    ];
+    if (primitive === "streak") {
+      const vx = velocities[index * 2]!;
+      const vy = velocities[index * 2 + 1]!;
+      const speed = Math.max(0.000001, Math.hypot(vx, vy));
+      const length = Math.min(64, Math.max(6, size * 2.4 + speed * 0.022));
+      const tailX = x - vx / speed * length;
+      const tailY = y - vy / speed * length;
+      if (glow > 0) {
+        drawLine(output, request.width, request.height, tailX, tailY, x, y,
+          color, opacity * Math.min(0.34, glow * 0.13), Math.max(2, size * (1.3 + glow * 0.28)));
+      }
+      drawLine(output, request.width, request.height, tailX, tailY, x, y,
+        color, opacity * 0.82, Math.max(0.75, size * 0.7));
+      drawLine(output, request.width, request.height, x - vx / speed * length * 0.42,
+        y - vy / speed * length * 0.42, x, y, [255, 250, 224, 255], opacity, Math.max(0.45, size * 0.24));
+      continue;
+    }
+    if (glow > 0) {
+      drawDisc(output, request.width, request.height, x, y, size * (2.1 + glow * 0.32),
+        color, opacity * Math.min(0.24, glow * 0.09));
+      drawDisc(output, request.width, request.height, x, y, size * 1.45,
+        color, opacity * Math.min(0.42, glow * 0.16));
+    }
+    drawDisc(output, request.width, request.height, x, y, size, color, opacity * 0.9);
+    drawDisc(output, request.width, request.height, x - size * 0.18, y - size * 0.2,
+      Math.max(0.45, size * 0.3), [255, 255, 255, 255], opacity * 0.72);
   }
   return true;
 }
@@ -1007,6 +1084,7 @@ function adapterPreview(
   request: FrameRequest,
   toolName: string
 ): void {
+  if (POLISHED_STRUCTURED_TOOLS.has(toolName)) return;
   const phase = request.time * Math.PI * 2;
   if (source !== undefined && toolName === "background_remove_compose") {
     for (let offset = 0; offset < output.length; offset += 4) {

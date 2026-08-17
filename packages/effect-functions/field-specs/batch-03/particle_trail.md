@@ -2,14 +2,14 @@
 
 ## 工具作用
 
-沿运动历史持续发射并保存粒子轨迹，形成彗星、丝带或电光拖尾。可选主体图由服务端绑定，轨迹扰动只使用服务端 `seed`。
+从可控画面位置沿直线、波浪或环绕轨迹持续发射粒子，形成彗星、丝带或电光拖尾。起点、方向和颜色由模型的封闭数值字段控制，素材身份仍只由服务器绑定。
 
 ## JSON 输出格式
 
 只输出以下结构的 JSON，不附加解释或代码块：
 
 ```json
-{"type":"particle_trail","data":{"emissionRate":180,"trailLength":1.2,"speed":220,"width":10,"fade":0.72,"waviness":0.18,"lifetime":1.6}}
+{"type":"particle_trail","data":{"emissionRate":180,"trailLength":1.2,"speed":220,"width":10,"fade":0.72,"waviness":0.18,"lifetime":1.6,"startX":0.5,"startY":0.5,"trajectory":"orbit","direction":-20,"hue":195,"saturation":0.78}}
 ```
 
 ## 完整参数表
@@ -23,6 +23,12 @@
 | `fade` | 数字 `0..1` | `0.72` | 随年龄衰减强度。 |
 | `waviness` | 数字 `0..1` | `0.18` | 横向波动量。 |
 | `lifetime` | 数字 `0.05..20` | `1.6` | 单粒子最长寿命（秒）。 |
+| `startX` | 数字 `0..1` | `0.5` | 轨迹起点横向位置，`0/1` 对应左/右。 |
+| `startY` | 数字 `0..1` | `0.5` | 轨迹起点纵向位置，`0/1` 对应上/下。 |
+| `trajectory` | `linear/wave/orbit` | `orbit` | 直线、波浪或环绕轨迹。 |
+| `direction` | 数字 `-180..180` | `-20` | 直线/波浪前进方向或环绕初始角度。 |
+| `hue` | 数字 `0..360` | `195` | 粒子色相角。 |
+| `saturation` | 数字 `0..1` | `0.78` | 粒子颜色饱和度；`0` 为白色。 |
 
 ## 表达映射与选择顺序
 
@@ -31,16 +37,18 @@
 - “消失更快”增大 `fade` 或减小 `lifetime`；强调渐隐曲线时改 `fade`，强调最长停留时间时改 `lifetime`。
 - `trailLength` 与 `lifetime` 共同限制历史窗口，先设置用户明确说出的长度，再确保 `lifetime` 不短于所需观感。
 - `emissionRate` 与 `width` 都让拖尾更厚：密度请求改前者，粗细请求改后者。
+- 位置先用 `startX/startY`，轨迹形态用 `trajectory`，运动朝向用 `direction`；三者不可互相代替。
+- 颜色名称映射到 `hue`，柔和或接近白色时降低 `saturation`。
 
 ## 自然语言示例
 
 | 用户表达 | `data` |
 | --- | --- |
-| 柔和长丝带拖尾 | `{"emissionRate":300,"trailLength":2.8,"speed":120,"width":18,"fade":0.45,"waviness":0.1,"lifetime":3.2}` |
-| 常规彗星拖尾 | `{"emissionRate":180,"trailLength":1.2,"speed":220,"width":10,"fade":0.72,"waviness":0.18,"lifetime":1.6}` |
-| 更长更密 | `{"emissionRate":480,"trailLength":4,"speed":220,"width":10,"fade":0.5,"waviness":0.18,"lifetime":4.5}` |
-| 短促细电光 | `{"emissionRate":520,"trailLength":0.55,"speed":620,"width":4,"fade":0.9,"waviness":0.7,"lifetime":0.65}` |
-| 宽而平直的余辉 | `{"emissionRate":240,"trailLength":2,"speed":100,"width":35,"fade":0.35,"waviness":0.02,"lifetime":2.4}` |
+| 左下向右的紫色波浪丝带 | `{"emissionRate":300,"trailLength":2.8,"speed":120,"width":18,"fade":0.45,"waviness":0.4,"lifetime":3.2,"startX":0.15,"startY":0.75,"trajectory":"wave","direction":-15,"hue":285,"saturation":0.55}` |
+| 常规蓝色环绕拖尾 | `{"emissionRate":180,"trailLength":1.2,"speed":220,"width":10,"fade":0.72,"waviness":0.18,"lifetime":1.6,"startX":0.5,"startY":0.5,"trajectory":"orbit","direction":-20,"hue":195,"saturation":0.78}` |
+| 从左侧水平向右的红色拖尾 | `{"emissionRate":480,"trailLength":2,"speed":180,"width":10,"fade":0.5,"waviness":0.05,"lifetime":2.5,"startX":0.08,"startY":0.5,"trajectory":"linear","direction":0,"hue":0,"saturation":0.9}` |
+| 短促青色电光 | `{"emissionRate":520,"trailLength":0.55,"speed":620,"width":4,"fade":0.9,"waviness":0.7,"lifetime":0.65,"startX":0.5,"startY":0.5,"trajectory":"linear","direction":-35,"hue":190,"saturation":1}` |
+| 右上白色环形余辉 | `{"emissionRate":240,"trailLength":2,"speed":100,"width":35,"fade":0.35,"waviness":0.2,"lifetime":2.4,"startX":0.75,"startY":0.25,"trajectory":"orbit","direction":90,"hue":210,"saturation":0}` |
 
 ## 推荐值、默认值和中性值
 

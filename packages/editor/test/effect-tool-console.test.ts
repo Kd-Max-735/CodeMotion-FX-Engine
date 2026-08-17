@@ -110,6 +110,19 @@ describe("120-tool selector helpers", () => {
     }
   });
 
+  it.each(["particle_snow_rain", "particle_spark"])(
+    "requires one background image for %s",
+    (toolName) => {
+      const particleTool = tool({
+        toolName,
+        inputRequirements: [input("background_image", "image")]
+      });
+      expect(imageUploadRequirement(particleTool)).toEqual({ min: 1, max: 1 });
+      expect(turnInputIds(particleTool, ["asset_imageabcdefgh"]))
+        .toEqual({ background_image: "asset_imageabcdefgh" });
+    }
+  );
+
   it("preserves available selections, truncates excess, and fills the required minimum", () => {
     const transition = tool({
       inputRequirements: [input("source_frame", "image"), input("target_frame", "image")]

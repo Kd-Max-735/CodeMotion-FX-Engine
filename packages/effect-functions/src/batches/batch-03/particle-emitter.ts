@@ -63,7 +63,7 @@ export const PARTICLE_EMITTER_DEFINITION: EffectToolDefinition<ParticleEmitterPa
     const lastEmission = Math.max(firstEmission, Math.floor(context.time * params.rate));
     const count = lastEmission - firstEmission;
     const buffer = createParticleBuffer(context, count, texture === undefined ? "disc" : "sprite",
-      texture === undefined ? {} : { spriteSlot: "particle_texture" });
+      texture === undefined ? { glow: 0.72 } : { spriteSlot: "particle_texture", glow: 0.38 });
     for (let index = 0; index < count; index += 1) {
       const emissionIndex = firstEmission + index;
       const birthTime = emissionIndex / params.rate;
@@ -84,7 +84,8 @@ export const PARTICLE_EMITTER_DEFINITION: EffectToolDefinition<ParticleEmitterPa
         vy,
         size: params.size * (0.8 + seededUnit(context.seed, emissionIndex * 3 + 3) * 0.4),
         opacity: 1 - age / params.lifetime,
-        color: [255, 255, 255, 255]
+        color: [116 + seededUnit(context.seed, emissionIndex + 700) * 92,
+          206 + seededUnit(context.seed, emissionIndex + 900) * 49, 255, 255]
       });
     }
     return particleTextureResult(context, buffer);

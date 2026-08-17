@@ -51,8 +51,10 @@ export interface ParticleTextureBuffer {
   readonly sourceComposite?: {
     readonly slot: string;
     readonly opacity: number;
+    readonly mask?: Uint8Array;
   };
   readonly spriteSlot?: string;
+  readonly glow?: number;
 }
 
 export function round(value: number, digits = 6): number {
@@ -253,7 +255,7 @@ export function createParticleBuffer(
   context: ServerEffectRenderContext,
   count: number,
   primitive: ParticlePrimitive,
-  options: Pick<ParticleTextureBuffer, "sourceComposite" | "spriteSlot"> = {}
+  options: Pick<ParticleTextureBuffer, "sourceComposite" | "spriteSlot" | "glow"> = {}
 ): ParticleTextureBuffer {
   const safeCount = Math.max(0, Math.floor(count));
   return {
@@ -302,9 +304,7 @@ export function setParticle(
 export function particleTextureResult(
   context: ServerEffectRenderContext,
   output: ParticleTextureBuffer,
-  warnings: readonly string[] = [
-    "BLOCKED: the shared server particle compositor must consume codemotion-particle-buffer/v1 before MP4 export."
-  ]
+  warnings: readonly string[] = []
 ): EffectRenderResult<ParticleTextureBuffer> {
   return {
     kind: "texture",

@@ -7,6 +7,7 @@ import {
   VALID_PARAMS,
   createParticleBuffer,
   particleTextureResult,
+  rgbaInput,
   seededSigned,
   seededUnit,
   setParticle
@@ -50,16 +51,20 @@ export const PARTICLE_SNOW_RAIN_DEFINITION: EffectToolDefinition<ParticleSnowRai
     { presetId: "weather.blizzard", displayName: "暴风雪", params: { ...defaults, density: 0.92, fallSpeed: 420, wind: 360, turbulence: 0.8, size: 7, depth: 1 } },
     { presetId: "weather.rain", displayName: "急雨", params: { ...defaults, mode: "rain", density: 0.78, fallSpeed: 1100, wind: 85, turbulence: 0.08, size: 2, depth: 0.85, opacity: 0.68 } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: true, cardinality: "one", description: "服务端授权并锁定的雨雪背景图像；不进入模型 data。" }],
   primaryBackend: BATCH_03_BACKEND,
   fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
-    const count = Math.ceil((context.width * context.height / 5_000) * params.density
+    rgbaInput(context, "background_image", true);
+    const count = Math.ceil((context.width * context.height / 850) * params.density
       * (params.mode === "rain" ? 1.4 : 1));
-    const buffer = createParticleBuffer(context, count, params.mode === "rain" ? "streak" : "disc");
+    const buffer = createParticleBuffer(context, count, params.mode === "rain" ? "streak" : "disc", {
+      sourceComposite: { slot: "background_image", opacity: 1 },
+      glow: params.mode === "rain" ? 0.35 : 0.22
+    });
     const wrap = (value: number, size: number) => ((value % size) + size) % size;
     for (let index = 0; index < count; index += 1) {
       const z = seededUnit(context.seed, index) * params.depth;

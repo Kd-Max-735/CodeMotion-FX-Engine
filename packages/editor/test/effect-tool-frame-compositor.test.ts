@@ -71,7 +71,9 @@ describe("effect tool frame compositor", () => {
 
   it.each([
     "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke",
-    "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on"
+    "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on",
+    "particle_dissolve", "particle_logo_assemble", "particle_snow_rain", "particle_spark",
+    "particle_trail", "particle_emitter"
   ])(
     "does not add the generic moving scanline to %s",
     (toolName) => {
@@ -160,5 +162,52 @@ describe("effect tool frame compositor", () => {
   ] as const)("keeps %s visually neutral when its opacity control is zero", (toolName, value) => {
     const source = solidSource();
     expect(composeEffectToolFrame(metadata(value), detailedRequest, toolName, source)).toEqual(source);
+  });
+
+  it("composites particle masks, source overlays, glow discs, and velocity streaks", () => {
+    const source = solidSource();
+    const mask = new Uint8Array(detailedRequest.width * detailedRequest.height).fill(255);
+    mask.fill(0, 0, Math.floor(mask.length / 2));
+    const particleOutput = {
+      format: "codemotion-particle-buffer/v1",
+      width: detailedRequest.width,
+      height: detailedRequest.height,
+      time: detailedRequest.time,
+      primitive: "streak",
+      count: 2,
+      positions: new Float32Array([32, 24, 66, 40]),
+      velocities: new Float32Array([260, -80, -180, 120]),
+      sizes: new Float32Array([3, 4]),
+      opacities: new Float32Array([0.9, 0.75]),
+      colors: new Uint8ClampedArray([255, 186, 60, 255, 90, 210, 255, 255]),
+      sourceComposite: { slot: "target_image", opacity: 1, mask },
+      glow: 1.8
+    };
+    const output = composeEffectToolFrame(metadata(particleOutput), detailedRequest,
+      "particle_dissolve", source);
+    expect([...output.slice(0, 4)]).toEqual([0, 0, 0, 0]);
+    expect([...output.slice(output.length - 4)]).toEqual([...source.slice(source.length - 4)]);
+    expect(changedPixelCount(source, output)).toBeGreaterThan(mask.length / 2);
+  });
+
+  it("starts logo particles on a blank canvas without the generic logo wipe", () => {
+    const source = solidSource();
+    const output = composeEffectToolFrame(metadata({
+      format: "codemotion-particle-buffer/v1",
+      width: detailedRequest.width,
+      height: detailedRequest.height,
+      time: 0,
+      primitive: "disc",
+      count: 0,
+      positions: new Float32Array(),
+      velocities: new Float32Array(),
+      sizes: new Float32Array(),
+      opacities: new Float32Array(),
+      colors: new Uint8ClampedArray(),
+      glow: 0.5
+    }), detailedRequest, "particle_logo_assemble", source);
+    expect([...output.slice(0, 4)]).toEqual([5, 8, 14, 255]);
+    expect(new Set(Array.from({ length: output.length / 4 }, (_, index) =>
+      output.slice(index * 4, index * 4 + 4).join(",")))).toEqual(new Set(["5,8,14,255"]));
   });
 });

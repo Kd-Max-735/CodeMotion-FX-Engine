@@ -251,6 +251,22 @@ class TestInputResolver implements EffectToolInputResolver {
         })
       }));
     }
+    if (definition.inputSlots.some((slot) => slot.name === "background_image")) {
+      return Promise.resolve(Object.freeze({
+        background_image: Object.freeze({
+          slot: "background_image",
+          kind: "image" as const,
+          tenantId: this.wrongOwner ? "tenant-other" : owner.tenantId,
+          userId: owner.userId,
+          locked: true as const,
+          binding: {
+            width: render.width,
+            height: render.height,
+            data: new Uint8Array(render.width * render.height * 4).fill(255)
+          }
+        })
+      }));
+    }
     if (definition.toolName !== "fade") return Promise.resolve(Object.freeze({}));
     return Promise.resolve(Object.freeze({
       source_layer: Object.freeze({
@@ -313,14 +329,14 @@ describe("server single effect-tool service", () => {
     const added = await service.execute(principal, {
       toolName: "particle_spark",
       prompt: "轻微火花",
-      inputIds: {},
+      inputIds: { background_image: "asset_abcdefgh" },
       render: { width: 32, height: 18, time: 0.1 }
     });
 
     expect(service.list()).toHaveLength(120);
     expect(existing).toMatchObject({ toolName: "fade", result: { kind: "frame", degraded: false } });
     expect(existing.result.output).toMatchObject({ width: 2, height: 2, byteLength: 16 });
-    expect(added).toMatchObject({ toolName: "particle_spark", result: { kind: "metadata" } });
+    expect(added).toMatchObject({ toolName: "particle_spark", result: { kind: "texture" } });
     expect(provider.requests.map((request) => request.toolName)).toEqual(["fade", "particle_spark"]);
     expect(provider.requests[0]!.fieldSpec).toContain("# 淡入淡出 `fade`");
     expect(provider.requests[1]!.fieldSpec).toContain("`particle_spark`");
@@ -334,17 +350,17 @@ describe("server single effect-tool service", () => {
 
     provider.output = { type: "fade", data: {} };
     await expect(service.execute(principal, {
-      toolName: "particle_spark", prompt: "火花", inputIds: {}
+      toolName: "particle_spark", prompt: "火花", inputIds: { background_image: "asset_abcdefgh" }
     })).rejects.toMatchObject({ code: "TYPE_MISMATCH" });
 
     provider.output = { type: "particle_spark", data: { assetId: "asset_abcdefgh" } };
     await expect(service.execute(principal, {
-      toolName: "particle_spark", prompt: "火花", inputIds: {}
+      toolName: "particle_spark", prompt: "火花", inputIds: { background_image: "asset_abcdefgh" }
     })).rejects.toMatchObject({ code: "RESOURCE_INJECTION" });
 
     provider.output = { type: "particle_spark", data: { rogue: 1 } };
     await expect(service.execute(principal, {
-      toolName: "particle_spark", prompt: "火花", inputIds: {}
+      toolName: "particle_spark", prompt: "火花", inputIds: { background_image: "asset_abcdefgh" }
     })).rejects.toMatchObject({ code: "PARAMETER_INVALID" });
 
     provider.output = undefined;
@@ -367,7 +383,7 @@ describe("server single effect-tool service", () => {
     const service = new EffectToolService(new RecordingProvider(), new TestInputResolver(), registry);
 
     await service.execute(principal, {
-      toolName: "particle_spark", prompt: "火花", inputIds: {}
+      toolName: "particle_spark", prompt: "火花", inputIds: { background_image: "asset_abcdefgh" }
     });
     expect(render).toHaveBeenCalledOnce();
   });
@@ -827,7 +843,7 @@ describe("server single effect-tool service", () => {
       const execution = await fetch(`${baseUrl}/api/effect-tools/v1/executions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ toolName: "particle_spark", prompt: "火花", inputIds: {} })
+        body: JSON.stringify({ toolName: "particle_spark", prompt: "火花", inputIds: { background_image: "asset_abcdefgh" } })
       });
       expect(execution.status).toBe(201);
       const created = await execution.json() as { execution: { id: string } };

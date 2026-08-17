@@ -57,16 +57,23 @@ export const LIQUID_DISPLACE_DEFINITION: EffectToolDefinition<LiquidDisplacePara
     const source = rgbaInput(context, "primary_image", true)!;
     const flowMap = rgbaInput(context, "flow_map", false, false);
     const output = new Uint8ClampedArray(context.width * context.height * 4);
-    const time = context.time * params.flowSpeed;
-    const displacementScale = params.refraction * Math.min(context.width, context.height) * 0.08
-      * (1.25 - params.surfaceTension * 0.5) * (1 - params.viscosity * 0.45);
+    const time = context.time * params.flowSpeed * (1.2 - params.viscosity * 0.65);
+    const minimumDimension = Math.min(context.width, context.height);
+    const displacementScale = params.refraction * minimumDimension * 0.15
+      * (0.82 + params.surfaceTension * 0.34) * (1 - params.viscosity * 0.18);
+    const flowScale = 34 + params.viscosity * 46 + params.surfaceTension * 28;
     for (let y = 0; y < context.height; y += 1) {
       for (let x = 0; x < context.width; x += 1) {
         let flowX: number;
         let flowY: number;
         if (flowMap === undefined) {
-          flowX = valueNoise3d(context.seed, x / 48 + time, y / 48, time * 0.4, 3);
-          flowY = valueNoise3d(context.seed, x / 48, y / 48 - time, time * 0.4, 71);
+          const broadX = valueNoise3d(context.seed, x / flowScale + time, y / flowScale, time * 0.28, 3);
+          const broadY = valueNoise3d(context.seed, x / flowScale, y / flowScale - time, time * 0.28, 71);
+          const detailWeight = 0.42 * (1 - params.surfaceTension * 0.68);
+          flowX = broadX + valueNoise3d(context.seed, x / 23 + time * 0.7,
+            y / 23, time * 0.36, 109) * detailWeight;
+          flowY = broadY + valueNoise3d(context.seed, x / 23,
+            y / 23 - time * 0.7, time * 0.36, 173) * detailWeight;
         } else {
           const mapX = x / Math.max(1, context.width - 1) * Math.max(0, flowMap.width - 1);
           const mapY = y / Math.max(1, context.height - 1) * Math.max(0, flowMap.height - 1);
@@ -80,8 +87,9 @@ export const LIQUID_DISPLACE_DEFINITION: EffectToolDefinition<LiquidDisplacePara
         const red = sampleBilinear(source, x - dx - dispersion, y - dy, "mirror");
         const green = sampleBilinear(source, x - dx, y - dy, "mirror");
         const blue = sampleBilinear(source, x - dx + dispersion, y - dy, "mirror");
+        const caustic = 1 + Math.min(0.16, Math.abs(flowX - flowY) * params.refraction * 0.055);
         writePixel(output, (y * context.width + x) * 4,
-          [red[0]!, green[1]!, blue[2]!, green[3]!]);
+          [red[0]! * caustic, green[1]! * caustic, blue[2]! * caustic, green[3]!]);
       }
     }
     return frameResult(context, output);

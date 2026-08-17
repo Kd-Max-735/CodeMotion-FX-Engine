@@ -228,11 +228,12 @@ describe("batch-03 definitions", () => {
     }
   });
 
-  it("keeps all six assigned resource names in server-only input slots", async () => {
+  it("keeps all assigned resource names in server-only input slots", async () => {
     const slotNames = new Set(BATCH_03_DEFINITIONS.flatMap((definition) =>
       definition.inputSlots.map((slot) => slot.name)));
     expect(slotNames).toEqual(new Set([
-      "primary_image", "flow_map", "particle_texture", "logo_image", "target_image", "source_image"
+      "primary_image", "flow_map", "particle_texture", "logo_image", "target_image", "source_image",
+      "background_image"
     ]));
     for (const definition of BATCH_03_DEFINITIONS) {
       expect(() => validateAndNormalizeEffectEnvelope(
@@ -293,7 +294,7 @@ describe("batch-03 definitions", () => {
       } else {
         expect(result.kind).toBe("texture");
         expectParticleBuffer(result.output);
-        expect(result.warnings.join(" ")).toContain("BLOCKED");
+        expect(result.warnings).toEqual([]);
       }
       expectFinite(result.output);
     }
@@ -307,6 +308,67 @@ describe("batch-03 definitions", () => {
       expect(repeat).toEqual(first);
       expect(evolved.output).not.toEqual(first.output);
     }
+  });
+
+  it("renders distinct liquid presets and preserves visible motion for high-viscosity gel", async () => {
+    const definition = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "liquid_displace")!;
+    const renderParams = async (data: JsonObject) => executeSelectedEffectTool(
+      definition,
+      definition.toolName,
+      { type: definition.toolName, data },
+      contextFor(definition, { time: 0.8 })
+    );
+    const glass = await renderParams({ ...definition.defaults, viscosity: 0.82, refraction: 0.18,
+      flowSpeed: 0.18, surfaceTension: 0.75, chromaticDispersion: 0.02 });
+    const gel = await renderParams({ ...definition.defaults, viscosity: 0.95, refraction: 0.4,
+      flowSpeed: 0.08, surfaceTension: 0.9, chromaticDispersion: 0 });
+    expect(glass.output).not.toEqual(gel.output);
+    expect((glass.output as RgbaFrame).data).not.toEqual(rgbaFrame().data);
+    expect((gel.output as RgbaFrame).data).not.toEqual(rgbaFrame().data);
+  });
+
+  it("cuts dissolved source pixels, starts logo assembly blank, and supports repeated spark bursts", async () => {
+    const dissolve = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "particle_dissolve")!;
+    const dissolveResult = await executeSelectedEffectTool(
+      dissolve,
+      dissolve.toolName,
+      { type: dissolve.toolName, data: { ...dissolve.defaults, progress: 0.5 } },
+      contextFor(dissolve, { time: 1.5 })
+    );
+    const mask = expectParticleBuffer(dissolveResult.output).sourceComposite?.mask;
+    expect(mask).toBeInstanceOf(Uint8Array);
+    expect(mask).toContain(0);
+    expect(mask).toContain(255);
+
+    const logo = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "particle_logo_assemble")!;
+    const logoStart = expectParticleBuffer((await executeDefaults(logo, { time: 0 })).output);
+    const logoLater = expectParticleBuffer((await executeDefaults(logo, { time: 0.8 })).output);
+    expect([...logoStart.opacities].every((opacity) => opacity === 0)).toBe(true);
+    expect([...logoLater.opacities].some((opacity) => opacity > 0)).toBe(true);
+
+    const spark = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "particle_spark")!;
+    const repeated = await executeSelectedEffectTool(
+      spark,
+      spark.toolName,
+      { type: spark.toolName, data: { ...spark.defaults, burstCount: 3, burstInterval: 0.4, lifetime: 0.65 } },
+      contextFor(spark, { time: 0.45 })
+    );
+    expect(expectParticleBuffer(repeated.output).count).toBe((spark.defaults.count as number) * 2);
+  });
+
+  it("uses trail position, trajectory, direction, and color parameters in particle output", async () => {
+    const trail = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "particle_trail")!;
+    const renderParams = async (data: JsonObject) => expectParticleBuffer((await executeSelectedEffectTool(
+      trail,
+      trail.toolName,
+      { type: trail.toolName, data },
+      contextFor(trail, { time: 0.8 })
+    )).output);
+    const blueOrbit = await renderParams({ ...trail.defaults });
+    const redLine = await renderParams({ ...trail.defaults, startX: 0.1, startY: 0.8,
+      trajectory: "linear", direction: 0, hue: 0, saturation: 1 });
+    expect(redLine.positions).not.toEqual(blueOrbit.positions);
+    expect(redLine.colors).not.toEqual(blueOrbit.colors);
   });
 
   it("uses only the server seed for stochastic distortion and particle state", async () => {
@@ -330,7 +392,12 @@ describe("batch-03 definitions", () => {
       item.inputSlots.some((slot) => slot.required))) {
       const normal = await executeDefaults(definition);
       const changed = await executeDefaults(definition, { inputs: inputsFor(definition, [], 1) });
-      expect(changed.output).not.toEqual(normal.output);
+      if (definition.inputSlots.some((slot) => slot.name === "background_image")) {
+        expect(expectParticleBuffer(normal.output).sourceComposite)
+          .toMatchObject({ slot: "background_image", opacity: 1 });
+      } else {
+        expect(changed.output).not.toEqual(normal.output);
+      }
     }
 
     const liquid = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "liquid_displace")!;
