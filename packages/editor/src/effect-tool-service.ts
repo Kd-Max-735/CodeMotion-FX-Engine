@@ -57,10 +57,11 @@ const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
 const HAN_TEXT = /\p{Script=Han}/u;
 const SENSITIVE_PATH = /(?:https?:\/\/|file:\/\/|[a-z]:\\|\/(?:home|tmp|var|etc|users)\/)/iu;
 const IMAGE_DERIVED_TEXT_TOOLS = new Set([
-  "character_cascade", "kinetic_typography", "scramble_decode", "text_morph"
+  "character_cascade", "kinetic_typography", "scramble_decode", "text_morph",
+  "text_path_reveal", "typewriter", "word_explode"
 ]);
 const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
-  "path_trim", "path_morph", "radial_burst", "shape_repeater"
+  "path_trim", "path_morph", "radial_burst", "shape_repeater", "brush_reveal"
 ]);
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
@@ -435,18 +436,28 @@ function visualKind(asset: VerifiedStoredMedia["asset"]): "image" | "video" | un
     : asset.type === "video" ? "video" : undefined;
 }
 
-function alphaValues(data: Uint8Array): number[] {
-  const values: number[] = [];
-  for (let offset = 0; offset < data.length; offset += 4) values.push(data[offset + 3]! / 255);
-  return values;
-}
-
 function luminanceValues(data: Uint8Array): number[] {
   const values: number[] = [];
   for (let offset = 0; offset < data.length; offset += 4) {
     values.push((data[offset]! * 0.2126 + data[offset + 1]! * 0.7152 + data[offset + 2]! * 0.0722) / 255);
   }
   return values;
+}
+
+function derivedBrushCoverage(data: Uint8Array, render: EffectToolRenderSettings): Uint8Array {
+  const coverage = new Uint8Array(render.width * render.height);
+  for (let y = 0; y < render.height; y += 1) {
+    for (let x = 0; x < render.width; x += 1) {
+      const pixel = y * render.width + x;
+      const offset = pixel * 4;
+      const luminance = (data[offset]! * 0.2126 + data[offset + 1]! * 0.7152
+        + data[offset + 2]! * 0.0722) / 255;
+      const alpha = data[offset + 3]! / 255;
+      const bristle = (x * 7 + y * 13) % 19 < 3 ? 0.28 : 1;
+      coverage[pixel] = Math.round(alpha * (0.25 + luminance * 0.75) * bristle * 255);
+    }
+  }
+  return coverage;
 }
 
 function audioBinding(
@@ -871,7 +882,9 @@ function previewDataBinding(
     case "camera_target": return { x: 0, y: 0, z: 0 };
     case "motion_path":
     case "stroke_path": return definition.primaryBackend.backendId === EXISTING_BACKEND
-      ? { path: "M 48 240 C 180 48 420 312 592 120" }
+      ? { path: definition.toolName === "text_path_reveal"
+        ? "M 0.08 0.68 C 0.28 0.15 0.72 0.85 0.92 0.28"
+        : "M 48 240 C 180 48 420 312 592 120" }
       : { points: path, closed: false };
     case "morph_paths": return {
       fromPath: "M 0.18 0.22 L 0.82 0.22 L 0.82 0.78 L 0.18 0.78 Z",
@@ -1092,7 +1105,7 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
           coverage: {
             width: render.width,
             height: render.height,
-            data: Uint8Array.from(alphaValues(pixels), (value) => Math.round(value * 255)),
+            data: derivedBrushCoverage(pixels, render),
             rowOrder: "top-to-bottom"
           }
         };

@@ -603,11 +603,15 @@ describe("server single effect-tool service", () => {
       ["kinetic_typography", "text_raster", "text", true],
       ["scramble_decode", "text_raster", "text", true],
       ["text_morph", "text_raster", "text", true],
+      ["text_path_reveal", "text_raster", "text", true],
+      ["typewriter", "text_raster", "text", true],
+      ["word_explode", "text_raster", "text", true],
       ["text_extrude_3d", "text_raster", "text", true],
       ["path_trim", "vector_source", "shape", true],
       ["path_morph", "vector_source", "shape", true],
       ["radial_burst", "vector_source", "shape", true],
-      ["shape_repeater", "vector_source", "shape", false]
+      ["shape_repeater", "vector_source", "shape", false],
+      ["brush_reveal", "vector_source", "shape", true]
     ] as const;
 
     for (const [toolName, primarySlot, sourceKind, animates] of cases) {
@@ -631,6 +635,10 @@ describe("server single effect-tool service", () => {
           glyph.coverage.data.some((value) => value > 0))).toBe(true);
         expect(binding.surface.data.some((value, offset) => offset % 4 === 3 && value === 0)).toBe(true);
         expect(binding.surface.data.some((value, offset) => offset % 4 === 3 && value > 0)).toBe(true);
+      }
+      if (toolName === "brush_reveal") {
+        const brush = inputs.brush_texture as { binding: { coverage: { data: Uint8Array } } };
+        expect(new Set(brush.binding.coverage.data).size).toBeGreaterThan(1);
       }
       const renderAt = (time: number) => executeSelectedEffectTool(
         definition, toolName, { type: toolName, data: definition.defaults }, {
