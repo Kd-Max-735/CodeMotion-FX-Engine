@@ -440,7 +440,8 @@ function renderMotion(
           : direction === "right" ? distance - overshoot : 0;
         const dy = direction === "up" ? -distance + overshoot
           : direction === "down" ? distance - overshoot : 0;
-        const customAmount = distance * 0.25;
+        const defaultVector = custom[0] === 1 && custom[1] === 0;
+        const customAmount = defaultVector ? 0 : distance * 0.25;
         rgba = transformedSample(source, u, v, (su, sv) => [
           su - dx - custom[0] * customAmount,
           sv - dy - custom[1] * customAmount

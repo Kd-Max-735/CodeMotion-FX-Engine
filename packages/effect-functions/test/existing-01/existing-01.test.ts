@@ -277,6 +277,19 @@ describe("existing-01 registry and field specifications", () => {
         .filter((name) => resourceFieldNames.has(name)), toolName).toEqual([]);
     }
   });
+
+  it("documents rotate speed through angle and turns without widening the Schema", () => {
+    const definition = definitionFor("rotate_in");
+    const markdown = readFileSync(join(specDirectory, "rotate_in.md"), "utf8");
+    const properties = (definition.parameterSchema as {
+      properties?: Readonly<Record<string, unknown>>;
+    }).properties ?? {};
+    expect(Object.keys(properties)).toEqual(["angle", "pivot", "blur", "turns"]);
+    expect(markdown).toContain("旋转速度");
+    expect(markdown).toContain("慢速约 `30°`");
+    expect(markdown).toContain("快速约 `360°`");
+    expect(markdown).toContain("很快约 `720°`");
+  });
 });
 
 describe("existing-01 execution safety", () => {

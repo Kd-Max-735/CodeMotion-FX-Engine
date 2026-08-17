@@ -681,6 +681,47 @@ describe("Group 2 P0 catalog", () => {
     }
   });
 
+  it("keeps default up and down slides vertical without hidden horizontal drift", () => {
+    const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "M02")!;
+    const fixture = realFixture(effect, "test.slide.vertical", 0, 11, 11);
+    const data = new Uint8ClampedArray(11 * 11 * 4);
+    const centerOffset = (5 * 11 + 5) * 4;
+    data[centerOffset] = 255;
+    data[centerOffset + 1] = 144;
+    data[centerOffset + 2] = 72;
+    data[centerOffset + 3] = 255;
+    const source = { ...fixture.source.surface, data };
+    for (const direction of ["up", "down"] as const) {
+      const output = effect.renderPixels(source, {
+        ...effect.defaultPreset,
+        direction,
+        overshoot: 0,
+        vector: [1, 0]
+      }, fixture.options);
+      const occupiedX = new Set<number>();
+      for (let pixel = 0; pixel < output.width * output.height; pixel += 1) {
+        if (output.data[pixel * 4 + 3]! > 0) occupiedX.add(pixel % output.width);
+      }
+      expect([...occupiedX], direction).toEqual([5]);
+    }
+  });
+
+  it("changes rotate-in angular speed through the existing angle and turns controls", () => {
+    const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "M04")!;
+    const fixture = realFixture(effect, "test.rotate-in.speed", 0.25, 48, 32);
+    const slow = effect.renderPixels(fixture.source.surface, {
+      ...effect.defaultPreset,
+      angle: -30,
+      turns: 0
+    }, fixture.options);
+    const fast = effect.renderPixels(fixture.source.surface, {
+      ...effect.defaultPreset,
+      angle: 0,
+      turns: -2
+    }, fixture.options);
+    expect(hashPixelSurface(fast)).not.toBe(hashPixelSurface(slow));
+  });
+
   it("uses elapsed seconds for every declared second/rate parameter in the first 40 effects", async () => {
     const cases = [
       ["M01", "duration", "seconds", { duration: 1, easing: "linear" }],
