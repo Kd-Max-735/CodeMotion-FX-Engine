@@ -611,7 +611,9 @@ describe("server single effect-tool service", () => {
       ["path_morph", "vector_source", "shape", true],
       ["radial_burst", "vector_source", "shape", true],
       ["shape_repeater", "vector_source", "shape", false],
-      ["brush_reveal", "vector_source", "shape", true]
+      ["brush_reveal", "vector_source", "shape", true],
+      ["chalk_stroke", "vector_source", "shape", true],
+      ["blend", "source_layer", "image", false]
     ] as const;
 
     for (const [toolName, primarySlot, sourceKind, animates] of cases) {
@@ -624,7 +626,7 @@ describe("server single effect-tool service", () => {
       expect(Array.isArray(primary)).toBe(false);
       const binding = (primary as { binding: {
         surface: { data: Uint8Array };
-        rasterInput: { source: { kind: string; glyphs?: readonly {
+        rasterInput: { layerId: string; source: { kind: string; glyphs?: readonly {
           coverage: { data: Uint8Array };
         }[] } };
       } }).binding;
@@ -639,6 +641,16 @@ describe("server single effect-tool service", () => {
       if (toolName === "brush_reveal") {
         const brush = inputs.brush_texture as { binding: { coverage: { data: Uint8Array } } };
         expect(new Set(brush.binding.coverage.data).size).toBeGreaterThan(1);
+      }
+      if (toolName === "blend") {
+        const overlay = (inputs.overlay_layer as { binding: {
+          surface: { data: Uint8Array };
+          rasterInput: { layerId: string; source: { kind: string } };
+        } }).binding;
+        expect(overlay.rasterInput.source.kind).toBe("image");
+        expect(overlay.rasterInput.layerId).not.toBe(binding.rasterInput.layerId);
+        expect(new Set(Array.from(overlay.surface.data)
+          .filter((_value, offset) => offset % 4 === 3)).size).toBeGreaterThan(1);
       }
       const renderAt = (time: number) => executeSelectedEffectTool(
         definition, toolName, { type: toolName, data: definition.defaults }, {

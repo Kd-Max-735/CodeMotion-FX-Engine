@@ -61,7 +61,7 @@ const IMAGE_DERIVED_TEXT_TOOLS = new Set([
   "text_path_reveal", "typewriter", "word_explode"
 ]);
 const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
-  "path_trim", "path_morph", "radial_burst", "shape_repeater", "brush_reveal"
+  "path_trim", "path_morph", "radial_burst", "shape_repeater", "brush_reveal", "chalk_stroke"
 ]);
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
@@ -616,6 +616,22 @@ function derivedPreviewPixels(
   return output;
 }
 
+function derivedBlendOverlayPixels(
+  source: Uint8Array,
+  render: EffectToolRenderSettings
+): Uint8Array {
+  const output = new Uint8Array(source);
+  const span = Math.max(1, render.width + render.height - 2);
+  for (let y = 0; y < render.height; y += 1) {
+    for (let x = 0; x < render.width; x += 1) {
+      const alphaOffset = (y * render.width + x) * 4 + 3;
+      const spatialOpacity = 0.25 + (x + y) / span * 0.65;
+      output[alphaOffset] = Math.round(output[alphaOffset]! * spatialOpacity);
+    }
+  }
+  return output;
+}
+
 function previewPath(render: EffectToolRenderSettings) {
   return [
     { x: render.width * 0.12, y: render.height * 0.68 },
@@ -1097,7 +1113,10 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
       }, signal === undefined ? {} : { signal });
       cache?.pixels.set(pixelCacheKey, pixelsPromise);
     }
-    const pixels = derivedPreviewPixels(await pixelsPromise, slot, render);
+    const previewPixels = derivedPreviewPixels(await pixelsPromise, slot, render);
+    const pixels = definition.toolName === "blend" && slot.name === "overlay_layer"
+      ? derivedBlendOverlayPixels(previewPixels, render)
+      : previewPixels;
     if (existing) {
       if (slot.name === "brush_texture") {
         return {
