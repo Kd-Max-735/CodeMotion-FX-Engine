@@ -15,6 +15,7 @@ export interface GlassParams extends JsonObject {
 export interface GlassOutput {
   readonly materialModel: "dielectric_transmission";
   readonly rgba: Rgba;
+  readonly tintRgb: readonly [number, number, number];
   readonly blurSigma: number;
   readonly indexOfRefraction: number;
   readonly borderHighlight: number;
@@ -41,7 +42,7 @@ export const GLASS_DEFINITION: EffectToolDefinition<GlassParams, AuthorizedEffec
   effectId: "fx.material.glass",
   toolName: "glass",
   displayName: "玻璃材质",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "material",
   parameterSchema: {
     $schema: JSON_SCHEMA,
@@ -64,7 +65,7 @@ export const GLASS_DEFINITION: EffectToolDefinition<GlassParams, AuthorizedEffec
     { presetId: "glass.prism", displayName: "棱镜玻璃", params: { blur: 4, refraction: 0.72, tint: "mint", tintStrength: 0.3, border: 3.5, opacity: 0.68 } }
   ],
   inputSlots: [
-    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized image receiving the glass material." },
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized image or video viewed through the glass material." },
     { name: "target_layer", kind: "data", required: true, cardinality: "one", description: "Server-resolved material surface." },
     { name: "backdrop_layer", kind: "data", required: true, cardinality: "one", description: "Server-resolved backdrop sampled behind the glass." }
   ],
@@ -78,7 +79,7 @@ export const GLASS_DEFINITION: EffectToolDefinition<GlassParams, AuthorizedEffec
     const backdrop = parsePixelLayer(singleBinding(context, "backdrop_layer"));
     const tint = TINTS[params.tint];
     const fresnel = (1 - surface.facing) ** 5;
-    const borderHighlight = clamp(fresnel * params.border / 3);
+    const borderHighlight = clamp(params.border / 10 * 0.55 + fresnel * params.border / 3);
     const transmission = 1 - params.opacity;
     const rgba = Object.freeze([
       round(clamp(backdrop.sample[0] * (1 - params.tintStrength) + tint[0] * params.tintStrength + borderHighlight)),
@@ -92,6 +93,7 @@ export const GLASS_DEFINITION: EffectToolDefinition<GlassParams, AuthorizedEffec
       output: Object.freeze({
         materialModel: "dielectric_transmission",
         rgba,
+        tintRgb: tint,
         blurSigma: round(params.blur / 3),
         indexOfRefraction: round(1 + params.refraction * 0.7),
         borderHighlight: round(borderHighlight),

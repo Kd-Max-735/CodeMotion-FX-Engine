@@ -642,16 +642,20 @@ export class EffectToolVideoService {
           const supplementalFrames: Record<string, Uint8Array> = {};
           if (task.prepared?.inputIds !== undefined) {
             const mutableInputs: Record<string, AuthorizedEffectInputs[string]> = { ...task.prepared.inputs };
-            for (const slot of definition.inputSlots.filter((item) => item.kind === "video")) {
+            for (const slot of definition.inputSlots.filter((item) => item.kind === "video"
+              || definition.toolName === "glass" && item.name === "source_image")) {
               const rawId = task.prepared.inputIds[slot.name];
               const assetId = typeof rawId === "string" ? rawId : rawId?.[0];
               if (assetId === undefined) continue;
               let media = preparedMedia.get(assetId);
               if (media === undefined) {
                 media = await this.options.media.resolve(task.owner, assetId, signal);
-                if (media.asset.type !== "video") throw new TypeError(`${slot.name} requires an authorized video asset.`);
+                if (media.asset.type !== "video" && definition.toolName !== "glass") {
+                  throw new TypeError(`${slot.name} requires an authorized video asset.`);
+                }
                 preparedMedia.set(assetId, media);
               }
+              if (media.asset.type !== "video") continue;
               const params = envelope.data as Readonly<Record<string, unknown>>;
               let sampleTime = request.time;
               if (definition.toolName === "video_freeze_frame") {

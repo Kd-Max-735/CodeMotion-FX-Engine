@@ -76,9 +76,9 @@ function uploadAccept(tool: SelectedEffectToolView): string {
 }
 
 function assetMatchesSlot(asset: BrowserAssetSummaryV1, slot: SelectedEffectToolView["inputRequirements"][number]): boolean {
-  if (slot.acceptsUploadedAudio || slot.kind === "audio") return asset.kind === "audio";
-  if (slot.acceptsUploadedVideo || slot.kind === "video") return asset.kind === "video";
-  return slot.acceptsUploadedImage && (asset.kind === "image" || asset.kind === "svg");
+  if (asset.kind === "audio") return slot.acceptsUploadedAudio || slot.kind === "audio";
+  if (asset.kind === "video") return slot.acceptsUploadedVideo || slot.kind === "video";
+  return (asset.kind === "image" || asset.kind === "svg") && slot.acceptsUploadedImage;
 }
 
 export type UploadedAssetBinding = Readonly<{
@@ -122,6 +122,7 @@ export function inputSlotDisplayName(toolName: string, slotName: string): string
   if (toolName === "energy_pulse" && slotName === "source_frame") return "基础图片";
   if (toolName === "fade" && slotName === "source_layer") return "基础图层";
   if (toolName === "fractal" && slotName === "background_image") return "基础图片";
+  if (toolName === "glass" && slotName === "source_image") return "基础图片或视频";
   return slotName;
 }
 

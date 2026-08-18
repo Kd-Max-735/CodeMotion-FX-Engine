@@ -525,6 +525,18 @@ function wrappedFramePixel(
   return [frame[offset]!, frame[offset + 1]!, frame[offset + 2]!, frame[offset + 3]!];
 }
 
+function clampedFramePixel(
+  frame: Uint8Array,
+  request: FrameRequest,
+  x: number,
+  y: number
+): readonly [number, number, number, number] {
+  const px = Math.max(0, Math.min(request.width - 1, Math.round(x)));
+  const py = Math.max(0, Math.min(request.height - 1, Math.round(y)));
+  const offset = (py * request.width + px) * 4;
+  return [frame[offset]!, frame[offset + 1]!, frame[offset + 2]!, frame[offset + 3]!];
+}
+
 function blendChannel(base: number, overlay: number, mode: string): number {
   const a = base / 255;
   const b = overlay / 255;
@@ -1606,20 +1618,40 @@ function batch0708Frame(
       const blur = Math.max(0, Math.min(18, Number(value.blurSigma ?? 4)));
       const refraction = Math.max(0, Number(value.indexOfRefraction ?? 1.2) - 1);
       const border = Math.max(0, Math.min(1, Number(value.borderHighlight ?? 0.2)));
-      const tint = Array.isArray(value.rgba) ? value.rgba as readonly number[] : [1, 1, 1, 1];
+      const transmission = Math.max(0, Math.min(1, Number(value.transmission ?? 0.3)));
+      const tint = Array.isArray(value.tintRgb) ? value.tintRgb as readonly number[]
+        : Array.isArray(value.rgba) ? value.rgba as readonly number[] : [1, 1, 1];
+      const radius = blur * 0.72;
+      const tintMix = 0.04 + (1 - transmission) * 0.08;
+      const sampleOffsets = Object.freeze([
+        [0, 0, 4], [-1, 0, 2], [1, 0, 2], [0, -1, 2], [0, 1, 2],
+        [-0.72, -0.72, 1], [0.72, -0.72, 1], [-0.72, 0.72, 1], [0.72, 0.72, 1]
+      ] as const);
       for (let y = 0; y < request.height; y += 1) for (let x = 0; x < request.width; x += 1) {
-        const wave = Math.sin(y * 0.045 + request.time * 1.8) * refraction * 18;
-        const samples = [-blur, 0, blur].map((offset) => wrappedFramePixel(frame, request, x + wave + offset, y + offset * 0.35));
+        const nx = x / Math.max(1, request.width - 1);
+        const ny = y / Math.max(1, request.height - 1);
+        const opticalX = (Math.sin(ny * 17.3 + Math.sin(nx * 5.7))
+          + Math.sin((nx + ny) * 11.9) * 0.42) * refraction * 3.2;
+        const opticalY = (Math.cos(nx * 15.1 + Math.cos(ny * 6.3))
+          + Math.cos((nx - ny) * 10.7) * 0.38) * refraction * 3.2;
+        const channelSums = [0, 0, 0];
+        let totalWeight = 0;
+        for (const [offsetX, offsetY, weight] of sampleOffsets) {
+          const sample = clampedFramePixel(frame, request,
+            x + opticalX + offsetX * radius, y + opticalY + offsetY * radius);
+          totalWeight += weight;
+          for (let channel = 0; channel < 3; channel += 1) channelSums[channel]! += sample[channel]! * weight;
+        }
+        const edgeDistance = Math.min(x, y, request.width - 1 - x, request.height - 1 - y);
+        const edgeHighlight = Math.exp(-edgeDistance / Math.max(1, 1.5 + border * 5)) * border * 30;
         const target = (y * request.width + x) * 4;
         for (let channel = 0; channel < 3; channel += 1) {
-          const average = samples.reduce((sum, sample) => sum + sample[channel]!, 0) / samples.length;
-          const caustic = Math.max(0, Math.sin(x * 0.024 + y * 0.018 - request.time * 2.2)) * border * 56;
-          output[target + channel] = clampByte(average * 0.78
-            + Number(tint[channel] ?? 1) * 255 * 0.12 + (channel === 2 ? 12 : 4) + caustic);
+          const average = channelSums[channel]! / totalWeight;
+          output[target + channel] = clampByte(average * (1 - tintMix)
+            + Number(tint[channel] ?? 1) * 255 * tintMix + edgeHighlight);
         }
+        output[target + 3] = 255;
       }
-      drawRing(output, request, request.width / 2, request.height / 2,
-        Math.min(request.width, request.height) * 0.43, [236, 252, 255, 255], 0.34 + border * 0.42, 2.2);
     } else if (toolName === "hologram") {
       const emissive = Array.isArray(value.emissive) ? value.emissive as readonly number[] : [0.1, 0.9, 1, 0.7];
       const glitch = Number(value.glitchOffset ?? 0);

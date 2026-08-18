@@ -382,7 +382,8 @@ function acceptsUploadedVideo(
   slot: EffectInputSlotDefinition
 ): boolean {
   if (isServerDerivedInputSlot(definition, slot)) return false;
-  return slot.kind === "video";
+  return slot.kind === "video"
+    || definition.toolName === "glass" && slot.name === "source_image";
 }
 
 function acceptsUploadedAudio(
@@ -1750,7 +1751,8 @@ export class EffectToolService {
         return typeof value === "string" ? [value] : value === undefined ? [] : [...value];
       })[0];
       const blendSourceId = definition.toolName === "blend" ? rawInputIds.source_layer : undefined;
-      const sourceImageId = typeof blendSourceId === "string" ? blendSourceId : declaredSourceImageId;
+      const sourceImageId = definition.toolName === "glass" ? undefined
+        : typeof blendSourceId === "string" ? blendSourceId : declaredSourceImageId;
       const execution = await this.nativeVideos.createPrepared(
         owner,
         definition,
