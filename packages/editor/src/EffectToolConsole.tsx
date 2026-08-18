@@ -107,6 +107,10 @@ export function inputSlotDisplayName(toolName: string, slotName: string): string
     if (slotName === "source_frame") return "当前正确画面";
     if (slotName === "previous_frame") return "错帧来源画面";
   }
+  if (toolName === "displacement_map") {
+    if (slotName === "source_layer") return "基础图片";
+    if (slotName === "displacement_map") return "置换贴图";
+  }
   return slotName;
 }
 
