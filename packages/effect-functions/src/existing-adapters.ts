@@ -105,6 +105,7 @@ const RESOURCE_FIELDS: Readonly<Record<string, readonly string[]>> = Object.free
 });
 
 const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
+  M01: "1.1.0",
   M05: "1.1.0",
   T02: "1.1.0",
   D02: "1.1.0",

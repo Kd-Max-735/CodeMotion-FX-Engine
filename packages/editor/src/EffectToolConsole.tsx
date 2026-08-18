@@ -120,6 +120,7 @@ export function inputSlotDisplayName(toolName: string, slotName: string): string
   if (toolName === "dash_flow" && slotName === "source_image") return "基础图片";
   if (toolName === "electric_arc" && slotName === "source_image") return "基础图片";
   if (toolName === "energy_pulse" && slotName === "source_frame") return "基础图片";
+  if (toolName === "fade" && slotName === "source_layer") return "基础图层";
   return slotName;
 }
 
