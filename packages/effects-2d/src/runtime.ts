@@ -491,7 +491,15 @@ function renderMotion(
         const offset = bounceIndex < bounceCount
           ? Math.sin(localTime * Math.PI) * height * damping ** bounceIndex
           : 0;
-        rgba = transformedSample(source, u, v, (su, sv) => [su, sv + offset]);
+        const contact = bounceIndex < bounceCount
+          ? (1 - Math.sin(localTime * Math.PI)) ** 5 * damping ** bounceIndex : 0;
+        const squash = numberParam(params, "squash", 0.22) * contact;
+        const scaleX = 1 + squash * 0.72;
+        const scaleY = Math.max(0.35, 1 - squash);
+        rgba = transformedSample(source, u, v, (su, sv) => [
+          0.5 + (su - 0.5) / scaleX,
+          1 + (sv + offset - 1) / scaleY
+        ]);
       } else if (blueprint.sourceId === "M06") {
         const amplitude = numberParam(params, "amplitude", 0.16);
         const decay = numberParam(params, "decay", 5);

@@ -102,6 +102,8 @@ const RESOURCE_FIELDS: Readonly<Record<string, readonly string[]>> = Object.free
   "fx.composite.displacementMap": Object.freeze(["map"])
 });
 
+const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({ M05: "1.1.0" });
+
 function slot(
   name: string,
   kind: EffectInputSlotDefinition["kind"],
@@ -238,7 +240,7 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
     effectId: effect.effectId,
     toolName: identity.toolName,
     displayName: identity.displayName,
-    version: "1.0.0",
+    version: ADAPTER_VERSIONS[effect.sourceId] ?? "1.0.0",
     category: effect.category,
     parameterSchema: parameterSchema(effect),
     defaults,

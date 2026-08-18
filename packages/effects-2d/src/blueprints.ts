@@ -139,7 +139,8 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "medium", 7),
   b("M05", "fx.motion.bounce", "Bounce", "motion", "Gravity-shaped repeated bounce.", [
     number("height", 0.25, 0, 2, 0.01, "canvas"), number("gravity", 9.8, 0.1, 40, 0.1, "m/s2"),
-    number("bounces", 3, 1, 12, 1, "count"), number("damping", 0.55, 0, 1, 0.01)
+    number("bounces", 3, 1, 12, 1, "count"), number("damping", 0.55, 0, 1, 0.01),
+    number("squash", 0.22, 0, 0.65, 0.01, "ratio")
   ], "light", 5),
   b("M06", "fx.motion.elastic", "Elastic", "motion", "Damped elastic displacement.", [
     number("amplitude", 0.16, 0, 2, 0.01, "canvas"), number("period", 0.28, 0.02, 4, 0.01, "seconds"),

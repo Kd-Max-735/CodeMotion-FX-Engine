@@ -1,6 +1,6 @@
 # 重力弹跳 `bounce`
 
-让服务端绑定的画面按重力曲线反复弹跳，并逐次衰减高度。对应现有特效 `fx.motion.bounce`。
+让服务端绑定的画面按重力曲线反复弹跳，并在每次落地时产生纵向压缩、横向舒展的挤压形变；高度和形变都会逐次衰减。对应现有特效 `fx.motion.bounce`。
 
 需要调用时只输出以下 JSON，不要附加解释或代码块：
 
@@ -11,7 +11,8 @@
     "height": 0.25,
     "gravity": 9.8,
     "bounces": 3,
-    "damping": 0.55
+    "damping": 0.55,
+    "squash": 0.22
   }
 }
 ```
@@ -22,20 +23,21 @@
 | `gravity` | 是 | 数字 `0.1..40`，步长 `0.1`，默认 `9.8` | 越大起落越快、越有重量感；越小越轻飘 |
 | `bounces` | 是 | 整数 `1..12`，默认 `3` | 用户明确次数时直接采用 |
 | `damping` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0.55` | 每次后续弹跳的保留比例；越小衰减越快 |
+| `squash` | 是 | 数字 `0..0.65`，步长 `0.01`，默认 `0.22` | 落地挤压形变量；坚硬物体取低值，柔软物体取高值 |
 
 ## 参数选择优先级
 
-`height` 决定空间幅度，`gravity` 决定一次弹跳的快慢，`bounces` 决定次数，`damping` 决定后续是否明显。不要仅提高 `bounces` 来表达“弹得高”。
+`height` 决定空间幅度，`gravity` 决定一次弹跳的快慢，`bounces` 决定次数，`damping` 决定后续是否明显，`squash` 决定落地形变。不要仅提高 `bounces` 来表达“弹得高”。
 
 | 用户提示词 | 应输出的 `data` 参数 |
 | --- | --- |
-| 轻轻弹两下 | `height=0.1, gravity=9.8, bounces=2, damping=0.4` |
-| 自然弹跳三次 | `height=0.25, gravity=9.8, bounces=3, damping=0.55` |
-| 像重物一样快速落下 | `height=0.2, gravity=24, bounces=2, damping=0.3` |
-| 轻飘飘地弹很久 | `height=0.35, gravity=3, bounces=8, damping=0.8` |
-| 强烈高弹 | `height=0.8, gravity=12, bounces=5, damping=0.7` |
+| 轻轻弹两下 | `height=0.1, gravity=9.8, bounces=2, damping=0.4, squash=0.12` |
+| 自然弹跳三次 | `height=0.25, gravity=9.8, bounces=3, damping=0.55, squash=0.22` |
+| 像重物一样快速落下 | `height=0.2, gravity=24, bounces=2, damping=0.3, squash=0.16` |
+| 轻飘飘地弹很久 | `height=0.35, gravity=3, bounces=8, damping=0.8, squash=0.28` |
+| 柔软果冻高弹 | `height=0.8, gravity=12, bounces=5, damping=0.7, squash=0.48` |
 
-`height` 推荐值：轻微 `0.08`，中等 `0.25`，明显 `0.5`，强烈 `0.8`。`gravity` 推荐为轻盈 `3`、自然 `9.8`、有力 `18`、沉重 `30`。默认是高度 `0.25` 的三次自然弹跳；`height=0` 是空间位移的中性设置。
+`height` 推荐值：轻微 `0.08`，中等 `0.25`，明显 `0.5`，强烈 `0.8`。`gravity` 推荐为轻盈 `3`、自然 `9.8`、有力 `18`、沉重 `30`。`squash` 推荐为坚硬 `0.1`、自然 `0.22`、柔软 `0.42`。默认是高度 `0.25`、形变 `0.22` 的三次自然弹跳；`height=0` 且 `squash=0` 是中性设置。
 
 素材由服务端绑定。本工具不模拟真实碰撞体、地面形状、刚体交互、声音或粒子，也不要虚构质量、速度或资源字段。
 
