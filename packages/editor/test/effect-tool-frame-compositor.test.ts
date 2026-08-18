@@ -74,6 +74,29 @@ function changedPixelCount(source: Uint8Array, output: Uint8Array): number {
   return count;
 }
 
+function rightMarkerSource(): Uint8Array {
+  const source = new Uint8Array(detailedRequest.width * detailedRequest.height * 4);
+  for (let y = 0; y < detailedRequest.height; y += 1) {
+    for (let x = 0; x < detailedRequest.width; x += 1) {
+      const offset = (y * detailedRequest.width + x) * 4;
+      source[offset] = x >= 70 && x <= 72 ? 255 : 0;
+      source[offset + 3] = 255;
+    }
+  }
+  return source;
+}
+
+function redCentroidX(frame: Uint8Array): number {
+  let weightedX = 0;
+  let weight = 0;
+  for (let y = 0; y < detailedRequest.height; y += 1) for (let x = 0; x < detailedRequest.width; x += 1) {
+    const value = frame[(y * detailedRequest.width + x) * 4]!;
+    weightedX += x * value;
+    weight += value;
+  }
+  return weightedX / weight;
+}
+
 describe("effect tool frame compositor", () => {
   it("composites transparent text effect frames over the uploaded source image", () => {
     const source = Uint8Array.from([10, 20, 30, 255]);
@@ -294,6 +317,21 @@ describe("effect tool frame compositor", () => {
     expect(forward).not.toEqual(backward);
     expect(changedPixelCount(source, forward)).toBeGreaterThan(500);
     expect(changedPixelCount(source, backward)).toBeGreaterThan(500);
+  });
+
+  it("maps dolly zoom forward outward and backward inward", () => {
+    const source = rightMarkerSource();
+    const render = (positionZ: number) => composeEffectToolFrame(metadata({
+      operation: "camera_dolly_zoom",
+      position: { x: 0, y: 0, z: positionZ },
+      rotationDegrees: { x: 0, y: 0, z: 0 },
+      progress: 0.75,
+      verticalFovDegrees: positionZ < 0 ? 65 : 35
+    }), detailedRequest, "dolly_zoom", source, { source_video: source });
+    const forward = render(-6);
+    const backward = render(6);
+    expect(redCentroidX(forward)).toBeGreaterThan(redCentroidX(source));
+    expect(redCentroidX(backward)).toBeLessThan(redCentroidX(source));
   });
 
   it.each([

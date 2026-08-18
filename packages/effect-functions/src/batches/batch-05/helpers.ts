@@ -8,6 +8,7 @@ import type {
 } from "../../types.js";
 
 export type MotionEasing = "linear" | "ease_in" | "ease_out" | "ease_in_out";
+export type CameraTravelDirection = "forward" | "backward" | "forward_then_backward" | "backward_then_forward";
 
 export interface Vector3 extends JsonObject {
   x: number;
@@ -63,6 +64,25 @@ export function effectProgress(
   easing: MotionEasing
 ): number {
   return round(ease(clamp(context.time / duration, 0, 1), easing));
+}
+
+export function cameraTravel(
+  context: ServerEffectRenderContext,
+  duration: number,
+  easing: MotionEasing,
+  direction: CameraTravelDirection
+): Readonly<{ progress: number; displacement: number }> {
+  const timelineProgress = clamp(context.time / duration, 0, 1);
+  const startsForward = direction === "forward" || direction === "forward_then_backward";
+  const sign = startsForward ? -1 : 1;
+  if (direction === "forward" || direction === "backward") {
+    const progress = round(ease(timelineProgress, easing));
+    return Object.freeze({ progress, displacement: round(sign * progress) });
+  }
+  const returning = timelineProgress > 0.5;
+  const legProgress = ease(returning ? (timelineProgress - 0.5) * 2 : timelineProgress * 2, easing);
+  const displacement = sign * (returning ? 1 - legProgress : legProgress);
+  return Object.freeze({ progress: round(timelineProgress), displacement: round(displacement) });
 }
 
 function singleInput(context: ServerEffectRenderContext, slot: string): AuthorizedEffectInput | undefined {

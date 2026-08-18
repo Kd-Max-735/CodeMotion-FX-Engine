@@ -2086,7 +2086,7 @@ function batch05CameraFrame(
         const dy = y - centerY;
         const radial = Math.min(1, Math.hypot(dx, dy) / maximumRadius);
         const subjectHold = smoothUnit(Math.max(0, (radial - 0.18) / 0.82));
-        const localScale = 1 + (forward ? -1 : 1) * strength * subjectHold;
+        const localScale = 1 + (forward ? 1 : -1) * strength * subjectHold;
         const sourceX = centerX + dx / Math.max(0.42, localScale);
         const sourceY = centerY + dy / Math.max(0.42, localScale);
         const offset = (y * request.width + x) * 4;

@@ -1,9 +1,9 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition, ServerEffectRenderContext } from "../../types.js";
-import { CAMERA_BACKEND, cameraOutput, effectProgress, frameOutput, invalid, round, valid, type MotionEasing, type Vector3 } from "./helpers.js";
+import { CAMERA_BACKEND, cameraOutput, cameraTravel, frameOutput, invalid, round, valid, type CameraTravelDirection, type MotionEasing, type Vector3 } from "./helpers.js";
 
 export interface DollyZoomParams extends JsonObject {
-  direction: "forward" | "backward";
+  direction: CameraTravelDirection;
   travelDistance: number;
   initialTargetDistance: number;
   initialFovDegrees: number;
@@ -17,17 +17,16 @@ export function compensatedFovDegrees(initialDistance: number, currentDistance: 
 }
 
 export function renderDollyZoom(context: ServerEffectRenderContext, params: Readonly<DollyZoomParams>) {
-  const progress = effectProgress(context, params.duration, params.easing);
-  const direction = params.direction === "forward" ? -1 : 1;
-  const travelled = params.travelDistance * progress;
-  const currentDistance = params.initialTargetDistance + direction * travelled;
+  const travel = cameraTravel(context, params.duration, params.easing, params.direction);
+  const travelled = params.travelDistance * travel.displacement;
+  const currentDistance = params.initialTargetDistance + travelled;
   const fov = compensatedFovDegrees(params.initialTargetDistance, currentDistance, params.initialFovDegrees);
-  const position: Vector3 = { x: 0, y: 0, z: round(direction * travelled) };
+  const position: Vector3 = { x: 0, y: 0, z: round(travelled) };
   const rotation: Vector3 = { x: 0, y: 0, z: 0 };
   return frameOutput(context, "camera_dolly_zoom", {
     sourceSlot: "source_video",
     targetSlot: "camera_target",
-    ...cameraOutput("camera-dolly-zoom", position, rotation, fov, progress),
+    ...cameraOutput("camera-dolly-zoom", position, rotation, fov, travel.progress),
     targetDistance: round(currentDistance),
     projectionCompensation: "constant-subject-scale"
   });
@@ -37,14 +36,14 @@ export const DOLLY_ZOOM_DEFINITION: EffectToolDefinition<DollyZoomParams> = {
   effectId: "fx.camera.dollyZoom",
   toolName: "dolly_zoom",
   displayName: "推拉变焦镜头",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "camera",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     additionalProperties: false,
     properties: {
-      direction: { type: "string", enum: ["forward", "backward"], default: "forward" },
+      direction: { type: "string", enum: ["forward", "backward", "forward_then_backward", "backward_then_forward"], default: "forward" },
       travelDistance: { type: "number", minimum: 0.1, maximum: 80, default: 4 },
       initialTargetDistance: { type: "number", minimum: 1, maximum: 200, default: 12 },
       initialFovDegrees: { type: "number", minimum: 10, maximum: 100, default: 50 },
@@ -66,7 +65,7 @@ export const DOLLY_ZOOM_DEFINITION: EffectToolDefinition<DollyZoomParams> = {
   fallbackStrategy: { kind: "reject", reason: "Synchronized camera translation and projection compensation are required." },
   performanceGrade: "medium",
   normalizeParams: (params) => ({ ...params, travelDistance: round(params.travelDistance), initialTargetDistance: round(params.initialTargetDistance), initialFovDegrees: round(params.initialFovDegrees), duration: round(params.duration) }),
-  validateParams: (params) => params.direction === "backward" || params.travelDistance < params.initialTargetDistance * 0.9
+  validateParams: (params) => !["forward", "forward_then_backward"].includes(params.direction) || params.travelDistance < params.initialTargetDistance * 0.9
     ? valid()
     : invalid("$.travelDistance", "forward travelDistance must remain below 90% of initialTargetDistance"),
   render: renderDollyZoom

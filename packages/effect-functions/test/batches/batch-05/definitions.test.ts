@@ -382,6 +382,35 @@ describe("batch-05 rendering behavior", () => {
     expect(output.projectionCompensation).toBe("constant-subject-scale");
   });
 
+  it("supports both ordered round trips for dolly and dolly zoom", async () => {
+    const positionAt = async (
+      definition: EffectToolDefinition,
+      direction: "forward_then_backward" | "backward_then_forward",
+      time: number
+    ) => {
+      const result = await executeSelectedEffectTool(
+        definition,
+        definition.toolName,
+        { type: definition.toolName, data: { direction, duration: 4, easing: "linear" } },
+        context(definition, time)
+      );
+      return result.output as JsonObject;
+    };
+    for (const definition of [DOLLY_DEFINITION, DOLLY_ZOOM_DEFINITION]) {
+      expect(schemaProperties(definition).direction!.enum).toEqual([
+        "forward", "backward", "forward_then_backward", "backward_then_forward"
+      ]);
+      const start = await positionAt(definition, "forward_then_backward", 0);
+      const forwardPeak = await positionAt(definition, "forward_then_backward", 2);
+      const returned = await positionAt(definition, "forward_then_backward", 4);
+      const backwardPeak = await positionAt(definition, "backward_then_forward", 2);
+      expect((start.position as JsonObject).z).toBe(0);
+      expect((forwardPeak.position as JsonObject).z).toBeLessThan(0);
+      expect((backwardPeak.position as JsonObject).z).toBeGreaterThan(0);
+      expect((returned.position as JsonObject).z).toBe(0);
+    }
+  });
+
   it("clamps bounded camera moves and keeps handheld sampling seed-stable", async () => {
     const dollyStart = await defaultOutput(DOLLY_DEFINITION, -10);
     const dollyEnd = await defaultOutput(DOLLY_DEFINITION, 999);
