@@ -1021,13 +1021,6 @@ function previewDataBinding(
   if (definition.toolName === "blob_morph" && slot.name === "source_shape") {
     return { points: pixelContour(pixels, render), closed: true };
   }
-  if (definition.toolName === "electric_arc" && slot.name === "terminals") {
-    const contour = pixelContour(pixels, render);
-    return {
-      points: [contour[2]!, contour[10]!, contour[18]!, contour[26]!],
-      closed: false
-    };
-  }
   if (definition.toolName === "lightning_trace" && slot.name === "guide_path") {
     return { points: derivedFeaturePath(pixels, render), closed: false };
   }

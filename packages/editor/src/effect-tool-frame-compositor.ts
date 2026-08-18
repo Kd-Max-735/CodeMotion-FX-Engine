@@ -366,9 +366,12 @@ function pointArray(value: unknown): readonly { readonly x: number; readonly y: 
 
 function pixelPoints(
   points: readonly { readonly x: number; readonly y: number }[],
-  request: FrameRequest
+  request: FrameRequest,
+  coordinateSpace: "auto" | "pixel" = "auto"
 ): readonly (readonly [number, number])[] {
-  return points.map((point) => pointToPixel(point, request.width, request.height));
+  return coordinateSpace === "pixel"
+    ? points.map((point) => [point.x, point.y] as const)
+    : points.map((point) => pointToPixel(point, request.width, request.height));
 }
 
 function drawPolyline(
@@ -378,10 +381,11 @@ function drawPolyline(
   color: readonly number[],
   opacity: number,
   thickness: number,
-  closed = false
+  closed = false,
+  coordinateSpace: "auto" | "pixel" = "auto"
 ): void {
   if (points.length < 2) return;
-  const pixels = pixelPoints(points, request);
+  const pixels = pixelPoints(points, request, coordinateSpace);
   const segmentCount = pixels.length - 1 + (closed ? 1 : 0);
   for (let index = 0; index < segmentCount; index += 1) {
     const from = pixels[index % pixels.length]!;
@@ -395,16 +399,20 @@ function drawElectricPath(
   points: readonly { readonly x: number; readonly y: number }[],
   request: FrameRequest,
   glow: number,
-  intensity = 1
+  intensity = 1,
+  color: readonly number[] = [72, 224, 255, 255],
+  coordinateSpace: "auto" | "pixel" = "auto"
 ): void {
   if (intensity <= 0) return;
   const energy = Math.max(0.2, Math.min(2.4, intensity));
+  const shadow = [Math.round(color[0]! * 0.12), Math.round(color[1]! * 0.18), Math.round(color[2]! * 0.34), 255];
+  const halo = [Math.round(color[0]! * 0.55), Math.round(color[1]! * 0.72), Math.round(color[2]! * 0.95), 255];
   if (glow > 0) {
-    drawPolyline(output, points, request, [8, 24, 76, 255], 0.13 * energy, Math.max(2, glow * 0.72));
-    drawPolyline(output, points, request, [40, 104, 255, 255], 0.24 * energy, Math.max(1.4, glow * 0.38));
+    drawPolyline(output, points, request, shadow, 0.13 * energy, Math.max(2, glow * 0.72), false, coordinateSpace);
+    drawPolyline(output, points, request, halo, 0.24 * energy, Math.max(1.4, glow * 0.38), false, coordinateSpace);
   }
-  drawPolyline(output, points, request, [72, 224, 255, 255], 0.55 * energy, 2.2);
-  drawPolyline(output, points, request, [238, 252, 255, 255], Math.min(1, 0.82 * energy), 0.8);
+  drawPolyline(output, points, request, color, 0.55 * energy, 2.2, false, coordinateSpace);
+  drawPolyline(output, points, request, [238, 252, 255, 255], Math.min(1, 0.82 * energy), 0.8, false, coordinateSpace);
 }
 
 function fillPolygon(
@@ -1840,6 +1848,7 @@ function polishedStructuredFrame(
   if (toolName === "electric_arc") {
     const glow = typeof value.glowRadius === "number" ? Math.max(0, value.glowRadius) : 10;
     const intensity = typeof value.intensity === "number" ? Math.max(0, value.intensity) : 1;
+    const color = hexColor(value.color, [72, 216, 255, 255]);
     if (intensity <= 0) return true;
     const arcs = Array.isArray(value.arcs) ? value.arcs : [];
     let rendered = false;
@@ -1847,11 +1856,11 @@ function polishedStructuredFrame(
       const points = pointArray(record(entry)?.points);
       if (points.length < 2) return;
       rendered = true;
-      drawElectricPath(output, points, request, glow, intensity);
+      drawElectricPath(output, points, request, glow, intensity, color, "pixel");
       for (const endpoint of [points[0]!, points[points.length - 1]!]) {
-        const pixel = pointToPixel(endpoint, request.width, request.height);
+        const pixel = [endpoint.x, endpoint.y] as const;
         drawDisc(output, request.width, request.height, pixel[0], pixel[1], Math.max(5, glow * 0.7),
-          [62, 166, 255, 255], 0.28);
+          color, 0.28);
         drawDisc(output, request.width, request.height, pixel[0], pixel[1], 2.2,
           [245, 255, 255, 255], 0.95);
       }
@@ -1861,10 +1870,10 @@ function polishedStructuredFrame(
       const branch = record(entry);
       const points = pointArray(branch?.points);
       const branchIntensity = typeof branch?.intensity === "number" ? branch.intensity : intensity * 0.65;
-      drawElectricPath(output, points, request, glow * 0.55, branchIntensity * 0.72);
+      drawElectricPath(output, points, request, glow * 0.55, branchIntensity * 0.72, color, "pixel");
       const tip = points[points.length - 1];
       if (tip !== undefined) {
-        const pixel = pointToPixel(tip, request.width, request.height);
+        const pixel = [tip.x, tip.y] as const;
         drawDisc(output, request.width, request.height, pixel[0], pixel[1], 3.4,
           [178, 241, 255, 255], 0.38);
       }
