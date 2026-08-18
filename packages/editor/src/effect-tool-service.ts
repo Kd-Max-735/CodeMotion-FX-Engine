@@ -67,6 +67,15 @@ const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
   "path_trim", "path_morph", "radial_burst", "shape_repeater", "brush_reveal", "chalk_stroke",
   "handwriting", "ink_spread"
 ]);
+const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  blob_morph: Object.freeze(["source_shape"]),
+  bounce: Object.freeze(["source_layer"]),
+  brush_reveal: Object.freeze(["vector_source", "brush_texture"]),
+  chalk_stroke: Object.freeze(["vector_source"]),
+  character_cascade: Object.freeze(["text_raster"]),
+  chart_reveal: Object.freeze(["chart_data"]),
+  dash_flow: Object.freeze(["source_path"])
+});
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
 export interface EffectToolPrincipal {
@@ -330,7 +339,8 @@ function isServerDerivedInputSlot(
   definition: EffectToolDefinition,
   slot: EffectInputSlotDefinition
 ): boolean {
-  return definition.toolName === "depth_of_field" && slot.name === "depth_field"
+  return isSyntheticDerivedInputSlot(definition, slot)
+    || definition.toolName === "depth_of_field" && slot.name === "depth_field"
     || definition.toolName === "paint_on" && slot.name === "stroke_plan"
     || ["dolly", "dolly_zoom", "orbit", "pan_tilt", "parallax_layers"].includes(definition.toolName)
       && slot.name === "camera_target"
@@ -353,7 +363,8 @@ function isSyntheticDerivedInputSlot(
   definition: EffectToolDefinition,
   slot: EffectInputSlotDefinition
 ): boolean {
-  return definition.toolName === "onset_trigger" && slot.name === "target_effect"
+  return PROMPT_ONLY_SERVER_INPUTS[definition.toolName]?.includes(slot.name) === true
+    || definition.toolName === "onset_trigger" && slot.name === "target_effect"
     || definition.toolName === "vocal_reactive_text"
       && (slot.name === "text_layer" || slot.name === "text_font")
     || ["chart_reveal", "live_binding", "number_counter"].includes(definition.toolName)
@@ -365,9 +376,9 @@ function acceptsUploadedImage(
   slot: EffectInputSlotDefinition
 ): boolean {
   if (isServerDerivedInputSlot(definition, slot)) return false;
-  if (definition.toolName === "blend" && slot.name === "source_layer") return true;
-  // Retained as the legacy "user-uploaded visual" flag for catalog compatibility.
-  return slot.kind === "image" || slot.kind === "video";
+  // The current picker accepts visual files for every non-audio required slot;
+  // the server converts data, mask, LUT, depth, model and texture slots after authorization.
+  return slot.kind !== "audio" && slot.kind !== "font";
 }
 
 function acceptsUploadedVideo(
@@ -423,6 +434,18 @@ function requirementView(
     acceptsUploadedVideo: acceptsUploadedVideo(definition, slot),
     acceptsUploadedAudio: acceptsUploadedAudio(definition, slot)
   });
+}
+
+function assertRequiredInputCoverage(definition: EffectToolDefinition): void {
+  const uncovered = definition.inputSlots.filter((slot) => slot.required
+    && !isServerDerivedInputSlot(definition, slot)
+    && !acceptsUploadedImage(definition, slot)
+    && !acceptsUploadedVideo(definition, slot)
+    && !acceptsUploadedAudio(definition, slot));
+  if (uncovered.length > 0) {
+    throw new TypeError(`Required input slots have no upload or server binding route: ${definition.toolName}: ${
+      uncovered.map((slot) => slot.name).join(", ")}.`);
+  }
 }
 
 function toolIdentity(definition: EffectToolDefinition): EffectToolListItem {
@@ -1098,6 +1121,84 @@ function previewDataBinding(
   }
 }
 
+function syntheticPreviewPixels(
+  definition: EffectToolDefinition,
+  render: EffectToolRenderSettings
+): Uint8Array {
+  const output = new Uint8Array(render.width * render.height * 4);
+  let hash = 2166136261;
+  for (const code of definition.toolName) hash = Math.imul(hash ^ code.charCodeAt(0), 16777619);
+  const accent = [72 + (hash >>> 16 & 63), 132 + (hash >>> 8 & 79), 156 + (hash & 79)] as const;
+  for (let y = 0; y < render.height; y += 1) {
+    for (let x = 0; x < render.width; x += 1) {
+      const u = (x + 0.5) / render.width;
+      const v = (y + 0.5) / render.height;
+      const dx = (u - 0.5) / 0.31;
+      const dy = (v - 0.5) / 0.34;
+      const edge = dx * dx + dy * dy;
+      const ripple = Math.sin(Math.atan2(dy, dx) * 5 + hash * 0.000001) * 0.08;
+      if (edge > 1 + ripple) continue;
+      const offset = (y * render.width + x) * 4;
+      const light = Math.max(0, 1 - edge) * 54;
+      output[offset] = Math.min(255, Math.round(accent[0] + light));
+      output[offset + 1] = Math.min(255, Math.round(accent[1] + light));
+      output[offset + 2] = Math.min(255, Math.round(accent[2] + light));
+      output[offset + 3] = 255;
+    }
+  }
+  return output;
+}
+
+function syntheticMedia(
+  definition: EffectToolDefinition,
+  render: EffectToolRenderSettings,
+  byteLength: number
+): VerifiedStoredMedia {
+  const id = `server_generated_${definition.toolName}`;
+  return {
+    asset: {
+      id,
+      type: "image",
+      uri: `media://${id}`,
+      hash: `sha256:${id}`,
+      metadata: { mime: "image/png", width: render.width, height: render.height, codec: "png" }
+    },
+    descriptor: { id, type: "media/image", cacheKey: id, metadata: {} },
+    storedPath: `server-generated:${definition.toolName}`,
+    arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: false, reason: "server-generated" },
+    trustedBytes: byteLength
+  };
+}
+
+function syntheticInputBinding(
+  definition: EffectToolDefinition,
+  slot: EffectInputSlotDefinition,
+  render: EffectToolRenderSettings
+): unknown {
+  const pixels = syntheticPreviewPixels(definition, render);
+  if (definition.primaryBackend.backendId !== EXISTING_BACKEND) {
+    return previewDataBinding(definition, slot, pixels, render);
+  }
+  if (slot.name === "brush_texture") {
+    return {
+      reference: "builtin://codemotion/default-brush",
+      coverage: {
+        width: render.width,
+        height: render.height,
+        data: derivedBrushCoverage(pixels, render),
+        rowOrder: "top-to-bottom"
+      }
+    };
+  }
+  return legacyRasterBinding(
+    definition,
+    slot,
+    syntheticMedia(definition, render, pixels.byteLength),
+    pixels,
+    render
+  );
+}
+
 function legacyRasterBinding(
   definition: EffectToolDefinition,
   slot: EffectInputSlotDefinition,
@@ -1206,7 +1307,7 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
           tenantId: principal.tenantId,
           userId: principal.userId,
           locked: true as const,
-          binding: previewDataBinding(definition, slot, new Uint8Array(render.width * render.height * 4), render)
+          binding: syntheticInputBinding(definition, slot, render)
         });
         continue;
       }
@@ -1374,12 +1475,15 @@ export class EffectToolService {
   }
 
   catalog(): readonly EffectToolCatalogItem[] {
-    return Object.freeze(this.registry.list().map((definition) => Object.freeze({
-      ...toolIdentity(definition),
-      configured: this.configured,
-      inputRequirements: Object.freeze(definition.inputSlots.map((slot) =>
-        requirementView(definition, slot)))
-    })));
+    return Object.freeze(this.registry.list().map((definition) => {
+      assertRequiredInputCoverage(definition);
+      return Object.freeze({
+        ...toolIdentity(definition),
+        configured: this.configured,
+        inputRequirements: Object.freeze(definition.inputSlots.map((slot) =>
+          requirementView(definition, slot)))
+      });
+    }));
   }
 
   nativeTool(): EffectToolListItem & { readonly configured: boolean } {

@@ -385,6 +385,11 @@ export function EffectToolConsole() {
     const value = prompt.trim();
     const requestedTool = selectedTool;
     if (value.length === 0 || busy || requestedTool === undefined) return;
+    const requirement = imageUploadRequirement(requestedTool);
+    if (selectedAssets.length < requirement.min) {
+      setError(`当前特效需要 ${requirement.min} 个素材，请先完成上传。`);
+      return;
+    }
     const inputIds = turnInputIdsForAssets(requestedTool, selectedAssets);
     const startedAt = performance.now();
     setPrompt("");
@@ -503,14 +508,14 @@ export function EffectToolConsole() {
                         onMouseEnter={() => setActiveToolIndex(index)}
                         onClick={() => selectTool(item)}
                       >
-                        <span className="tool-option-copy"><span className="tool-option-heading"><strong>{item.displayName}</strong><b>{item.category}</b></span><small>{item.toolName}</small><em>{item.inputRequirements.length === 0 ? "无需额外输入" : item.inputRequirements.map((slot) => `${slot.required ? "必需" : "可选"} ${slot.kind}`).join(" · ")}</em></span>
+                        <span className="tool-option-copy"><span className="tool-option-heading"><strong>{item.displayName}</strong><b>{item.category}</b></span><small>{item.toolName}</small><em>{imageUploadRequirement(item).max === 0 ? "无需上传素材" : item.inputRequirements.map((slot) => `${slot.required ? "必需" : "可选"} ${slot.kind}`).join(" · ")}</em></span>
                         <span className="tool-option-action">{item.toolName === selectedTool?.toolName && <><Check size={13} />已选择</>}</span>
                       </button>)}
                       {filteredTools.length === 0 && <div className="tool-empty">没有匹配的工具</div>}
                     </div>
                   </div>}
                 </div>
-                <button className="send-button" type="submit" title="发送" disabled={busy || selectedTool === undefined || prompt.trim().length === 0}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}</button>
+                <button className="send-button" type="submit" title="发送" disabled={busy || selectedTool === undefined || prompt.trim().length === 0 || selectedAssetIds.length < uploadRequirement.min}>{busy ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}</button>
               </div>
             </div>
           </form>

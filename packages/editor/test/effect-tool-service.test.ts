@@ -542,6 +542,51 @@ describe("server single effect-tool service", () => {
     })).rejects.toMatchObject({ code: "security" });
   });
 
+  it("exports a prompt-only selected tool without uploaded media", async () => {
+    const provider = new NativeRecordingProvider();
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("bounce")!;
+    provider.turn = {
+      reasoningContent: "用户要求直接生成重力弹跳视频。",
+      content: "准备调用重力弹跳工具。",
+      toolCall: {
+        id: "call-prompt-only-bounce",
+        name: "bounce",
+        arguments: {
+          effectParams: definition.defaults,
+          output: { durationSeconds: 1, generationMode: "fast" }
+        }
+      }
+    };
+    const resolveMedia = vi.fn(async () => { throw new Error("Prompt-only export must not resolve uploaded media."); });
+    const inputs = new TenantMediaEffectToolInputResolver({ resolve: resolveMedia } as never);
+    const video = await testVideoService();
+    const service = new EffectToolService(provider, inputs, EFFECT_TOOL_REGISTRY, video.service);
+
+    const turn = await service.selectedTurn(principal, {
+      toolName: "bounce",
+      prompt: "生成一秒自然的重力弹跳视频",
+      inputIds: {}
+    });
+
+    expect(turn).toMatchObject({
+      kind: "tool_call",
+      tool: { toolName: "bounce" },
+      executionInput: {
+        authorizedInputs: [{ name: "source_layer", kind: "data", count: 1 }]
+      },
+      execution: { toolName: "bounce", status: "queued", video: { frameCount: 15 } }
+    });
+    if (turn.kind !== "tool_call") throw new Error("Expected a tool call.");
+    await waitFor(() => service.videoExecution(principal, turn.execution.id).status === "completed");
+    expect(service.videoExecution(principal, turn.execution.id)).toMatchObject({
+      status: "completed",
+      video: { progress: 1, bytes: 15 }
+    });
+    expect(resolveMedia).not.toHaveBeenCalled();
+    expect(video.decodeFrame).not.toHaveBeenCalled();
+    expect(video.exportFrames).toHaveBeenCalledOnce();
+  });
+
   it("requires every distinct selected-tool image only when Ark chooses the Tool Call", async () => {
     const provider = new NativeRecordingProvider();
     const inputs = new TestInputResolver();
@@ -627,6 +672,51 @@ describe("server single effect-tool service", () => {
       rogue_slot: "asset_abcdefgh"
     }, { time: 0, fps: 30, width: 2, height: 2, seed: 1, quality: "preview" }))
       .rejects.toThrow(/unknown slot/u);
+  });
+
+  it("creates server-owned inputs for every reported prompt-only tool without resolving media", async () => {
+    const resolveMedia = vi.fn(async () => { throw new Error("Prompt-only tools must not resolve uploaded media."); });
+    const resolver = new TenantMediaEffectToolInputResolver({ resolve: resolveMedia } as never);
+    const render = { time: 0.45, fps: 30, width: 96, height: 64, seed: 20260818, quality: "preview" } as const;
+    const toolNames = [
+      "blob_morph", "bounce", "brush_reveal", "chalk_stroke",
+      "character_cascade", "chart_reveal", "dash_flow"
+    ] as const;
+
+    for (const toolName of toolNames) {
+      const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
+      const inputs = await resolver.resolve(principal, definition, {}, render);
+      expect(Object.keys(inputs).sort(), toolName).toEqual(definition.inputSlots.map((slot) => slot.name).sort());
+      const result = await executeSelectedEffectTool(
+        definition,
+        toolName,
+        { type: toolName, data: definition.defaults },
+        {
+          environment: "server",
+          requestId: `prompt-only-${toolName}`,
+          tenantId: principal.tenantId,
+          userId: principal.userId,
+          time: render.time,
+          deltaTime: 1 / render.fps,
+          frame: Math.floor(render.time * render.fps),
+          fps: render.fps,
+          width: render.width,
+          height: render.height,
+          seed: render.seed,
+          quality: render.quality,
+          backend: definition.primaryBackend,
+          inputs
+        }
+      );
+      expect(["frame", "metadata"], toolName).toContain(result.kind);
+      if (result.kind === "frame") {
+        const frame = result.output as { width: number; height: number; data: Uint8Array };
+        expect([frame.width, frame.height, frame.data.length], toolName)
+          .toEqual([render.width, render.height, render.width * render.height * 4]);
+        expect(frame.data.some((value) => value > 0), toolName).toBe(true);
+      }
+    }
+    expect(resolveMedia).not.toHaveBeenCalled();
   });
 
   it("derives structured image previews for the reported existing tools", async () => {
@@ -1027,6 +1117,23 @@ describe("server single effect-tool service", () => {
           { name: "overlay_layer", required: true, acceptsUploadedImage: true }
         ]
       });
+      for (const toolName of [
+        "blob_morph", "bounce", "brush_reveal", "chalk_stroke",
+        "character_cascade", "chart_reveal", "dash_flow"
+      ]) {
+        const promptOnly = catalog.tools.find((item) => item.toolName === toolName)! as {
+          inputRequirements: Array<{
+            required: boolean;
+            acceptsUploadedImage: boolean;
+            acceptsUploadedVideo: boolean;
+            acceptsUploadedAudio: boolean;
+          }>;
+        };
+        expect(promptOnly.inputRequirements.length, toolName).toBeGreaterThan(0);
+        expect(promptOnly.inputRequirements.every((item) => item.required
+          && !item.acceptsUploadedImage && !item.acceptsUploadedVideo && !item.acceptsUploadedAudio), toolName)
+          .toBe(true);
+      }
       expect(catalog.tools.find((item) => item.toolName === "dolly_zoom")).toMatchObject({
         inputRequirements: [
           { name: "source_video", required: true, acceptsUploadedImage: true },

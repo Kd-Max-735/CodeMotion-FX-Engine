@@ -106,6 +106,24 @@ describe("120-tool selector helpers", () => {
     });
   });
 
+  it.each([
+    ["blob_morph", [["source_shape", "data"]]],
+    ["bounce", [["source_layer", "data"]]],
+    ["brush_reveal", [["vector_source", "data"], ["brush_texture", "texture"]]],
+    ["chalk_stroke", [["vector_source", "data"]]],
+    ["character_cascade", [["text_raster", "data"]]],
+    ["chart_reveal", [["chart_data", "data"]]],
+    ["dash_flow", [["source_path", "data"]]]
+  ] as const)("requires no upload for prompt-only tool %s", (toolName, slots) => {
+    const promptOnly = tool({
+      toolName,
+      inputRequirements: slots.map(([name, kind]) => input(name, kind, true, false))
+    });
+
+    expect(imageUploadRequirement(promptOnly)).toEqual({ min: 0, max: 0 });
+    expect(turnInputIds(promptOnly, [])).toEqual({});
+  });
+
   it("binds one uploaded video without counting server-derived analysis as a second asset", () => {
     const smartCrop = tool({
       toolName: "smart_crop_animate",
