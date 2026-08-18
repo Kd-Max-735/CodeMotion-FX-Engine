@@ -555,8 +555,6 @@ export class EffectToolVideoService {
         task.view.video.fps
       );
       let sourcePixels: Uint8Array | undefined;
-      const preparedInputFrames = task.prepared === undefined
-        ? undefined : authorizedInputFrameData(task.prepared.inputs);
       const preparedMedia = new Map<string, VerifiedStoredMedia>();
       if (task.prepared === undefined) {
         if (initialMedia === undefined || task.sourceAssetIds.length !== 1) {
@@ -726,7 +724,7 @@ export class EffectToolVideoService {
             request,
             definition.toolName,
             frameSource,
-            preparedInputFrames
+            frameInputs === undefined ? undefined : authorizedInputFrameData(frameInputs)
           );
         }
       });

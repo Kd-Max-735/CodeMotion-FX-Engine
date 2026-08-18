@@ -587,6 +587,77 @@ describe("server single effect-tool service", () => {
     expect(video.exportFrames).toHaveBeenCalledOnce();
   });
 
+  it("composes every camera frame from the current decoded video frame", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "cmfx-dolly-video-"));
+    const assetId = "asset_videoabcdefgh";
+    const media: VerifiedStoredMedia = {
+      asset: {
+        id: assetId,
+        type: "video",
+        uri: "media://source.mp4",
+        hash: "sha256:test-video",
+        metadata: { mime: "video/mp4", width: 2, height: 2, duration: 1, codec: "h264" }
+      },
+      descriptor: { id: assetId, type: "media/video", cacheKey: "test-video", metadata: {} },
+      storedPath: join(outputRoot, "source.mp4"),
+      arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: false, reason: "test" },
+      trustedBytes: 256
+    };
+    const red = new Uint8Array([255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255]);
+    const green = new Uint8Array([0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255]);
+    const rendered: Uint8Array[] = [];
+    const exportFrames = vi.fn(async (options: ExportOptions) => {
+      for (const [frame, time] of [[0, 0], [1, 0.5]] as const) {
+        rendered.push(await options.renderFrame({ frame, time, deltaTime: 0.5, fps: 2, width: 2, height: 2 }, options.signal));
+      }
+      await writeFile(options.outputPath, "test-mp4-output");
+      return { outputPath: options.outputPath, frameCount: 2, inspections: [], encoder: "libx264" };
+    });
+    const decodeFrame = vi.fn(async (_media: VerifiedStoredMedia, request: { time: number }) =>
+      request.time < 0.25 ? red : green);
+    const service = new EffectToolVideoService({
+      media: { resolve: vi.fn(async () => media) },
+      outputRoot,
+      exportFrames: exportFrames as never,
+      decodeFrame: decodeFrame as never,
+      durationSeconds: 1,
+      fps: 2,
+      gpuSampler: vi.fn(async () => ({ name: "Test GPU", memoryUsedMiB: 1, memoryTotalMiB: 2, utilizationPercent: 1 }))
+    });
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("dolly")!;
+    const inputs: AuthorizedEffectInputs = Object.freeze({
+      source_video: Object.freeze({
+        slot: "source_video",
+        kind: "video" as const,
+        tenantId: principal.tenantId,
+        userId: principal.userId,
+        locked: true as const,
+        binding: { version: "rgba8-frame-v1", width: 2, height: 2, data: red }
+      })
+    });
+    const task = await service.createPrepared(
+      principal,
+      definition,
+      { type: "dolly", data: definition.defaults },
+      inputs,
+      [assetId],
+      7,
+      1,
+      2,
+      2,
+      undefined,
+      2,
+      { source_video: assetId }
+    );
+    await waitFor(() => service.get(principal, task.id).status === "completed");
+
+    expect(decodeFrame).toHaveBeenCalledTimes(2);
+    expect(rendered).toHaveLength(2);
+    expect(rendered[0]![0]).toBeGreaterThan(rendered[0]![1]!);
+    expect(rendered[1]![1]).toBeGreaterThan(rendered[1]![0]!);
+    await service.close();
+  });
+
   it("requires every distinct selected-tool image only when Ark chooses the Tool Call", async () => {
     const provider = new NativeRecordingProvider();
     const inputs = new TestInputResolver();
