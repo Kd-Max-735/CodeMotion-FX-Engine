@@ -26,7 +26,7 @@ export const AURA_FIELD_DEFINITION: Batch02Definition<AuraFieldParams> = {
   }, defaults,
   presets: [
     { presetId: "aura-field.portrait", displayName: "人像柔光", params: { ...defaults, intensity: 0.35, radius: 0.55, softness: 0.8, hue: 32, secondaryHue: 315 } },
-    { presetId: "aura-field.neon", displayName: "霓虹光环", params: { ...defaults, intensity: 0.82, radius: 0.3, softness: 0.25, hue: 300, secondaryHue: 185, pulseRate: 1.1 } },
+    { presetId: "aura-field.neon", displayName: "霓虹光环", params: { ...defaults, intensity: 0.94, radius: 0.42, softness: 0.48, hue: 300, secondaryHue: 185, pulseRate: 1.1 } },
     { presetId: "aura-field.wide", displayName: "宽幅环境光", params: { ...defaults, centerY: 0.65, radius: 0.75, ellipticity: 2.2, intensity: 0.48 } }
   ],
   inputSlots: [SOURCE_FRAME_SLOT], primaryBackend: CPU_BACKEND, fallbackStrategy: REJECT_FALLBACK, performanceGrade: "medium",
@@ -35,7 +35,7 @@ export const AURA_FIELD_DEFINITION: Batch02Definition<AuraFieldParams> = {
   render(context, params) {
     const frame = frameInput(context); const output: number[] = [];
     const phase = context.time * params.pulseRate * Math.PI * 2;
-    const pulse = params.pulseRate === 0 ? 1 : 0.7 + 0.3 * Math.sin(phase);
+    const pulse = params.pulseRate === 0 ? 1 : 0.85 + 0.15 * Math.sin(phase);
     const drift = params.pulseRate === 0 ? 0 : params.radius * 0.12;
     const centerX = params.centerX + Math.cos(phase * 0.73) * drift;
     const centerY = params.centerY + Math.sin(phase * 0.61) * drift / Math.max(0.5, params.ellipticity);
@@ -59,12 +59,12 @@ export const AURA_FIELD_DEFINITION: Batch02Definition<AuraFieldParams> = {
       const colorMix = 0.5 + 0.5 * Math.sin(angle);
       const hue = params.hue + hueDelta * colorMix;
       const color = hsvToRgb(hue, 0.68, clamp(0.5 + ring * 0.36 + secondaryField * 0.24));
-      const amount = clamp((field * 0.52 + ring * 0.3 + secondaryField * 0.38) * params.intensity * pulse);
+      const amount = clamp((field * 0.62 + ring * 0.38 + secondaryField * 0.44) * params.intensity * pulse);
       const base = pixelAt(frame, x, y);
       output.push(
-        byte(base[0]! + (255 - base[0]!) * color[0]! / 255 * amount * 0.78),
-        byte(base[1]! + (255 - base[1]!) * color[1]! / 255 * amount * 0.78),
-        byte(base[2]! + (255 - base[2]!) * color[2]! / 255 * amount * 0.78),
+        byte(base[0]! + (255 - base[0]!) * color[0]! / 255 * amount * 0.92),
+        byte(base[1]! + (255 - base[1]!) * color[1]! / 255 * amount * 0.92),
+        byte(base[2]! + (255 - base[2]!) * color[2]! / 255 * amount * 0.92),
         base[3]!
       );
     }

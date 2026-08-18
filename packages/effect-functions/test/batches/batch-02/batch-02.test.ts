@@ -364,6 +364,26 @@ describe("batch-02 definitions", () => {
     expect(center[0]).toBeGreaterThan(center[1]!);
   });
 
+  it("makes the documented strong aura visibly stronger than the default field", async () => {
+    const lightAura = await render(AURA_FIELD_DEFINITION, {
+      ...AURA_FIELD_DEFINITION.defaults,
+      intensity: 0.25,
+      radius: 0.42,
+      softness: 0.48,
+      pulseRate: 0
+    });
+    const strongAura = await render(AURA_FIELD_DEFINITION, {
+      ...AURA_FIELD_DEFINITION.defaults,
+      intensity: 0.94,
+      radius: 0.42,
+      softness: 0.48,
+      pulseRate: 0
+    });
+    const meanRgbDelta = (frame: RgbaFrame): number => frame.data.reduce((sum, value, index) =>
+      index % 4 === 3 ? sum : sum + Math.abs(value - source.data[index]!), 0) / (width * height * 3);
+    expect(meanRgbDelta(strongAura)).toBeGreaterThan(meanRgbDelta(lightAura) * 2.5);
+  });
+
   it("applies a real color transform and keeps its all-neutral grade unchanged", async () => {
     const neutral = await render(COLOR_GRADE_DEFINITION);
     expect(neutral.data).toEqual(source.data);
