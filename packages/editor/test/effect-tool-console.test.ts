@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SelectedEffectToolView } from "../src/effect-tool-client.js";
 import {
+  assetBindingsForAssets,
   filterEffectTools,
   imageUploadRequirement,
+  inputSlotDisplayName,
   reconcileSelectedAssetIds,
   turnInputIds,
   turnInputIdsForAssets
@@ -103,6 +105,31 @@ describe("120-tool selector helpers", () => {
     expect(turnInputIds(blend, assetIds)).toEqual({
       source_layer: assetIds[0],
       overlay_layer: assetIds[1]
+    });
+  });
+
+  it("shows and reorders same-kind datamosh input roles without putting them in model data", () => {
+    const datamosh = tool({
+      toolName: "datamosh",
+      inputRequirements: [input("source_frame", "image"), input("previous_frame", "image")]
+    });
+    const asset = (assetId: string) => ({
+      assetId, kind: "image", displayName: assetId, mime: "image/png", codec: "png", bytes: 100,
+      uploadedAt: new Date(0).toISOString(), allowedPurposes: ["reference-image"]
+    }) as BrowserAssetSummaryV1;
+    const current = asset("asset_current0000");
+    const previous = asset("asset_previous000");
+
+    expect(assetBindingsForAssets(datamosh, [current, previous]).map(({ asset: item, slot }) => ({
+      assetId: item.assetId,
+      role: inputSlotDisplayName(datamosh.toolName, slot.name)
+    }))).toEqual([
+      { assetId: current.assetId, role: "当前正确画面" },
+      { assetId: previous.assetId, role: "错帧来源画面" }
+    ]);
+    expect(turnInputIdsForAssets(datamosh, [previous, current])).toEqual({
+      source_frame: previous.assetId,
+      previous_frame: current.assetId
     });
   });
 

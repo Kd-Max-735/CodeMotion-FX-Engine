@@ -1,5 +1,5 @@
 import {
-  Check, ChevronDown, Clock3, Copy, Download, FileAudio, FileImage, LoaderCircle, Menu, Paperclip,
+  ArrowLeft, ArrowRight, Check, ChevronDown, Clock3, Copy, Download, FileAudio, FileImage, LoaderCircle, Menu, Paperclip,
   Plus, Search, Send, Settings, Square, Video, Wrench, X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
@@ -81,6 +81,35 @@ function assetMatchesSlot(asset: BrowserAssetSummaryV1, slot: SelectedEffectTool
   return slot.acceptsUploadedImage && (asset.kind === "image" || asset.kind === "svg");
 }
 
+export type UploadedAssetBinding = Readonly<{
+  asset: BrowserAssetSummaryV1;
+  slot: SelectedEffectToolView["inputRequirements"][number];
+}>;
+
+export function assetBindingsForAssets(
+  tool: SelectedEffectToolView,
+  assets: readonly BrowserAssetSummaryV1[]
+): readonly UploadedAssetBinding[] {
+  const remaining = [...assets];
+  const bindings: UploadedAssetBinding[] = [];
+  for (const slot of uploadSlots(tool)) {
+    const matches = remaining.filter((asset) => assetMatchesSlot(asset, slot));
+    const count = slot.cardinality === "many" ? Math.min(MAX_MANY_IMAGES, matches.length) : Math.min(1, matches.length);
+    const selected = matches.slice(0, count);
+    bindings.push(...selected.map((asset) => Object.freeze({ asset, slot })));
+    for (const asset of selected) remaining.splice(remaining.findIndex((item) => item.assetId === asset.assetId), 1);
+  }
+  return Object.freeze(bindings);
+}
+
+export function inputSlotDisplayName(toolName: string, slotName: string): string {
+  if (toolName === "datamosh") {
+    if (slotName === "source_frame") return "当前正确画面";
+    if (slotName === "previous_frame") return "错帧来源画面";
+  }
+  return slotName;
+}
+
 function compatibleAssetIds(
   tool: SelectedEffectToolView,
   assets: readonly BrowserAssetSummaryV1[]
@@ -140,16 +169,7 @@ export function turnInputIdsForAssets(
   tool: SelectedEffectToolView,
   assets: readonly BrowserAssetSummaryV1[]
 ): Readonly<Record<string, string | readonly string[]>> {
-  const slots = uploadSlots(tool);
-  const remaining = [...assets];
-  const ordered: string[] = [];
-  for (const slot of slots) {
-    const matches = remaining.filter((asset) => assetMatchesSlot(asset, slot));
-    const count = slot.cardinality === "many" ? Math.min(MAX_MANY_IMAGES, matches.length) : Math.min(1, matches.length);
-    const selected = matches.slice(0, count);
-    ordered.push(...selected.map((asset) => asset.assetId));
-    for (const asset of selected) remaining.splice(remaining.findIndex((item) => item.assetId === asset.assetId), 1);
-  }
+  const ordered = assetBindingsForAssets(tool, assets).map(({ asset }) => asset.assetId);
   return turnInputIds(tool, ordered);
 }
 
@@ -290,6 +310,7 @@ export function EffectToolConsole() {
     const asset = imageAssets.find((item) => item.assetId === assetId);
     return asset === undefined ? [] : [asset];
   });
+  const selectedAssetBindings = selectedTool === undefined ? [] : assetBindingsForAssets(selectedTool, selectedAssets);
   const uploadRequirement = selectedTool === undefined
     ? { min: 0, max: 0 }
     : imageUploadRequirement(selectedTool);
@@ -420,6 +441,17 @@ export function EffectToolConsole() {
 
   const reset = () => { setEntries([]); setPrompt(""); setError(undefined); };
 
+  const moveSelectedAsset = (assetId: string, offset: -1 | 1) => {
+    setSelectedAssetIds((current) => {
+      const index = current.indexOf(assetId);
+      const target = index + offset;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      return next;
+    });
+  };
+
   const selectTool = (tool: SelectedEffectToolView) => {
     setSelectedToolName(tool.toolName);
     setSelectedAssetIds((current) => reconcileSelectedAssetIds(
@@ -472,7 +504,7 @@ export function EffectToolConsole() {
           {entries.length === 0 && !loading && <div className="empty-state"><div className="empty-mark"><span>›</span><i>_</i></div><h1>想要制作什么视频特效？</h1><p>选择一个工具并描述需求。服务器只会向 Doubao 提供该工具的参数定义。</p><div className="starter-prompts"><button type="button" onClick={() => setPrompt("让效果更明显一些，生成 5 秒视频")}>生成所选特效</button><button type="button" onClick={() => setPrompt("这个工具有哪些参数？")}>询问参数</button></div></div>}
           {loading && <div className="empty-state compact"><LoaderCircle className="spin" size={23} /><p>正在连接服务器</p></div>}
           {entries.map((entry) => entry.role === "user" ? (
-            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>{entry.tool.displayName} · {entry.tool.toolName}</span></div>{entry.assets && <div className="user-assets">{entry.assets.map((asset) => <span className="user-file" key={asset.assetId}>{asset.kind === "audio" ? <FileAudio size={13} /> : asset.kind === "video" ? <Video size={13} /> : <FileImage size={13} />}{asset.displayName}</span>)}</div>}</div></article>
+            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>{entry.tool.displayName} · {entry.tool.toolName}</span></div>{entry.assets && <div className="user-assets">{assetBindingsForAssets(entry.tool, entry.assets).map(({ asset, slot }) => <span className="user-file" key={asset.assetId}>{asset.kind === "audio" ? <FileAudio size={13} /> : asset.kind === "video" ? <Video size={13} /> : <FileImage size={13} />}<b>{inputSlotDisplayName(entry.tool.toolName, slot.name)}</b>{asset.displayName}</span>)}</div>}</div></article>
           ) : (
             <article key={entry.id} className="message agent-message"><div className="agent-avatar">AE</div><div className="agent-content"><div className="turn-duration"><Clock3 size={13} /><span>{entry.tool.displayName} · 已思考 <b>{formatElapsed(entry.elapsedMs)}</b></span></div>{entry.showThinking && entry.turn.reasoningContent && <details className="process-section" open><summary><span className="section-icon thinking-icon" /><strong>深度思考</strong><span className="process-summary">理解需求并判断是否调用 {entry.tool.toolName}</span><ChevronDown className="process-chevron" size={13} /></summary><div className="process-timeline"><div className="thinking-row completed"><span className="thinking-dot" /><p>{entry.turn.reasoningContent}</p><small>完成</small></div></div></details>}{entry.turn.kind === "tool_call" && <ToolResult turn={entry.turn} tool={entry.tool} />}{entry.turn.content && <section className="final-response"><div className="section-heading"><span className="section-icon final-icon"><Check size={12} /></span><strong>{entry.turn.kind === "tool_call" ? "最终回复" : "回复"}</strong></div><div className="assistant-text markdown-body"><p>{entry.turn.content}</p></div></section>}</div></article>
           ))}
@@ -483,7 +515,14 @@ export function EffectToolConsole() {
           <form className="composer-shell" onSubmit={(event) => void submit(event)}>
             <div className="selected-tool-tray">
               {selectedTool && <span><Wrench size={12} /><b>{selectedTool.displayName}</b><code>{selectedTool.toolName}</code></span>}
-              {selectedAssets.map((asset) => <button type="button" title="移除素材" key={asset.assetId} onClick={() => setSelectedAssetIds((current) => current.filter((assetId) => assetId !== asset.assetId))}>{asset.kind === "audio" ? <FileAudio size={12} /> : asset.kind === "video" ? <Video size={12} /> : <FileImage size={12} />}{asset.displayName}<X size={11} /></button>)}
+              {selectedAssetBindings.map(({ asset, slot }, index) => <div className="asset-binding" key={`${slot.name}:${asset.assetId}`}>
+                <span className="asset-role">{inputSlotDisplayName(selectedTool?.toolName ?? "", slot.name)}</span>
+                {asset.kind === "audio" ? <FileAudio size={12} /> : asset.kind === "video" ? <Video size={12} /> : <FileImage size={12} />}
+                <span className="asset-name">{asset.displayName}</span>
+                {selectedAssetBindings.length > 1 && <button type="button" title="向前移动素材" aria-label={`向前移动 ${asset.displayName}`} disabled={index === 0} onClick={() => moveSelectedAsset(asset.assetId, -1)}><ArrowLeft size={11} /></button>}
+                {selectedAssetBindings.length > 1 && <button type="button" title="向后移动素材" aria-label={`向后移动 ${asset.displayName}`} disabled={index === selectedAssetBindings.length - 1} onClick={() => moveSelectedAsset(asset.assetId, 1)}><ArrowRight size={11} /></button>}
+                <button type="button" title="移除素材" aria-label={`移除 ${asset.displayName}`} onClick={() => setSelectedAssetIds((current) => current.filter((assetId) => assetId !== asset.assetId))}><X size={11} /></button>
+              </div>)}
               {uploadRequirement.max > 0 && <span className="asset-count">素材 {selectedAssetIds.length}/{uploadRequirement.max}</span>}
             </div>
             <textarea rows={1} maxLength={4_000} placeholder="描述视频特效需求" value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={onComposerKeyDown} />

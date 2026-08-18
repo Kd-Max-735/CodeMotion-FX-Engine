@@ -158,6 +158,13 @@ h1, h2, p { margin: 0; }
 .ae-agent .selected-tool-tray > span code { color: #679080; font-size: 8px; }
 .ae-agent .selected-tool-tray > button { overflow: hidden; border-color: var(--ae-line); background: #fafafa; color: var(--ae-muted); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .ae-agent .selected-tool-tray > .asset-count { border-color: var(--ae-line); background: #fafafa; color: var(--ae-muted); font-variant-numeric: tabular-nums; }
+.ae-agent .asset-binding { min-width: 0; max-width: 100%; min-height: 26px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 7px; border: 1px solid var(--ae-line); border-radius: 6px; background: #fafafa; color: var(--ae-muted); font-size: 9px; }
+.ae-agent .asset-binding .asset-role { flex: 0 0 auto; padding-right: 5px; border-right: 1px solid var(--ae-line); color: #28705a; font-weight: 700; }
+.ae-agent .asset-binding .asset-name { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ae-agent .asset-binding button { width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #72767a; cursor: pointer; }
+.ae-agent .asset-binding button:hover:not(:disabled) { background: #e9eceb; color: #303336; }
+.ae-agent .asset-binding button:disabled { opacity: .25; cursor: default; }
+.ae-agent .user-file b { color: #315f51; font-size: 8px; }
 .ae-agent .composer-shell textarea { width: 100%; min-height: 50px; max-height: 140px; padding: 13px 16px 8px; resize: none; overflow-y: auto; border: 0; outline: 0; background: transparent; color: var(--ae-ink); font-size: 13px; line-height: 1.55; }
 .ae-agent .composer-shell textarea::placeholder { color: #a0a3a7; }
 .ae-agent .composer-toolbar { min-height: 46px; display: flex; align-items: center; gap: 8px; padding: 6px 9px 8px; }
