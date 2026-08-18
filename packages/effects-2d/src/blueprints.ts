@@ -236,7 +236,8 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "heavy", 13),
   b("L04", "fx.light.energyPulse", "Energy Pulse", "light", "Radial energy rings.", [
     vector("center", [0.5, 0.5]), number("radius", 0.34, 0, 2, 0.01, "canvas"),
-    number("falloff", 0.2, 0.001, 1, 0.005), number("rings", 4, 1, 32, 1, "count", "medium")
+    number("falloff", 0.2, 0.001, 1, 0.005), number("rings", 4, 1, 32, 1, "count", "medium"),
+    number("duration", 3, 0.1, 60, 0.1, "seconds")
   ], "medium", 9),
 
   b("P01", "fx.post.gaussianBlur", "Gaussian Blur", "post", "Separable Gaussian approximation.", [

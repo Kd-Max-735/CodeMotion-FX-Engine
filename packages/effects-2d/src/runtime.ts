@@ -1023,7 +1023,7 @@ function renderLight(
     for (let x = 0; x < source.width; x += 1) {
       const u = source.width === 1 ? 0.5 : x / (source.width - 1);
       const v = source.height === 1 ? 0.5 : y / (source.height - 1);
-      const base = read(source, x, y);
+      let base = read(source, x, y);
       let light = 0;
       let color = neon;
       if (blueprint.sourceId === "L01") {
@@ -1070,15 +1070,31 @@ function renderLight(
         const radius = numberParam(params, "radius", 0.34);
         const rings = Math.max(1, Math.round(numberParam(params, "rings", 4)));
         const falloff = numberParam(params, "falloff", 0.2);
-        const pulseTime = effectProgress(blueprint, params, options) * rings;
+        const duration = Math.max(0.1, numberParam(params, "duration", 3));
+        const pulseProgress = clamp(seconds / duration);
+        const pulseLifetime = 2 / (rings + 1);
+        let refraction = 0;
         for (let ringIndex = 0; ringIndex < rings; ringIndex += 1) {
-          const phase = (pulseTime - ringIndex) / 1.4;
+          const emissionStart = ringIndex / (rings + 1);
+          const phase = (pulseProgress - emissionStart) / pulseLifetime;
           if (phase < 0 || phase > 1) continue;
           const ringRadius = radius * phase;
-          const envelope = Math.sin(Math.PI * phase) ** 0.35;
-          light += Math.exp(
-            -Math.abs(distance - ringRadius) * (8 / Math.max(0.001, falloff))
-          ) * envelope;
+          const envelope = Math.sin(Math.PI * phase) ** 0.42;
+          const crestWidth = 0.003 + falloff * 0.055;
+          const delta = distance - ringRadius;
+          const crest = Math.exp(-(delta * delta) / (2 * crestWidth * crestWidth));
+          const glow = Math.exp(-Math.abs(delta) / (0.012 + falloff * 0.14));
+          const wakeDelta = distance - ringRadius * 0.78;
+          const wakeWidth = crestWidth * 2.5;
+          const wake = Math.exp(-(wakeDelta * wakeDelta) / (2 * wakeWidth * wakeWidth));
+          const core = Math.exp(-distance / (0.018 + falloff * 0.09)) * Math.exp(-phase * 5.5);
+          light += (crest * 1.15 + glow * 0.38 + wake * 0.22 + core * 0.9) * envelope;
+          refraction += Math.sign(delta) * crest * envelope * (0.0015 + falloff * 0.007);
+        }
+        if (distance > 0.0001 && Math.abs(refraction) > 0.00001) {
+          const sourceU = u - (u - center[0]) / distance * refraction;
+          const sourceV = v - (v - center[1]) / distance * refraction;
+          base = read(source, sourceU * (source.width - 1), sourceV * (source.height - 1));
         }
         light = clamp(light);
         color = [0.55, 0.3, 1];
