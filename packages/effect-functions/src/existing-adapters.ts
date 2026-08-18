@@ -102,7 +102,11 @@ const RESOURCE_FIELDS: Readonly<Record<string, readonly string[]>> = Object.free
   "fx.composite.displacementMap": Object.freeze(["map"])
 });
 
-const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({ M05: "1.1.0", D02: "1.1.0" });
+const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
+  M05: "1.1.0",
+  D02: "1.1.0",
+  D04: "1.1.0"
+});
 
 function slot(
   name: string,

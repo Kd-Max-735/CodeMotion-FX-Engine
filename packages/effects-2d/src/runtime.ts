@@ -864,8 +864,13 @@ function coverageForVector(
     return smoothstep(radius + noise, radius - (0.02 + absorption * 0.14), distance)
       * (0.55 + absorption * 0.45);
   }
-  const grain = effectRandom(options, "D04.grain", Math.floor(u * 90), Math.floor(v * 90), 1, 0, false);
-  const stroke = smoothstep(0.12, 0.005, inputSample.distance);
+  const grain = numberParam(params, "grain", 0.55);
+  const strokeWidth = numberParam(params, "strokeWidth", 0.025);
+  const fineGrain = effectRandom(options, "D04.grain-fine",
+    Math.floor(u * 220), Math.floor(v * 220), 1, 0, false);
+  const coarseGrain = effectRandom(options, "D04.grain-coarse",
+    Math.floor(u * 58), Math.floor(v * 58), 1, 11, false);
+  const stroke = smoothstep(strokeWidth * 1.9, strokeWidth * 0.18, inputSample.distance);
   const scatter = numberParam(params, "scatter", 0.18);
   const opacity = numberParam(params, "opacity", 0.85);
   const scattered = effectRandom(
@@ -877,8 +882,14 @@ function coverageForVector(
     17,
     false
   );
-  return u <= p + (scattered - 0.5) * scatter
-    ? stroke * (grain > numberParam(params, "grain", 0.55) * 0.45 ? 1 : 0.25) * opacity : 0;
+  const dustEnvelope = Math.max(0,
+    smoothstep(strokeWidth * (4 + scatter * 8), strokeWidth * 1.4, inputSample.distance) - stroke);
+  const pigment = fineGrain > grain * 0.62
+    ? 1 : fineGrain > grain * 0.3 ? 0.5 : 0.12;
+  const chalkBody = stroke * pigment * (0.72 + coarseGrain * 0.28);
+  const dust = dustEnvelope * (scattered > 1 - scatter * 0.72 ? 0.7 : 0.06);
+  return u <= p + (scattered - 0.5) * scatter * 0.18
+    ? clamp(chalkBody + dust) * opacity : 0;
 }
 
 function renderVectorOrDraw(
@@ -978,7 +989,11 @@ function renderVectorOrDraw(
       const v = source.height === 1 ? 0.5 : y / (source.height - 1);
       const sourceColor = read(source, x, y);
       const coverage = coverageForVector(blueprint.sourceId, u, v, params, options, geometry);
-      const ink: Rgba = isDraw ? [0.96, 0.88, 0.7, coverage] : [0.25, 0.82, 1, coverage];
+      const chalkColor = blueprint.sourceId === "D04"
+        ? parseHex(stringParam(params, "color", "#f4f0df")) : undefined;
+      const ink: Rgba = chalkColor
+        ? [chalkColor[0], chalkColor[1], chalkColor[2], coverage]
+        : isDraw ? [0.96, 0.88, 0.7, coverage] : [0.25, 0.82, 1, coverage];
       write(output, x, y, mixColor(sourceColor, ink, coverage * (isDraw ? 0.9 : 0.75)));
     }
   }

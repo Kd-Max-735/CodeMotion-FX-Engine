@@ -215,7 +215,8 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "heavy", 11),
   b("D04", "fx.draw.chalkStroke", "Chalk Stroke", "draw", "Granular chalk stroke.", [
     number("grain", 0.55, 0, 1, 0.01), number("scatter", 0.18, 0, 1, 0.01),
-    number("opacity", 0.85, 0, 1, 0.01), number("progress", 0.5, 0, 1, 0.01)
+    number("opacity", 0.85, 0, 1, 0.01), number("progress", 0.5, 0, 1, 0.01),
+    text("color", "#f4f0df", 16), number("strokeWidth", 0.025, 0.002, 0.2, 0.001, "canvas")
   ], "medium", 8),
 
   b("L01", "fx.light.neonGlow", "Neon Glow", "light", "Linear-space neon edge glow.", [

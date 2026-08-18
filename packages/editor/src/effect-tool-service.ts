@@ -71,7 +71,6 @@ const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = O
   blob_morph: Object.freeze(["source_shape"]),
   bounce: Object.freeze(["source_layer"]),
   brush_reveal: Object.freeze(["brush_texture"]),
-  chalk_stroke: Object.freeze(["vector_source"]),
   character_cascade: Object.freeze(["text_raster"]),
   dash_flow: Object.freeze(["source_path"])
 });

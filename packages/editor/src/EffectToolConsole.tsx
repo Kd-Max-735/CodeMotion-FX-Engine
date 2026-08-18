@@ -115,6 +115,7 @@ export function inputSlotDisplayName(toolName: string, slotName: string): string
     if (slotName === "source_frame") return "起始图片";
     if (slotName === "target_frame") return "目标图片";
   }
+  if (toolName === "chalk_stroke" && slotName === "vector_source") return "基础图片";
   return slotName;
 }
 
