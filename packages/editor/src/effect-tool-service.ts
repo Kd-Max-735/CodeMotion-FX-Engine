@@ -73,7 +73,6 @@ const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = O
   brush_reveal: Object.freeze(["vector_source", "brush_texture"]),
   chalk_stroke: Object.freeze(["vector_source"]),
   character_cascade: Object.freeze(["text_raster"]),
-  chart_reveal: Object.freeze(["chart_data"]),
   dash_flow: Object.freeze(["source_path"])
 });
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
@@ -353,7 +352,7 @@ function isServerDerivedInputSlot(
     || definition.toolName === "onset_trigger" && slot.name === "target_effect"
     || definition.toolName === "vocal_reactive_text"
       && (slot.name === "text_layer" || slot.name === "text_font")
-    || ["chart_reveal", "live_binding", "number_counter"].includes(definition.toolName)
+    || ["live_binding", "number_counter"].includes(definition.toolName)
       && slot.kind === "data"
     || ["glass", "hologram", "metal"].includes(definition.toolName)
       && slot.name !== "source_image";
@@ -367,7 +366,7 @@ function isSyntheticDerivedInputSlot(
     || definition.toolName === "onset_trigger" && slot.name === "target_effect"
     || definition.toolName === "vocal_reactive_text"
       && (slot.name === "text_layer" || slot.name === "text_font")
-    || ["chart_reveal", "live_binding", "number_counter"].includes(definition.toolName)
+    || ["live_binding", "number_counter"].includes(definition.toolName)
       && slot.kind === "data";
 }
 
@@ -1069,9 +1068,6 @@ function previewDataBinding(
   }
   switch (slot.name) {
     case "audio_analysis": return previewAudioBinding(definition, render);
-    case "chart_data": return { version: "validated-chart-v1", series: [
-      { label: "A", value: 28 }, { label: "B", value: 62 }, { label: "C", value: 44 }, { label: "D", value: 86 }
-    ] };
     case "number_range": return { version: "validated-number-v1", from: 0, to: 100 };
     case "validated_binding": return {
       version: "validated-live-binding-v1", value: 0.72, previousValue: 0.48,

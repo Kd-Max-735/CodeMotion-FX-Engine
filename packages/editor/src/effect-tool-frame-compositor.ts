@@ -1473,7 +1473,9 @@ function batch0708Frame(
     const values = items.map((item) => Math.max(0, Number(item.value ?? 0)) * Math.max(0, Math.min(1, Number(item.reveal ?? 1))));
     const maximum = Math.max(1e-6, ...values);
     const chartType = typeof value.chartType === "string" ? value.chartType : "bar";
-    const palette = [[66, 220, 255, 255], [255, 88, 176, 255], [126, 244, 170, 255], [255, 196, 84, 255]] as const;
+    const palette = items.map((item, index) => hexColor(item.color,
+      index % 2 === 0 ? [66, 220, 255, 255] : [255, 88, 176, 255]));
+    const seriesColor = palette[0] ?? [66, 220, 255, 255];
     if (chartType === "pie") {
       const total = Math.max(1e-6, ...[values.reduce((sum, entry) => sum + entry, 0)]);
       let angle = -Math.PI / 2;
@@ -1483,7 +1485,7 @@ function batch0708Frame(
         for (let cursor = angle; cursor < end; cursor += 0.008) {
           drawLine(output, request.width, request.height, request.width / 2, request.height / 2,
             request.width / 2 + Math.cos(cursor) * radius, request.height / 2 + Math.sin(cursor) * radius,
-            palette[index % palette.length]!, 0.82, 1.5);
+            palette[index]!, 0.82, 1.5);
         }
         angle = end;
       });
@@ -1500,7 +1502,7 @@ function batch0708Frame(
         const width = (right - left) / Math.max(2, values.length) * 0.62;
         for (let x = point.x - width / 2; x <= point.x + width / 2; x += 1) {
           drawLine(output, request.width, request.height, x, bottom, x, point.y,
-            palette[index % palette.length]!, 0.76, 1);
+            palette[index]!, 0.76, 1);
         }
       });
       else {
@@ -1510,13 +1512,13 @@ function batch0708Frame(
           for (let x = Math.floor(previous.x); x <= point.x; x += 1) {
             const ratio = (x - previous.x) / Math.max(1, point.x - previous.x);
             const y = previous.y + (point.y - previous.y) * ratio;
-            drawLine(output, request.width, request.height, x, bottom, x, y, primary, 0.14, 1);
+            drawLine(output, request.width, request.height, x, bottom, x, y, seriesColor, 0.14, 1);
           }
         });
-        drawScreenPolyline(output, points, request, primary, 0.24, 7);
+        drawScreenPolyline(output, points, request, seriesColor, 0.24, 7);
         drawScreenPolyline(output, points, request, [238, 255, 255, 255], 0.92, 2);
         points.forEach((point, index) => drawDisc(output, request.width, request.height,
-          point.x, point.y, 4, palette[index % palette.length]!, 0.9));
+          point.x, point.y, 4, palette[index]!, 0.9));
       }
       drawLine(output, request.width, request.height, left, bottom, right, bottom, [186, 204, 220, 255], 0.5, 1);
     }
