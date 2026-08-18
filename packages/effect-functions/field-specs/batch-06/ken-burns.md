@@ -12,7 +12,7 @@
 ## JSON 示例
 
 ```json
-{"type":"ken_burns","data":{"startTime":0,"duration":6,"startScale":1,"endScale":1.25,"startCenterX":0.4,"startCenterY":0.5,"endCenterX":0.6,"endCenterY":0.42,"easing":"ease_in_out"}}
+{"type":"ken_burns","data":{"startTime":0,"duration":6,"startScale":1,"endScale":1.25,"startCenterX":0.4,"startCenterY":0.5,"endCenterX":0.6,"endCenterY":0.42,"easing":"ease_in_out","motionMode":"single"}}
 ```
 
 ## 参数字段
@@ -26,10 +26,11 @@
 | `startCenterX/Y` | number，各 0–1 | 0.5 / 0.5 | 0.25–0.75 | 0.5 | 起始裁切中心 |
 | `endCenterX/Y` | number，各 0–1 | 0.55 / 0.45 | 0.25–0.75 | 0.5 | 结束裁切中心 |
 | `easing` | 四种标准缓动 | `ease_in_out` | `ease_in_out` | `linear` | 运动节奏 |
+| `motionMode` | `single` / `push_then_pull` | `single` | 按描述 | `single` | 单段运动，或先推进到峰值再拉远 |
 
 ## 选择规则与优先级
 
-“推近”令结束缩放大于起始缩放；“拉远”相反；“只横移”令两端缩放相等。左右、上下位置使用 0–1 归一化坐标，左/上更接近 0。优先级：明确起止位置与倍率 > 时长 > 方向词 > 默认值。若用户只说“轻微”，缩放差建议不超过 0.2。
+“推近”令结束缩放大于起始缩放；“拉远”相反；“先推进再拉远”必须使用 `motionMode=push_then_pull`，不能退化成单向缩放；“只横移”令两端缩放相等。左右、上下位置使用 0–1 归一化坐标，左/上更接近 0。“画面从左向右移动”描述的是可见内容方向，因此设置 `startCenterX` 大于 `endCenterX`；“镜头从左侧巡览到右侧”描述的是裁切中心方向，则设置 `startCenterX` 小于 `endCenterX`。优先级：明确起止位置与倍率 > 时长 > 方向词 > 默认值。
 
 ## 用户表达示例
 

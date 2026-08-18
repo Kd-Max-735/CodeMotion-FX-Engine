@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { REJECT_FALLBACK, SERVER_GPU_BACKEND, blockedRender, valid, type Easing } from "./common.js";
+import { REJECT_FALLBACK, SERVER_GPU_BACKEND, readRgba8Frame, readScalarPixels, rgbaPixels, timedProgress, valid, type Easing } from "./common.js";
 
 export interface ImageDepthParallaxParams extends JsonObject {
   startTime: number;
@@ -55,7 +55,7 @@ export const IMAGE_DEPTH_PARALLAX_DEFINITION: EffectToolDefinition<ImageDepthPar
     { presetId: "image_depth_parallax.vertical", displayName: "纵向漂移", params: { ...defaults, motionX: 0, motionY: -0.25, duration: 6 } }
   ],
   inputSlots: [
-    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized source image." },
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized source image.", acceptedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/avif"] },
     { name: "source_depth", kind: "depth-map", required: true, cardinality: "one", description: "Server-authorized depth map aligned to the image." }
   ],
   primaryBackend: SERVER_GPU_BACKEND,
@@ -63,8 +63,32 @@ export const IMAGE_DEPTH_PARALLAX_DEFINITION: EffectToolDefinition<ImageDepthPar
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: () => blockedRender(
-    "image_depth_parallax",
-    "an aligned depth-map resolver and depth-displaced server frame renderer adapter"
-  )
+  render: (context, params) => {
+    const source = readRgba8Frame(context, "source_image");
+    const depth = readScalarPixels(context, "source_depth", source.width, source.height);
+    const progress = timedProgress(context.time, params.startTime, params.duration, params.easing);
+    const displacement = params.depthScale * (1 + params.edgeExpansion * 2) / Math.max(0.5, params.cameraDistance);
+    const output = new Uint8ClampedArray(context.width * context.height * 4);
+    for (let y = 0; y < context.height; y += 1) {
+      for (let x = 0; x < context.width; x += 1) {
+        const px = x / Math.max(1, context.width - 1);
+        const py = y / Math.max(1, context.height - 1);
+        const di = Math.min(depth.length - 1, Math.floor(py * (source.height - 1)) * source.width
+          + Math.floor(px * (source.width - 1)));
+        const z = (depth[di] ?? 0.5) - 0.5;
+        const sx = Math.max(0, Math.min(source.width - 1, Math.round(px * (source.width - 1)
+          - params.motionX * progress * z * displacement * source.width)));
+        const sy = Math.max(0, Math.min(source.height - 1, Math.round(py * (source.height - 1)
+          - params.motionY * progress * z * displacement * source.height)));
+        const si = (sy * source.width + sx) * 4;
+        const oi = (y * context.width + x) * 4;
+        output[oi] = source.data[si]!;
+        output[oi + 1] = source.data[si + 1]!;
+        output[oi + 2] = source.data[si + 2]!;
+        output[oi + 3] = 255;
+      }
+    }
+    return rgbaPixels(SERVER_GPU_BACKEND.backendId, context.width, context.height, output,
+      "source_image", context.time);
+  }
 };

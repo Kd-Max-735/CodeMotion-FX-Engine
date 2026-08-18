@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { FFMPEG_BACKEND, REJECT_FALLBACK, blockedRender, valid } from "./common.js";
+import { FFMPEG_BACKEND, REJECT_FALLBACK, readRgba8Frame, resampleRgbaFrame, rgbaPixels, valid } from "./common.js";
 
 export interface VideoFreezeFrameParams extends JsonObject {
   freezeAt: number;
@@ -39,14 +39,21 @@ export const VIDEO_FREEZE_FRAME_DEFINITION: EffectToolDefinition<VideoFreezeFram
     { presetId: "video_freeze_frame.emphasis", displayName: "强调定格", params: { ...defaults, freezeDuration: 2, zoomScale: 1.08, vignette: 0.25 } },
     { presetId: "video_freeze_frame.quick", displayName: "快速停顿", params: { ...defaults, freezeDuration: 0.5 } }
   ],
-  inputSlots: [{ name: "source_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized source video decoded at explicit sample times." }],
+  inputSlots: [{ name: "source_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized source video decoded at explicit sample times.", acceptedMimeTypes: ["video/mp4", "video/webm"] }],
   primaryBackend: FFMPEG_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: () => blockedRender(
-    "video_freeze_frame",
-    "a random-access server video decoder and freeze-frame compositor adapter"
-  )
+  render: (context, params) => {
+    const source = readRgba8Frame(context, "source_video");
+    const frozen = context.time >= params.freezeAt && context.time < params.freezeAt + params.freezeDuration;
+    const pixels = resampleRgbaFrame(source, context.width, context.height,
+      frozen ? params.zoomScale : 1, 0.5, 0.5, frozen ? params.vignette : 0);
+    const sampleTime = context.time < params.freezeAt ? context.time
+      : context.time < params.freezeAt + params.freezeDuration ? params.freezeAt
+        : context.time - params.freezeDuration;
+    return rgbaPixels(FFMPEG_BACKEND.backendId, context.width, context.height, pixels,
+      "source_video", sampleTime);
+  }
 };

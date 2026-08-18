@@ -121,6 +121,7 @@ export interface EffectToolInputRequirementView {
   readonly description: string;
   readonly acceptedMimeTypes: readonly string[];
   readonly acceptsUploadedImage: boolean;
+  readonly acceptsUploadedVideo: boolean;
 }
 
 export interface EffectToolCatalogItem extends EffectToolListItem {
@@ -334,7 +335,10 @@ function isServerDerivedInputSlot(
       && slot.name === "camera_target"
     || definition.toolName === "parallax_layers" && slot.name === "depth_map"
     || definition.toolName === "object_match_cut"
-      && (slot.name === "from_match_mask" || slot.name === "to_match_mask");
+      && (slot.name === "from_match_mask" || slot.name === "to_match_mask")
+    || definition.toolName === "background_remove_compose" && slot.name === "foreground_matte"
+    || definition.toolName === "image_depth_parallax" && slot.name === "source_depth"
+    || definition.toolName === "smart_crop_animate" && slot.name === "subject_tracks";
 }
 
 function acceptsUploadedImage(
@@ -342,7 +346,16 @@ function acceptsUploadedImage(
   slot: EffectInputSlotDefinition
 ): boolean {
   if (isServerDerivedInputSlot(definition, slot)) return false;
-  return true;
+  // Retained as the legacy "user-uploaded visual" flag for catalog compatibility.
+  return slot.kind === "image" || slot.kind === "video";
+}
+
+function acceptsUploadedVideo(
+  definition: EffectToolDefinition,
+  slot: EffectInputSlotDefinition
+): boolean {
+  if (isServerDerivedInputSlot(definition, slot)) return false;
+  return slot.kind === "video";
 }
 
 function derivedInputResourceId(
@@ -353,8 +366,12 @@ function derivedInputResourceId(
   if (!isServerDerivedInputSlot(definition, slot)) return undefined;
   const sourceSlot = definition.toolName === "object_match_cut"
     ? slot.name === "to_match_mask" ? "to_video" : "from_video"
-    : definition.toolName === "depth_of_field" ? "source_frame"
-      : definition.toolName === "paint_on" ? "source_image" : "source_video";
+      : definition.toolName === "depth_of_field" ? "source_frame"
+      : definition.toolName === "paint_on" ? "source_image"
+      : definition.toolName === "background_remove_compose" && slot.name === "foreground_matte"
+        ? "foreground_video"
+      : definition.toolName === "image_depth_parallax" && slot.name === "source_depth"
+        ? "source_image" : "source_video";
   const value = inputIds[sourceSlot];
   return typeof value === "string" && RESOURCE_ID.test(value) ? value : undefined;
 }
@@ -370,7 +387,8 @@ function requirementView(
     cardinality: slot.cardinality,
     description: slot.description,
     acceptedMimeTypes: Object.freeze([...(slot.acceptedMimeTypes ?? [])]),
-    acceptsUploadedImage: acceptsUploadedImage(definition, slot)
+    acceptsUploadedImage: acceptsUploadedImage(definition, slot),
+    acceptsUploadedVideo: acceptsUploadedVideo(definition, slot)
   });
 }
 
@@ -604,13 +622,26 @@ function derivedPreviewPixels(
 ): Uint8Array {
   const output = new Uint8Array(source);
   if (slot.kind === "mask" || /mask|matte/u.test(slot.name)) {
+    let edgeColor: readonly [number, number, number] | undefined;
+    if (slot.name === "foreground_matte") {
+      let red = 0; let green = 0; let blue = 0; let count = 0;
+      for (let y = 0; y < render.height; y += 1) for (let x = 0; x < render.width; x += 1) {
+        if (x !== 0 && y !== 0 && x !== render.width - 1 && y !== render.height - 1) continue;
+        const offset = (y * render.width + x) * 4;
+        red += source[offset]!; green += source[offset + 1]!; blue += source[offset + 2]!; count += 1;
+      }
+      edgeColor = [red / count, green / count, blue / count];
+    }
     for (let offset = 0; offset < output.length; offset += 4) {
-      const luminance = Math.round(output[offset]! * 0.2126
-        + output[offset + 1]! * 0.7152 + output[offset + 2]! * 0.0722);
-      output[offset] = luminance;
-      output[offset + 1] = luminance;
-      output[offset + 2] = luminance;
-      output[offset + 3] = luminance;
+      const matte = edgeColor === undefined
+        ? Math.round(output[offset]! * 0.2126 + output[offset + 1]! * 0.7152 + output[offset + 2]! * 0.0722)
+        : Math.round(Math.max(0, Math.min(255, (Math.hypot(
+            output[offset]! - edgeColor[0], output[offset + 1]! - edgeColor[1], output[offset + 2]! - edgeColor[2]
+          ) - 18) * 4.2)));
+      output[offset] = matte;
+      output[offset + 1] = matte;
+      output[offset + 2] = matte;
+      output[offset + 3] = matte;
     }
     return output;
   }
@@ -953,6 +984,17 @@ function previewDataBinding(
   if (definition.toolName === "paint_on" && slot.name === "stroke_plan") {
     return { strokes: derivedPaintStrokes(pixels, render) };
   }
+  if (definition.toolName === "smart_crop_animate" && slot.name === "subject_tracks") {
+    const contour = derivedVisualContour(pixels, render);
+    const centerX = contour.reduce((sum, point) => sum + point.x, 0) / contour.length;
+    const centerY = contour.reduce((sum, point) => sum + point.y, 0) / contour.length;
+    return {
+      subjects: [{ samples: [
+        { time: 0, centerX, centerY, width: 0.28, height: 0.46 },
+        { time: 30, centerX: Math.max(0.2, Math.min(0.8, centerX + 0.12)), centerY, width: 0.28, height: 0.46 }
+      ] }]
+    };
+  }
   switch (slot.name) {
     case "audio_analysis": return previewAudioBinding(definition, render);
     case "chart_data": return { version: "validated-chart-v1", series: [
@@ -1172,6 +1214,14 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     const kind = visualKind(media.asset);
     if (kind === undefined) {
       throw new TypeError(`${slot.name} requires an authorized ${slot.kind} visual resource.`);
+    }
+    if (["background_remove_compose", "smart_crop_animate", "speed_ramp", "video_freeze_frame"]
+      .includes(definition.toolName) && slot.kind === "video" && kind !== "video") {
+      throw new TypeError(`${slot.name} requires an authorized video asset.`);
+    }
+    if (["background_remove_compose", "image_depth_parallax", "ken_burns", "object_explode", "photo_stack", "text_logo_reveal"]
+      .includes(definition.toolName) && slot.kind === "image" && kind !== "image") {
+      throw new TypeError(`${slot.name} requires an authorized image asset.`);
     }
     const pixelCacheKey = JSON.stringify([
       resourceId, render.time, render.fps, render.width, render.height
@@ -1542,8 +1592,11 @@ export class EffectToolService {
       );
       if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
       const assetIds = Object.values(rawInputIds).flatMap((value) => typeof value === "string" ? [value] : [...value]);
-      const sourceImageId = Object.values(rawInputIds).flatMap((value) =>
-        typeof value === "string" ? [value] : [...value])[0];
+      const sourceImageId = definition.inputSlots.flatMap((slot) => {
+        if (slot.kind !== "image") return [];
+        const value = rawInputIds[slot.name];
+        return typeof value === "string" ? [value] : value === undefined ? [] : [...value];
+      })[0];
       const execution = await this.nativeVideos.createPrepared(
         owner,
         definition,
@@ -1555,7 +1608,8 @@ export class EffectToolService {
         render.width,
         render.height,
         sourceImageId,
-        VIDEO_GENERATION_MODE_FPS[nativeArguments.generationMode]
+        VIDEO_GENERATION_MODE_FPS[nativeArguments.generationMode],
+        rawInputIds
       );
       const normalizedArguments = Object.freeze({
         effectParams: structuredClone(envelope.data),

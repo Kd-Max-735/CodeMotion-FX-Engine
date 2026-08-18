@@ -23,6 +23,7 @@ export interface KenBurnsParams extends JsonObject {
   endCenterX: number;
   endCenterY: number;
   easing: Easing;
+  motionMode: "single" | "push_then_pull";
 }
 
 const defaults: KenBurnsParams = {
@@ -34,7 +35,8 @@ const defaults: KenBurnsParams = {
   startCenterY: 0.5,
   endCenterX: 0.55,
   endCenterY: 0.45,
-  easing: "ease_in_out"
+  easing: "ease_in_out",
+  motionMode: "single"
 };
 
 function sourcePixel(frame: Rgba8FrameBinding, x: number, y: number): readonly number[] {
@@ -77,7 +79,8 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
       startCenterY: { type: "number", minimum: 0, maximum: 1, default: 0.5 },
       endCenterX: { type: "number", minimum: 0, maximum: 1, default: 0.55 },
       endCenterY: { type: "number", minimum: 0, maximum: 1, default: 0.45 },
-      easing: { type: "string", enum: ["linear", "ease_in", "ease_out", "ease_in_out"], default: "ease_in_out" }
+      easing: { type: "string", enum: ["linear", "ease_in", "ease_out", "ease_in_out"], default: "ease_in_out" },
+      motionMode: { type: "string", enum: ["single", "push_then_pull"], default: "single" }
     }
   },
   defaults,
@@ -86,7 +89,7 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
     { presetId: "ken_burns.pull_out", displayName: "缓慢拉远", params: { ...defaults, startScale: 1.3, endScale: 1, startCenterX: 0.45, endCenterX: 0.5 } },
     { presetId: "ken_burns.pan", displayName: "横向巡览", params: { ...defaults, duration: 7, startScale: 1.25, endScale: 1.25, startCenterX: 0.3, endCenterX: 0.7 } }
   ],
-  inputSlots: [{ name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized still image." }],
+  inputSlots: [{ name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized still image.", acceptedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/avif"] }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",
@@ -96,7 +99,12 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
     const source = readRgba8Frame(context, "source_image");
     const progress = timedProgress(context.time, params.startTime, params.duration, params.easing);
     const mix = (start: number, end: number) => round(start + (end - start) * progress);
-    const scale = mix(params.startScale, params.endScale);
+    const peakScale = Math.max(params.startScale, params.endScale, 1.25);
+    const scale = params.motionMode === "push_then_pull"
+      ? progress < 0.5
+        ? params.startScale + (peakScale - params.startScale) * progress * 2
+        : peakScale + (params.endScale - peakScale) * (progress - 0.5) * 2
+      : mix(params.startScale, params.endScale);
     const centerX = mix(params.startCenterX, params.endCenterX);
     const centerY = mix(params.startCenterY, params.endCenterY);
     const coverScale = Math.max(context.width / source.width, context.height / source.height);

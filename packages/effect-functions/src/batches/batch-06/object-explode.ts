@@ -3,7 +3,9 @@ import type { EffectToolDefinition } from "../../types.js";
 import {
   REJECT_FALLBACK,
   SERVER_THREE_BACKEND,
-  blockedRender,
+  ease,
+  readRgba8Frame,
+  rgbaPixels,
   valid,
   type Easing
 } from "./common.js";
@@ -64,19 +66,52 @@ export const OBJECT_EXPLODE_DEFINITION: EffectToolDefinition<ObjectExplodeParams
     { presetId: "object_explode.zero_gravity", displayName: "失重碎裂", params: { ...defaults, duration: 2.5, fragmentCount: 96, explosionRadius: 5, gravity: 0, spinTurns: 3 } }
   ],
   inputSlots: [{
-    name: "source_model",
-    kind: "model",
+    name: "source_image",
+    kind: "image",
     required: true,
     cardinality: "one",
-    description: "Owner-authorized server model whose geometry is partitioned into fragments."
+    description: "Owner-authorized source image partitioned into textured 3D fragments.",
+    acceptedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/avif"]
   }],
   primaryBackend: SERVER_THREE_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: () => blockedRender(
-    "object_explode",
-    "an owner-authorized model partitioning and server-three frame renderer adapter"
-  )
+  render: (context, params) => {
+    const source = readRgba8Frame(context, "source_image");
+    const output = new Uint8ClampedArray(context.width * context.height * 4);
+    for (let offset = 0; offset < output.length; offset += 4) {
+      output[offset] = 8; output[offset + 1] = 10; output[offset + 2] = 16; output[offset + 3] = 255;
+    }
+    const progress = Math.max(0, Math.min(1, (context.time - params.startTime) / params.duration));
+    const eased = ease(progress, params.easing);
+    const columns = Math.max(4, Math.ceil(Math.sqrt(params.fragmentCount)));
+    const rows = columns;
+    for (let row = 0; row < rows; row += 1) for (let column = 0; column < columns; column += 1) {
+      const left = Math.floor(column / columns * source.width);
+      const top = Math.floor(row / rows * source.height);
+      const right = Math.max(left + 1, Math.floor((column + 1) / columns * source.width));
+      const bottom = Math.max(top + 1, Math.floor((row + 1) / rows * source.height));
+      const nx = (column + 0.5) / columns - 0.5 - params.originX * 0.05;
+      const ny = (row + 0.5) / rows - 0.5 - params.originY * 0.05;
+      const dx = nx * params.explosionRadius * eased * context.width * 0.32;
+      const dy = ny * params.explosionRadius * eased * context.height * 0.32
+        + params.gravity * eased * eased * context.height * 0.04;
+      const angle = params.spinTurns * Math.PI * 2 * eased * (nx - ny);
+      const cosine = Math.cos(angle); const sine = Math.sin(angle);
+      for (let y = top; y < bottom; y += 1) for (let x = left; x < right; x += 1) {
+        const localX = x - (left + right) / 2; const localY = y - (top + bottom) / 2;
+        const tx = Math.round((left + right) / 2 + localX * cosine - localY * sine + dx);
+        const ty = Math.round((top + bottom) / 2 + localX * sine + localY * cosine + dy);
+        if (tx < 0 || ty < 0 || tx >= context.width || ty >= context.height) continue;
+        const si = (y * source.width + x) * 4; const oi = (ty * context.width + tx) * 4;
+        const shade = Math.max(0.45, Math.min(1.25, 1 + params.originZ * 0.025 + Math.sin(angle) * 0.18));
+        output[oi] = Math.round(source.data[si]! * shade); output[oi + 1] = Math.round(source.data[si + 1]! * shade);
+        output[oi + 2] = Math.round(source.data[si + 2]! * shade); output[oi + 3] = 255;
+      }
+    }
+    return rgbaPixels(SERVER_THREE_BACKEND.backendId, context.width, context.height, output,
+      "source_image", context.time);
+  }
 };

@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { FFMPEG_BACKEND, REJECT_FALLBACK, blockedRender, clamp, valid, type Easing } from "./common.js";
+import { FFMPEG_BACKEND, REJECT_FALLBACK, clamp, readRgba8Frame, rgbaPixels, valid, type Easing } from "./common.js";
 
 export interface SpeedRampParams extends JsonObject {
   rampStart: number;
@@ -68,14 +68,15 @@ export const SPEED_RAMP_DEFINITION: EffectToolDefinition<SpeedRampParams> = {
     { presetId: "speed_ramp.slow_motion", displayName: "渐入慢动作", params: { ...defaults, speedBefore: 1, speedAfter: 0.25, rampDuration: 1.5 } },
     { presetId: "speed_ramp.whip", displayName: "快速甩镜", params: { ...defaults, rampStart: 0.5, rampDuration: 0.6, speedAfter: 6, curve: "ease_in" } }
   ],
-  inputSlots: [{ name: "source_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized source video sampled by integrated speed." }],
+  inputSlots: [{ name: "source_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized source video sampled by integrated speed.", acceptedMimeTypes: ["video/mp4", "video/webm"] }],
   primaryBackend: FFMPEG_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: () => blockedRender(
-    "speed_ramp",
-    "a random-access server video decoder and motion-compensated frame sampler adapter"
-  )
+  render: (context, params) => {
+    const source = readRgba8Frame(context, "source_video");
+    return rgbaPixels(FFMPEG_BACKEND.backendId, context.width, context.height,
+      Uint8ClampedArray.from(source.data), "source_video", speedRampSampleTime(context.time, params));
+  }
 };

@@ -161,6 +161,44 @@ export function readRgba8Frame(
   };
 }
 
+export function readRgba8Frames(
+  context: ServerEffectRenderContext,
+  slot: string
+): readonly Rgba8FrameBinding[] {
+  const input = context.inputs[slot];
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new TypeError(`${slot} must contain one or more server-decoded RGBA frames.`);
+  }
+  return input.map((entry) => readRgba8Frame({ ...context, inputs: { [slot]: entry } }, slot));
+}
+
+export function readScalarPixels(
+  context: ServerEffectRenderContext,
+  slot: string,
+  width: number,
+  height: number
+): Float32Array {
+  const input = context.inputs[slot];
+  if (input === undefined || Array.isArray(input)) {
+    throw new TypeError(`${slot} must contain exactly one server-derived scalar field.`);
+  }
+  const authorized = input as AuthorizedEffectInput;
+  if (typeof authorized.binding !== "object" || authorized.binding === null) {
+    throw new TypeError(`${slot} must contain exactly one server-derived scalar field.`);
+  }
+  const binding = authorized.binding as { readonly data?: unknown; readonly values?: unknown };
+  const raw = binding.data ?? binding.values;
+  if (!Array.isArray(raw) && !ArrayBuffer.isView(raw)) {
+    throw new TypeError(`${slot} must bind scalar pixel data.`);
+  }
+  const values = Array.from(raw as ArrayLike<number>);
+  if (values.length !== width * height || values.some((value) => !Number.isFinite(value))) {
+    throw new RangeError(`${slot} scalar dimensions do not match the source frame.`);
+  }
+  const normalized = values.some((value) => value > 1);
+  return Float32Array.from(values, (value) => clamp(normalized ? value / 255 : value, 0, 1));
+}
+
 export function rgbaFrameResult(
   backendId: string,
   output: Rgba8FrameOutput
@@ -172,6 +210,53 @@ export function rgbaFrameResult(
     degraded: false,
     warnings: []
   };
+}
+
+export function rgbaPixels(
+  backendId: string,
+  width: number,
+  height: number,
+  data: Uint8Array | Uint8ClampedArray,
+  sourceSlot: string,
+  sampleTime: number
+): EffectRenderResult<Rgba8FrameOutput> {
+  return rgbaFrameResult(backendId, {
+    version: RGBA8_FRAME_VERSION,
+    width,
+    height,
+    data,
+    sourceSlot,
+    sampleTime
+  });
+}
+
+export function resampleRgbaFrame(
+  source: Rgba8FrameBinding,
+  width: number,
+  height: number,
+  scale = 1,
+  centerX = 0.5,
+  centerY = 0.5,
+  vignette = 0
+): Uint8ClampedArray {
+  const output = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const u = centerX + (x / Math.max(1, width - 1) - 0.5) / scale;
+      const v = centerY + (y / Math.max(1, height - 1) - 0.5) / scale;
+      const sx = Math.max(0, Math.min(source.width - 1, Math.round(u * (source.width - 1))));
+      const sy = Math.max(0, Math.min(source.height - 1, Math.round(v * (source.height - 1))));
+      const sourceOffset = (sy * source.width + sx) * 4;
+      const targetOffset = (y * width + x) * 4;
+      const radius = Math.hypot(x / Math.max(1, width - 1) - 0.5, y / Math.max(1, height - 1) - 0.5) / 0.707;
+      const shade = 1 - Math.max(0, radius - 0.45) * vignette;
+      output[targetOffset] = Math.round(source.data[sourceOffset]! * shade);
+      output[targetOffset + 1] = Math.round(source.data[sourceOffset + 1]! * shade);
+      output[targetOffset + 2] = Math.round(source.data[sourceOffset + 2]! * shade);
+      output[targetOffset + 3] = 255;
+    }
+  }
+  return output;
 }
 
 export const REJECT_FALLBACK = Object.freeze({

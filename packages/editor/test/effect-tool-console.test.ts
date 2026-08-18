@@ -4,8 +4,10 @@ import {
   filterEffectTools,
   imageUploadRequirement,
   reconcileSelectedAssetIds,
-  turnInputIds
+  turnInputIds,
+  turnInputIdsForAssets
 } from "../src/EffectToolConsole.js";
+import type { BrowserAssetSummaryV1 } from "../src/media-asset-client.js";
 
 function tool(overrides: Partial<SelectedEffectToolView> = {}): SelectedEffectToolView {
   return {
@@ -23,7 +25,8 @@ function input(
   kind: SelectedEffectToolView["inputRequirements"][number]["kind"],
   required = true,
   acceptsUploadedImage = true,
-  cardinality: "one" | "many" = "one"
+  cardinality: "one" | "many" = "one",
+  acceptsUploadedVideo = false
 ) {
   return {
     name,
@@ -32,7 +35,8 @@ function input(
     cardinality,
     description: name,
     acceptedMimeTypes: [],
-    acceptsUploadedImage
+    acceptsUploadedImage,
+    acceptsUploadedVideo
   };
 }
 
@@ -86,6 +90,37 @@ describe("120-tool selector helpers", () => {
     expect(imageUploadRequirement(transition)).toEqual({ min: 2, max: 2 });
     expect(imageUploadRequirement(stack)).toEqual({ min: 2, max: 32 });
     expect(turnInputIds(stack, stackIds)).toEqual({ source_images: stackIds });
+  });
+
+  it("binds one uploaded video without counting server-derived analysis as a second asset", () => {
+    const smartCrop = tool({
+      toolName: "smart_crop_animate",
+      inputRequirements: [
+        input("source_video", "video", true, true, "one", true),
+        input("subject_tracks", "data", true, false)
+      ]
+    });
+    expect(imageUploadRequirement(smartCrop)).toEqual({ min: 1, max: 1 });
+    expect(turnInputIds(smartCrop, ["asset_videoabcdefgh"]))
+      .toEqual({ source_video: "asset_videoabcdefgh" });
+  });
+
+  it("binds mixed foreground video and background image by media kind rather than picker order", () => {
+    const compose = tool({
+      toolName: "background_remove_compose",
+      inputRequirements: [
+        input("foreground_video", "video", true, true, "one", true),
+        input("foreground_matte", "mask", true, false),
+        input("background_image", "image")
+      ]
+    });
+    const asset = (assetId: string, kind: "image" | "video") => ({
+      assetId, kind, displayName: assetId, mime: kind === "video" ? "video/mp4" : "image/png",
+      codec: kind === "video" ? "h264" : "png", bytes: 100, uploadedAt: new Date(0).toISOString(),
+      allowedPurposes: [kind === "video" ? "reference-video" : "reference-image"]
+    }) as BrowserAssetSummaryV1;
+    expect(turnInputIdsForAssets(compose, [asset("asset_bg00000000", "image"), asset("asset_fg00000000", "video")]))
+      .toEqual({ foreground_video: "asset_fg00000000", background_image: "asset_bg00000000" });
   });
 
   it("requires one upload when the server derives depth or stroke geometry", () => {

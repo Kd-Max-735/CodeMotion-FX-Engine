@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { REJECT_FALLBACK, SERVER_GPU_BACKEND, blockedRender, valid } from "./common.js";
+import { REJECT_FALLBACK, SERVER_GPU_BACKEND, readRgba8Frame, readScalarPixels, rgbaPixels, valid } from "./common.js";
 
 export interface BackgroundRemoveComposeParams extends JsonObject {
   edgeFeather: number;
@@ -46,17 +46,55 @@ export const BACKGROUND_REMOVE_COMPOSE_DEFINITION: EffectToolDefinition<Backgrou
     { presetId: "background_remove_compose.tight", displayName: "紧致边缘", params: { ...defaults, edgeFeather: 1, edgeContract: 2, spillSuppression: 0.85 } }
   ],
   inputSlots: [
-    { name: "foreground_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized foreground video." },
+    { name: "foreground_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized foreground video.", acceptedMimeTypes: ["video/mp4", "video/webm"] },
     { name: "foreground_matte", kind: "mask", required: true, cardinality: "one", description: "Server-authorized matte aligned to the foreground." },
-    { name: "background_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized replacement background." }
+    { name: "background_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized replacement background.", acceptedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/avif"] }
   ],
   primaryBackend: SERVER_GPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => valid(),
-  render: () => blockedRender(
-    "background_remove_compose",
-    "an aligned foreground-video/matte/background decoder and server frame compositor adapter"
-  )
+  render: (context, params) => {
+    const foreground = readRgba8Frame(context, "foreground_video");
+    const background = readRgba8Frame(context, "background_image");
+    const matte = readScalarPixels(context, "foreground_matte", foreground.width, foreground.height);
+    const output = new Uint8ClampedArray(context.width * context.height * 4);
+    const feather = Math.max(1, params.edgeFeather);
+    for (let y = 0; y < context.height; y += 1) {
+      for (let x = 0; x < context.width; x += 1) {
+        const sx = Math.min(foreground.width - 1, Math.floor(x / context.width * foreground.width));
+        const sy = Math.min(foreground.height - 1, Math.floor(y / context.height * foreground.height));
+        const si = (sy * foreground.width + sx) * 4;
+        const backgroundX = Math.max(0, Math.min(background.width - 1, Math.round((0.5
+          + (x / Math.max(1, context.width - 1) - 0.5) / params.backgroundScale) * (background.width - 1))));
+        const backgroundY = Math.max(0, Math.min(background.height - 1, Math.round((0.5
+          + (y / Math.max(1, context.height - 1) - 0.5) / params.backgroundScale) * (background.height - 1))));
+        const blur = Math.min(8, Math.round(params.backgroundBlur));
+        const backgroundColor = [0, 1, 2].map((channel) => {
+          let total = 0; let count = 0;
+          for (let by = -blur; by <= blur; by += Math.max(1, blur)) for (let bx = -blur; bx <= blur; bx += Math.max(1, blur)) {
+            const sampleX = Math.max(0, Math.min(background.width - 1, backgroundX + bx));
+            const sampleY = Math.max(0, Math.min(background.height - 1, backgroundY + by));
+            total += background.data[(sampleY * background.width + sampleX) * 4 + channel]!;
+            count += 1;
+          }
+          return total / count;
+        });
+        const mi = sy * foreground.width + sx;
+        const alpha = Math.max(0, Math.min(1, matte[mi]! - params.edgeContract / 32));
+        const edge = Math.min(1, alpha * feather / (feather + 1));
+        const a = Math.max(0, Math.min(1, alpha * (0.72 + edge * 0.28)));
+        const oi = (y * context.width + x) * 4;
+        const spill = params.spillSuppression * (1 - a);
+        const wrap = params.lightWrap * (1 - Math.abs(a * 2 - 1));
+        output[oi] = Math.round(foreground.data[si]! * a + backgroundColor[0]! * (1 - a + wrap * a));
+        output[oi + 1] = Math.round(foreground.data[si + 1]! * a + backgroundColor[1]! * (1 - a + wrap * a));
+        output[oi + 2] = Math.round(foreground.data[si + 2]! * a * (1 - spill) + backgroundColor[2]! * (1 - a + wrap * a) + 10 * spill);
+        output[oi + 3] = 255;
+      }
+    }
+    return rgbaPixels(SERVER_GPU_BACKEND.backendId, context.width, context.height, output,
+      "foreground_video", context.time);
+  }
 };

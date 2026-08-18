@@ -93,6 +93,7 @@ interface StoredVideoTask {
   readonly controller: AbortController;
   readonly prepared?: {
     readonly inputs: AuthorizedEffectInputs;
+    readonly inputIds?: Readonly<Record<string, string | readonly string[]>>;
     readonly width: number;
     readonly height: number;
   };
@@ -120,6 +121,59 @@ function safeNumber(value: unknown, label: string): number {
     throw new RangeError(`${label} is invalid.`);
   }
   return value;
+}
+
+function integratedRampEase(value: number, curve: unknown): number {
+  const t = Math.max(0, Math.min(1, value));
+  if (curve === "ease_in") return t ** 3 / 3;
+  if (curve === "ease_out") return t * t - t ** 3 / 3;
+  if (curve === "ease_in_out") return t < 0.5
+    ? 2 * t ** 3 / 3 : -t + 2 * t * t - 2 * t ** 3 / 3 + 1 / 6;
+  return t * t / 2;
+}
+
+function speedRampSourceTime(outputTime: number, params: Readonly<Record<string, unknown>>): number {
+  const time = Math.max(0, outputTime);
+  const rampStart = Number(params.rampStart ?? 1);
+  const rampDuration = Math.max(0.001, Number(params.rampDuration ?? 2));
+  const speedBefore = Number(params.speedBefore ?? 1);
+  const speedAfter = Number(params.speedAfter ?? 2);
+  if (time <= rampStart) return time * speedBefore;
+  const rampElapsed = Math.min(rampDuration, time - rampStart);
+  const x = rampElapsed / rampDuration;
+  const rampSource = rampDuration * (speedBefore * x
+    + (speedAfter - speedBefore) * integratedRampEase(x, params.curve));
+  return rampStart * speedBefore + rampSource
+    + Math.max(0, time - rampStart - rampDuration) * speedAfter;
+}
+
+function foregroundMatte(pixels: Uint8Array, width: number, height: number): number[] {
+  let red = 0; let green = 0; let blue = 0; let count = 0;
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    if (x !== 0 && y !== 0 && x !== width - 1 && y !== height - 1) continue;
+    const offset = (y * width + x) * 4;
+    red += pixels[offset]!; green += pixels[offset + 1]!; blue += pixels[offset + 2]!; count += 1;
+  }
+  const edge = [red / count, green / count, blue / count];
+  return Array.from({ length: width * height }, (_, index) => {
+    const offset = index * 4;
+    return Math.max(0, Math.min(1, (Math.hypot(
+      pixels[offset]! - edge[0]!, pixels[offset + 1]! - edge[1]!, pixels[offset + 2]! - edge[2]!
+    ) - 18) * 4.2 / 255));
+  });
+}
+
+function subjectCenter(pixels: Uint8Array, width: number, height: number): readonly [number, number] {
+  const matte = foregroundMatte(pixels, width, height);
+  let weightedX = 0; let weightedY = 0; let weight = 0;
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const value = matte[y * width + x]!;
+    weightedX += x * value; weightedY += y * value; weight += value;
+  }
+  return weight < 1e-6 ? [0.5, 0.5] : [
+    weightedX / weight / Math.max(1, width - 1),
+    weightedY / weight / Math.max(1, height - 1)
+  ];
 }
 
 function parseGpuNumber(value: string, label: string): number {
@@ -332,7 +386,8 @@ export class EffectToolVideoService {
     width = 640,
     height = 360,
     sourceImageId?: string,
-    fps = this.fps
+    fps = this.fps,
+    inputIds?: Readonly<Record<string, string | readonly string[]>>
   ): Promise<EffectToolVideoExecutionView> {
     if (this.closing) throw new Error("Effect video service is closing.");
     safeNumber(durationSeconds, "Video duration");
@@ -348,7 +403,7 @@ export class EffectToolVideoService {
       sourceAssetIds: Object.freeze([...sourceAssetIds]),
       outputPath,
       controller: new AbortController(),
-      prepared: Object.freeze({ inputs, width: metadata.width, height: metadata.height }),
+      prepared: Object.freeze({ inputs, width: metadata.width, height: metadata.height, ...(inputIds === undefined ? {} : { inputIds }) }),
       view: {
         id,
         status: "queued",
@@ -502,6 +557,7 @@ export class EffectToolVideoService {
       let sourcePixels: Uint8Array | undefined;
       const preparedInputFrames = task.prepared === undefined
         ? undefined : authorizedInputFrameData(task.prepared.inputs);
+      const preparedMedia = new Map<string, VerifiedStoredMedia>();
       if (task.prepared === undefined) {
         if (initialMedia === undefined || task.sourceAssetIds.length !== 1) {
           throw new Error("The source image binding is unavailable.");
@@ -559,6 +615,70 @@ export class EffectToolVideoService {
         ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
         signal: task.controller.signal,
         renderFrame: async (request, signal) => {
+          let frameInputs = task.prepared?.inputs;
+          let frameSource = sourcePixels;
+          if (task.prepared?.inputIds !== undefined) {
+            const mutableInputs: Record<string, AuthorizedEffectInputs[string]> = { ...task.prepared.inputs };
+            for (const slot of definition.inputSlots.filter((item) => item.kind === "video")) {
+              const rawId = task.prepared.inputIds[slot.name];
+              const assetId = typeof rawId === "string" ? rawId : rawId?.[0];
+              if (assetId === undefined) continue;
+              let media = preparedMedia.get(assetId);
+              if (media === undefined) {
+                media = await this.options.media.resolve(task.owner, assetId, signal);
+                if (media.asset.type !== "video") throw new TypeError(`${slot.name} requires an authorized video asset.`);
+                preparedMedia.set(assetId, media);
+              }
+              const params = envelope.data as Readonly<Record<string, unknown>>;
+              let sampleTime = request.time;
+              if (definition.toolName === "video_freeze_frame") {
+                const freezeAt = Number(params.freezeAt ?? 2);
+                const freezeDuration = Number(params.freezeDuration ?? 1.5);
+                sampleTime = request.time < freezeAt ? request.time
+                  : request.time < freezeAt + freezeDuration ? freezeAt : request.time - freezeDuration;
+              } else if (definition.toolName === "speed_ramp") {
+                sampleTime = speedRampSourceTime(request.time, params);
+              }
+              const duration = Number(media.asset.metadata.duration ?? 0);
+              if (duration > 0) sampleTime = Math.min(Math.max(0, duration - 1 / request.fps), sampleTime);
+              const pixels = await this.decodeFrame(media, { ...request, time: sampleTime, frame: Math.floor(sampleTime * request.fps) },
+                signal === undefined ? {} : { signal });
+              const original = task.prepared.inputs[slot.name];
+              const authorized = Array.isArray(original) ? original[0] : original;
+              if (authorized !== undefined) {
+                mutableInputs[slot.name] = Object.freeze({
+                  ...authorized,
+                  binding: { version: "rgba8-frame-v1", width: request.width, height: request.height, data: pixels }
+                });
+                if (definition.toolName === "background_remove_compose" && slot.name === "foreground_video") {
+                  const matteInput = task.prepared.inputs.foreground_matte;
+                  const matteAuthorized = Array.isArray(matteInput) ? matteInput[0] : matteInput;
+                  if (matteAuthorized !== undefined) {
+                    const values = foregroundMatte(pixels, request.width, request.height);
+                    mutableInputs.foreground_matte = Object.freeze({
+                      ...matteAuthorized,
+                      binding: { width: request.width, height: request.height, data: values, values }
+                    });
+                  }
+                }
+                if (definition.toolName === "smart_crop_animate" && slot.name === "source_video") {
+                  const tracksInput = task.prepared.inputs.subject_tracks;
+                  const tracksAuthorized = Array.isArray(tracksInput) ? tracksInput[0] : tracksInput;
+                  if (tracksAuthorized !== undefined) {
+                    const [centerX, centerY] = subjectCenter(pixels, request.width, request.height);
+                    mutableInputs.subject_tracks = Object.freeze({
+                      ...tracksAuthorized,
+                      binding: { subjects: [{ samples: [{
+                        time: request.time, centerX, centerY, width: 0.28, height: 0.46
+                      }] }] }
+                    });
+                  }
+                }
+                frameSource = pixels;
+              }
+            }
+            frameInputs = Object.freeze(mutableInputs);
+          }
           const context: ServerEffectRenderContext = {
             environment: "server",
             requestId: `${task.view.id}:${request.frame}`,
@@ -573,7 +693,7 @@ export class EffectToolVideoService {
             seed,
             quality: "final",
             backend: definition.primaryBackend,
-            inputs: task.prepared?.inputs ?? {
+            inputs: frameInputs ?? {
               source_frame: {
                 slot: "source_frame",
                 kind: "image",
@@ -605,7 +725,7 @@ export class EffectToolVideoService {
             result,
             request,
             definition.toolName,
-            sourcePixels,
+            frameSource,
             preparedInputFrames
           );
         }

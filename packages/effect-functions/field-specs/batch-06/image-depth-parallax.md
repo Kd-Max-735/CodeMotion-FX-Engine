@@ -6,8 +6,8 @@
 
 ## 服务器资源要求与接入状态
 
-- 必需输入槽：`source_image`（owner-authorized、locked 的 `image`）和独立、对齐的 `source_depth`（`depth-map`）。禁止把源图片再次绑定为深度图。
-- 接入状态：**BLOCKED**。等待窗口 12 提供对齐深度解析与 depth-displaced 真实帧渲染适配器；当前安全失败，不把相机/网格描述作为帧输出。
+- 用户只上传 `source_image`。`source_depth` 由服务器从这张已授权图片派生并锁定，不占用第二个上传位，也不进入模型参数。
+- 接入状态：**PASS**。当前服务端使用对齐深度场逐像素位移，`motionX` 只控制横轴、`motionY` 只控制纵轴，近景与远景产生不同幅度的视差。
 
 ## JSON 示例
 

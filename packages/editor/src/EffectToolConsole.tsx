@@ -33,7 +33,7 @@ function errorMessage(error: unknown): string {
     const missing = error.requirements.map((item) => `${item.description || item.name}（${item.kind}）`).join("、");
     return missing.length === 0
       ? "当前工具缺少必需输入，已安全停止执行。"
-      : `缺少必需输入：${missing}。上传一张图片后，服务器会为人工预览派生受控资源。`;
+      : `缺少必需输入：${missing}。请上传该工具要求的图片或视频素材，派生资源由服务器生成。`;
   }
   if (error instanceof BrowserApiError) {
     if (error.code === "ARK_PROVIDER_UNAVAILABLE") return "Ark 尚未配置，请检查服务器 ARK_API_KEY。";
@@ -50,11 +50,41 @@ const MAX_MANY_IMAGES = 32;
 export function imageUploadRequirement(tool: SelectedEffectToolView): Readonly<{ min: number; max: number }> {
   const required = tool.inputRequirements.filter((slot) => slot.required);
   const slots = (required.length > 0 ? required : tool.inputRequirements.filter((slot) => !slot.required))
-    .filter((slot) => slot.acceptsUploadedImage);
+    .filter((slot) => slot.acceptsUploadedImage || slot.acceptsUploadedVideo);
   return Object.freeze(slots.reduce((range, slot) => ({
     min: range.min + (slot.required ? slot.cardinality === "many" ? MIN_MANY_IMAGES : 1 : 0),
     max: range.max + (slot.cardinality === "many" ? MAX_MANY_IMAGES : 1)
   }), { min: 0, max: 0 }));
+}
+
+function uploadSlots(tool: SelectedEffectToolView) {
+  const required = tool.inputRequirements.filter((slot) => slot.required);
+  return (required.length > 0 ? required : tool.inputRequirements.filter((slot) => !slot.required))
+    .filter((slot) => slot.acceptsUploadedImage || slot.acceptsUploadedVideo);
+}
+
+function uploadAccept(tool: SelectedEffectToolView): string {
+  const mimes = new Set(uploadSlots(tool).flatMap((slot) => slot.acceptedMimeTypes));
+  if (mimes.size > 0) return [...mimes].join(",");
+  const acceptsVideo = uploadSlots(tool).some((slot) => slot.acceptsUploadedVideo);
+  return acceptsVideo ? "image/*,video/*" : "image/*";
+}
+
+function compatibleAssetIds(
+  tool: SelectedEffectToolView,
+  assets: readonly BrowserAssetSummaryV1[]
+): readonly string[] {
+  const slots = uploadSlots(tool);
+  const remaining = [...assets];
+  const ordered: string[] = [];
+  for (const slot of slots) {
+    const matches = remaining.filter((asset) => slot.acceptsUploadedVideo
+      ? asset.kind === "video" : asset.kind === "image" || asset.kind === "svg");
+    const selected = slot.cardinality === "many" ? matches.slice(0, MAX_MANY_IMAGES) : matches.slice(0, 1);
+    ordered.push(...selected.map((asset) => asset.assetId));
+    for (const asset of selected) remaining.splice(remaining.findIndex((item) => item.assetId === asset.assetId), 1);
+  }
+  return ordered;
 }
 
 export function reconcileSelectedAssetIds(
@@ -77,9 +107,7 @@ export function turnInputIds(
   tool: SelectedEffectToolView,
   selectedAssetIds: readonly string[]
 ): Readonly<Record<string, string | readonly string[]>> {
-  const required = tool.inputRequirements.filter((slot) => slot.required);
-  const slots = (required.length > 0 ? required : tool.inputRequirements.filter((slot) => !slot.required))
-    .filter((slot) => slot.acceptsUploadedImage);
+  const slots = uploadSlots(tool);
   const output: Record<string, string | readonly string[]> = {};
   let offset = 0;
   slots.forEach((slot, index) => {
@@ -96,6 +124,24 @@ export function turnInputIds(
     offset += count;
   });
   return Object.freeze(output);
+}
+
+export function turnInputIdsForAssets(
+  tool: SelectedEffectToolView,
+  assets: readonly BrowserAssetSummaryV1[]
+): Readonly<Record<string, string | readonly string[]>> {
+  const slots = uploadSlots(tool);
+  const remaining = [...assets];
+  const ordered: string[] = [];
+  for (const slot of slots) {
+    const matches = remaining.filter((asset) => slot.acceptsUploadedVideo
+      ? asset.kind === "video" : asset.kind === "image" || asset.kind === "svg");
+    const count = slot.cardinality === "many" ? Math.min(MAX_MANY_IMAGES, matches.length) : Math.min(1, matches.length);
+    const selected = matches.slice(0, count);
+    ordered.push(...selected.map((asset) => asset.assetId));
+    for (const asset of selected) remaining.splice(remaining.findIndex((item) => item.assetId === asset.assetId), 1);
+  }
+  return turnInputIds(tool, ordered);
 }
 
 export function filterEffectTools(
@@ -229,7 +275,7 @@ export function EffectToolConsole() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string>();
-  const imageAssets = useMemo(() => assets.filter((asset) => asset.kind === "image" || asset.kind === "svg"), [assets]);
+  const imageAssets = useMemo(() => assets.filter((asset) => asset.kind === "image" || asset.kind === "svg" || asset.kind === "video"), [assets]);
   const selectedTool = tools.find((item) => item.toolName === selectedToolName) ?? tools[0];
   const selectedAssets = selectedAssetIds.flatMap((assetId) => {
     const asset = imageAssets.find((item) => item.assetId === assetId);
@@ -267,7 +313,7 @@ export function EffectToolConsole() {
     setSelectedAssetIds((current) => reconcileSelectedAssetIds(
       selectedTool,
       current,
-      imageAssets.map((asset) => asset.assetId)
+      compatibleAssetIds(selectedTool, imageAssets)
     ));
   }, [selectedTool?.toolName, imageAssets]);
 
@@ -294,14 +340,17 @@ export function EffectToolConsole() {
     const requirement = imageUploadRequirement(requestedTool);
     const remaining = Math.max(0, requirement.max - selectedAssetIds.length);
     if (files.length > remaining) {
-      setError(`当前特效最多使用 ${requirement.max} 张图片，还可上传 ${remaining} 张。`);
+      setError(`当前特效最多使用 ${requirement.max} 个素材，还可上传 ${remaining} 个。`);
       return;
     }
     setUploading(true);
     setError(undefined);
     const uploaded: BrowserAssetSummaryV1[] = [];
     try {
-      for (const file of files) uploaded.push(await mediaAssetApi.upload(file, "reference-image"));
+      for (const file of files) {
+        const purpose = file.type.startsWith("video/") ? "reference-video" : "reference-image";
+        uploaded.push(await mediaAssetApi.upload(file, purpose));
+      }
     } catch (cause) { setError(errorMessage(cause)); }
     finally {
       if (uploaded.length > 0) {
@@ -310,10 +359,11 @@ export function EffectToolConsole() {
           ...uploaded,
           ...current.filter((item) => !uploadedIds.includes(item.assetId))
         ]);
+        const available = [...uploaded, ...imageAssets.filter((item) => !uploadedIds.includes(item.assetId))];
         setSelectedAssetIds((current) => reconcileSelectedAssetIds(
           requestedTool,
           [...current, ...uploadedIds],
-          [...uploadedIds, ...imageAssets.map((asset) => asset.assetId)]
+          compatibleAssetIds(requestedTool, available)
         ));
       }
       setUploading(false);
@@ -325,7 +375,7 @@ export function EffectToolConsole() {
     const value = prompt.trim();
     const requestedTool = selectedTool;
     if (value.length === 0 || busy || requestedTool === undefined) return;
-    const inputIds = turnInputIds(requestedTool, selectedAssetIds);
+    const inputIds = turnInputIdsForAssets(requestedTool, selectedAssets);
     const startedAt = performance.now();
     setPrompt("");
     setError(undefined);
@@ -360,7 +410,7 @@ export function EffectToolConsole() {
     setSelectedAssetIds((current) => reconcileSelectedAssetIds(
       tool,
       current,
-      imageAssets.map((asset) => asset.assetId)
+      compatibleAssetIds(tool, imageAssets)
     ));
     setToolMenuOpen(false);
     setToolQuery("");
@@ -418,12 +468,12 @@ export function EffectToolConsole() {
           <form className="composer-shell" onSubmit={(event) => void submit(event)}>
             <div className="selected-tool-tray">
               {selectedTool && <span><Wrench size={12} /><b>{selectedTool.displayName}</b><code>{selectedTool.toolName}</code></span>}
-              {selectedAssets.map((asset) => <button type="button" title="移除图片" key={asset.assetId} onClick={() => setSelectedAssetIds((current) => current.filter((assetId) => assetId !== asset.assetId))}><FileImage size={12} />{asset.displayName}<X size={11} /></button>)}
-              {uploadRequirement.max > 0 && <span className="asset-count">图片 {selectedAssetIds.length}/{uploadRequirement.max}</span>}
+              {selectedAssets.map((asset) => <button type="button" title="移除素材" key={asset.assetId} onClick={() => setSelectedAssetIds((current) => current.filter((assetId) => assetId !== asset.assetId))}>{asset.kind === "video" ? <Video size={12} /> : <FileImage size={12} />}{asset.displayName}<X size={11} /></button>)}
+              {uploadRequirement.max > 0 && <span className="asset-count">素材 {selectedAssetIds.length}/{uploadRequirement.max}</span>}
             </div>
             <textarea rows={1} maxLength={4_000} placeholder="描述视频特效需求" value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={onComposerKeyDown} />
             <div className="composer-toolbar">
-              <label className={`attach-button ${uploadDisabled ? "is-disabled" : ""}`} title={uploadRequirement.max === 0 ? "当前特效不需要图片" : `上传图片（最多 ${uploadRequirement.max} 张）`}><input ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/avif,image/svg+xml" aria-label="上传图片" disabled={uploadDisabled} onChange={(event) => void upload(event)} />{uploading ? <LoaderCircle className="spin" size={16} /> : <Paperclip size={17} />}</label>
+              <label className={`attach-button ${uploadDisabled ? "is-disabled" : ""}`} title={uploadRequirement.max === 0 ? "当前特效不需要素材" : `上传素材（最多 ${uploadRequirement.max} 个）`}><input ref={fileInput} type="file" multiple accept={selectedTool === undefined ? "image/*" : uploadAccept(selectedTool)} aria-label="上传素材" disabled={uploadDisabled} onChange={(event) => void upload(event)} />{uploading ? <LoaderCircle className="spin" size={16} /> : <Paperclip size={17} />}</label>
               <label className="thinking-toggle"><input type="checkbox" checked={thinking} onChange={(event) => setThinking(event.target.checked)} /><span>深度思考</span></label>
               <div className="composer-actions-right">
                 <span className="model-label">Doubao 2.0 Lite</span>

@@ -30,7 +30,7 @@ import {
 } from "../../../src/batches/batch-06/common.js";
 import { speedRampSampleTime } from "../../../src/batches/batch-06/speed-ramp.js";
 
-const BLOCKED_DEFINITIONS = [
+const EXECUTABLE_DEFINITIONS = [
   OBJECT_EXPLODE_DEFINITION,
   TEXT_LOGO_REVEAL_DEFINITION,
   SMART_CROP_ANIMATE_DEFINITION,
@@ -38,13 +38,12 @@ const BLOCKED_DEFINITIONS = [
   PHOTO_STACK_DEFINITION,
   VIDEO_FREEZE_FRAME_DEFINITION,
   SPEED_RAMP_DEFINITION,
-  ECHO_TRAIL_DEFINITION,
   BACKGROUND_REMOVE_COMPOSE_DEFINITION
 ] as const;
 
 const EXPECTED_SLOTS: Readonly<Record<string, readonly string[]>> = {
-  object_explode: ["source_model"],
-  text_logo_reveal: ["logo_geometry", "typeface"],
+  object_explode: ["source_image"],
+  text_logo_reveal: ["source_image"],
   ken_burns: ["source_image"],
   smart_crop_animate: ["source_video", "subject_tracks"],
   image_depth_parallax: ["source_image", "source_depth"],
@@ -84,11 +83,15 @@ function authorized(
 function inputsFor(definition: EffectToolDefinition): AuthorizedEffectInputs {
   const inputs: Record<string, AuthorizedEffectInputValue> = {};
   for (const slot of definition.inputSlots) {
-    const binding = definition === KEN_BURNS_DEFINITION && slot.name === "source_image"
-      ? sourceImage
-      : { adapterFixture: slot.name };
+    const binding = slot.kind === "image" || slot.kind === "video" ? sourceImage
+      : slot.kind === "mask" || slot.kind === "depth-map"
+        ? { width: 4, height: 4, data: Array.from({ length: 16 }, (_, index) => index / 15) }
+        : { adapterFixture: slot.name };
     inputs[slot.name] = slot.cardinality === "many"
-      ? [authorized(slot, { adapterFixture: `${slot.name}-0` }), authorized(slot, { adapterFixture: `${slot.name}-1` })]
+      ? [authorized(slot, sourceImage), authorized(slot, {
+          ...sourceImage,
+          data: Uint8ClampedArray.from(sourceImage.data, (value, index) => index % 4 === 3 ? 255 : 255 - value)
+        })]
       : authorized(slot, binding);
   }
   return inputs;
@@ -127,6 +130,16 @@ function executeDefault(
     { type: definition.toolName, data: {} },
     context
   );
+}
+
+function executeParams(
+  definition: EffectToolDefinition,
+  data: Record<string, unknown>,
+  time: number,
+  inputs = inputsFor(definition)
+) {
+  return executeSelectedEffectTool(definition, definition.toolName,
+    { type: definition.toolName, data }, contextFor(definition, time, inputs));
 }
 
 describe("batch-06 resource contracts", () => {
@@ -204,18 +217,59 @@ describe("batch-06 real rendering and explicit blockers", () => {
       .rejects.toThrow("source_image must bind");
   });
 
-  it.each(BLOCKED_DEFINITIONS)("reports an adapter blocker instead of a fake frame for $toolName", async (definition) => {
-    await expect(executeDefault(definition)).rejects.toBeInstanceOf(Batch06AdapterRequiredError);
-    await expect(executeDefault(definition)).rejects.toMatchObject({
-      code: "BATCH_06_ADAPTER_REQUIRED",
-      toolName: definition.toolName
-    });
+  it.each(EXECUTABLE_DEFINITIONS)("renders a real RGBA frame for $toolName", async (definition) => {
+    const result = await executeDefault(definition);
+    expect(result.kind).toBe("frame");
+    const frame = result.output as Rgba8FrameOutput;
+    expect(frame).toMatchObject({ version: RGBA8_FRAME_VERSION, width: 4, height: 4 });
+    expect(frame.data).toHaveLength(64);
   });
 
-  it("keeps speed-ramp sample time deterministic while frame decoding is blocked", () => {
+  it("keeps only the out-of-scope echo adapter explicitly blocked", async () => {
+    await expect(executeDefault(ECHO_TRAIL_DEFINITION)).rejects.toBeInstanceOf(Batch06AdapterRequiredError);
+  });
+
+  it("keeps speed-ramp source sampling deterministic", () => {
     const params = SPEED_RAMP_DEFINITION.defaults;
     expect(speedRampSampleTime(1, params)).toBeCloseTo(1, 8);
     expect(speedRampSampleTime(3, params)).toBeCloseTo(4, 8);
     expect(speedRampSampleTime(4, params)).toBeCloseTo(6, 8);
+  });
+
+  it("supports a true Ken Burns push-then-pull scale curve", async () => {
+    const data = {
+      motionMode: "push_then_pull", duration: 4, startScale: 1, endScale: 1,
+      startCenterX: 0.5, endCenterX: 0.5, startCenterY: 0.5, endCenterY: 0.5, easing: "linear"
+    };
+    const start = (await executeParams(KEN_BURNS_DEFINITION, data, 0)).output as Rgba8FrameOutput;
+    const middle = (await executeParams(KEN_BURNS_DEFINITION, data, 2)).output as Rgba8FrameOutput;
+    const end = (await executeParams(KEN_BURNS_DEFINITION, data, 4)).output as Rgba8FrameOutput;
+    expect([...middle.data]).not.toEqual([...start.data]);
+    expect([...end.data]).toEqual([...start.data]);
+  });
+
+  it("keeps horizontal and vertical depth-parallax motion visually distinct", async () => {
+    const horizontal = (await executeParams(IMAGE_DEPTH_PARALLAX_DEFINITION,
+      { duration: 1, motionX: 0.8, motionY: 0, depthScale: 2, cameraDistance: 0.5 }, 1)).output as Rgba8FrameOutput;
+    const vertical = (await executeParams(IMAGE_DEPTH_PARALLAX_DEFINITION,
+      { duration: 1, motionX: 0, motionY: 0.8, depthScale: 2, cameraDistance: 0.5 }, 1)).output as Rgba8FrameOutput;
+    expect([...horizontal.data]).not.toEqual([...vertical.data]);
+  });
+
+  it("uses multiple authorized photos instead of repeating the first image", async () => {
+    const normalInputs = inputsFor(PHOTO_STACK_DEFINITION);
+    const reversedInputs = { ...normalInputs,
+      source_images: [...(normalInputs.source_images as readonly AuthorizedEffectInput[])].reverse() };
+    const normal = (await executeParams(PHOTO_STACK_DEFINITION,
+      { visibleCount: 2, revealInterval: 0, spreadX: 0.3 }, 1, normalInputs)).output as Rgba8FrameOutput;
+    const reversed = (await executeParams(PHOTO_STACK_DEFINITION,
+      { visibleCount: 2, revealInterval: 0, spreadX: 0.3 }, 1, reversedInputs)).output as Rgba8FrameOutput;
+    expect([...normal.data]).not.toEqual([...reversed.data]);
+  });
+
+  it("reports the frozen source time throughout the freeze interval", async () => {
+    const frame = (await executeParams(VIDEO_FREEZE_FRAME_DEFINITION,
+      { freezeAt: 1.25, freezeDuration: 2 }, 2.5)).output as Rgba8FrameOutput;
+    expect(frame.sampleTime).toBe(1.25);
   });
 });

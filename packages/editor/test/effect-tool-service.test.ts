@@ -1033,6 +1033,30 @@ describe("server single effect-tool service", () => {
           { name: "camera_target", required: false, acceptsUploadedImage: false }
         ]
       });
+      expect(catalog.tools.find((item) => item.toolName === "background_remove_compose")).toMatchObject({
+        inputRequirements: [
+          { name: "foreground_video", acceptsUploadedVideo: true },
+          { name: "foreground_matte", acceptsUploadedImage: false, acceptsUploadedVideo: false },
+          { name: "background_image", acceptsUploadedImage: true, acceptsUploadedVideo: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "image_depth_parallax")).toMatchObject({
+        inputRequirements: [
+          { name: "source_image", acceptsUploadedImage: true },
+          { name: "source_depth", acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "smart_crop_animate")).toMatchObject({
+        inputRequirements: [
+          { name: "source_video", acceptsUploadedVideo: true },
+          { name: "subject_tracks", acceptsUploadedImage: false, acceptsUploadedVideo: false }
+        ]
+      });
+      for (const toolName of ["speed_ramp", "video_freeze_frame"]) {
+        expect(catalog.tools.find((item) => item.toolName === toolName)).toMatchObject({
+          inputRequirements: [{ name: "source_video", acceptsUploadedVideo: true }]
+        });
+      }
 
       const inquiry = await fetch(`${baseUrl}/api/effect-tools/v3/turns`, {
         method: "POST",
