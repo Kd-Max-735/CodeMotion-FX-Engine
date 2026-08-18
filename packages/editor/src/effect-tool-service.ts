@@ -365,6 +365,7 @@ function acceptsUploadedImage(
   slot: EffectInputSlotDefinition
 ): boolean {
   if (isServerDerivedInputSlot(definition, slot)) return false;
+  if (definition.toolName === "blend" && slot.name === "source_layer") return true;
   // Retained as the legacy "user-uploaded visual" flag for catalog compatibility.
   return slot.kind === "image" || slot.kind === "video";
 }
@@ -740,22 +741,6 @@ function derivedPreviewPixels(
         output[targetOffset + 2] = snapshot[sourceOffset + 2]!;
         output[targetOffset + 3] = snapshot[sourceOffset + 3]!;
       }
-    }
-  }
-  return output;
-}
-
-function derivedBlendOverlayPixels(
-  source: Uint8Array,
-  render: EffectToolRenderSettings
-): Uint8Array {
-  const output = new Uint8Array(source);
-  const span = Math.max(1, render.width + render.height - 2);
-  for (let y = 0; y < render.height; y += 1) {
-    for (let x = 0; x < render.width; x += 1) {
-      const alphaOffset = (y * render.width + x) * 4 + 3;
-      const spatialOpacity = 0.25 + (x + y) / span * 0.65;
-      output[alphaOffset] = Math.round(output[alphaOffset]! * spatialOpacity);
     }
   }
   return output;
@@ -1318,10 +1303,10 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
       }, signal === undefined ? {} : { signal });
       cache?.pixels.set(pixelCacheKey, pixelsPromise);
     }
-    const previewPixels = derivedPreviewPixels(await pixelsPromise, slot, render);
-    const pixels = definition.toolName === "blend" && slot.name === "overlay_layer"
-      ? derivedBlendOverlayPixels(previewPixels, render)
-      : previewPixels;
+    const decodedPixels = await pixelsPromise;
+    const pixels = definition.toolName === "blend"
+      ? new Uint8Array(decodedPixels)
+      : derivedPreviewPixels(decodedPixels, slot, render);
     if (existing) {
       if (slot.name === "brush_texture") {
         return {
@@ -1672,11 +1657,13 @@ export class EffectToolService {
       );
       if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
       const assetIds = Object.values(rawInputIds).flatMap((value) => typeof value === "string" ? [value] : [...value]);
-      const sourceImageId = definition.inputSlots.flatMap((slot) => {
+      const declaredSourceImageId = definition.inputSlots.flatMap((slot) => {
         if (slot.kind !== "image") return [];
         const value = rawInputIds[slot.name];
         return typeof value === "string" ? [value] : value === undefined ? [] : [...value];
       })[0];
+      const blendSourceId = definition.toolName === "blend" ? rawInputIds.source_layer : undefined;
+      const sourceImageId = typeof blendSourceId === "string" ? blendSourceId : declaredSourceImageId;
       const execution = await this.nativeVideos.createPrepared(
         owner,
         definition,

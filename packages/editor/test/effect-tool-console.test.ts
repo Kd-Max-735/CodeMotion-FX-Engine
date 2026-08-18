@@ -92,6 +92,20 @@ describe("120-tool selector helpers", () => {
     expect(turnInputIds(stack, stackIds)).toEqual({ source_images: stackIds });
   });
 
+  it("binds two independent uploaded images for blend", () => {
+    const blend = tool({
+      toolName: "blend",
+      inputRequirements: [input("source_layer", "data"), input("overlay_layer", "image")]
+    });
+    const assetIds = ["asset_blendbase00", "asset_blendover00"];
+
+    expect(imageUploadRequirement(blend)).toEqual({ min: 2, max: 2 });
+    expect(turnInputIds(blend, assetIds)).toEqual({
+      source_layer: assetIds[0],
+      overlay_layer: assetIds[1]
+    });
+  });
+
   it("binds one uploaded video without counting server-derived analysis as a second asset", () => {
     const smartCrop = tool({
       toolName: "smart_crop_animate",

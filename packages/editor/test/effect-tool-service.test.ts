@@ -660,9 +660,16 @@ describe("server single effect-tool service", () => {
       arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: false, reason: "test" },
       trustedBytes: pixels.byteLength
     };
-    const decode = vi.fn(async () => pixels);
+    const overlayPixels = Uint8Array.from(pixels, (value, offset) => offset % 4 === 3 ? value : 255 - value);
+    const overlayAssetId = "asset_overlayabcdefgh";
+    const decode = vi.fn(async (resolved: VerifiedStoredMedia) =>
+      resolved.asset.id === overlayAssetId ? overlayPixels : pixels);
     const resolver = new TenantMediaEffectToolInputResolver(
-      { resolve: vi.fn(async () => media) } as never,
+      { resolve: vi.fn(async (_owner, assetId: string) => ({
+        ...media,
+        asset: { ...media.asset, id: assetId, uri: `media://${assetId}`, hash: `sha256:${assetId}` },
+        descriptor: { ...media.descriptor, id: assetId, cacheKey: assetId }
+      })) } as never,
       undefined,
       decode as never
     );
@@ -688,9 +695,11 @@ describe("server single effect-tool service", () => {
 
     for (const [toolName, primarySlot, sourceKind, animates] of cases) {
       const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
-      const inputs = await resolver.resolve(principal, definition, {
-        [primarySlot]: media.asset.id
-      }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
+      const inputIds = toolName === "blend"
+        ? { [primarySlot]: media.asset.id, overlay_layer: overlayAssetId }
+        : { [primarySlot]: media.asset.id };
+      const inputs = await resolver.resolve(principal, definition, inputIds,
+        { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
       const primary = inputs[primarySlot];
       expect(primary).toBeDefined();
       expect(Array.isArray(primary)).toBe(false);
@@ -720,8 +729,8 @@ describe("server single effect-tool service", () => {
         } }).binding;
         expect(overlay.rasterInput.source.kind).toBe("image");
         expect(overlay.rasterInput.layerId).not.toBe(binding.rasterInput.layerId);
-        expect(new Set(Array.from(overlay.surface.data)
-          .filter((_value, offset) => offset % 4 === 3)).size).toBeGreaterThan(1);
+        expect(Buffer.from(overlay.surface.data)).toEqual(Buffer.from(overlayPixels));
+        expect(Buffer.from(overlay.surface.data)).not.toEqual(Buffer.from(binding.surface.data));
       }
       const renderAt = (time: number) => executeSelectedEffectTool(
         definition, toolName, { type: toolName, data: definition.defaults }, {
@@ -1010,6 +1019,12 @@ describe("server single effect-tool service", () => {
         inputRequirements: [
           { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },
           { name: "stroke_plan", kind: "data", required: true, acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "blend")).toMatchObject({
+        inputRequirements: [
+          { name: "source_layer", required: true, acceptsUploadedImage: true },
+          { name: "overlay_layer", required: true, acceptsUploadedImage: true }
         ]
       });
       expect(catalog.tools.find((item) => item.toolName === "dolly_zoom")).toMatchObject({
