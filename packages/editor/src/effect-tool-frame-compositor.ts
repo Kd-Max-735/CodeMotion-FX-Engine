@@ -2084,15 +2084,22 @@ function batch05CameraFrame(
     const centerX = (request.width - 1) / 2;
     const centerY = (request.height - 1) / 2;
     const maximumRadius = Math.max(1, Math.hypot(centerX, centerY));
+    const subjectRadius = 0.38;
+    const radialBias = Math.exp((forward ? 1 : -1) * strength * 2.4);
     for (let y = 0; y < request.height; y += 1) {
       for (let x = 0; x < request.width; x += 1) {
         const dx = x - centerX;
         const dy = y - centerY;
         const radial = Math.min(1, Math.hypot(dx, dy) / maximumRadius);
-        const subjectHold = smoothUnit(Math.max(0, (radial - 0.18) / 0.82));
-        const localScale = 1 + (forward ? 1 : -1) * strength * subjectHold;
-        const sourceX = centerX + dx / Math.max(0.42, localScale);
-        const sourceY = centerY + dy / Math.max(0.42, localScale);
+        const annulus = radial <= subjectRadius
+          ? 0 : (radial - subjectRadius) / (1 - subjectRadius);
+        const warpedAnnulus = annulus <= 0 ? 0
+          : annulus / (annulus + (1 - annulus) * radialBias);
+        const sourceRadius = radial <= subjectRadius
+          ? radial : subjectRadius + warpedAnnulus * (1 - subjectRadius);
+        const radialScale = radial <= Number.EPSILON ? 1 : sourceRadius / radial;
+        const sourceX = centerX + dx * radialScale;
+        const sourceY = centerY + dy * radialScale;
         const offset = (y * request.width + x) * 4;
         for (let channel = 0; channel < 4; channel += 1) {
           output[offset + channel] = clampByte(sampledChannel(

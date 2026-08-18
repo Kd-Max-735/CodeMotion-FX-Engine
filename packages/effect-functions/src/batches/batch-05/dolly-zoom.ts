@@ -36,7 +36,7 @@ export const DOLLY_ZOOM_DEFINITION: EffectToolDefinition<DollyZoomParams> = {
   effectId: "fx.camera.dollyZoom",
   toolName: "dolly_zoom",
   displayName: "推拉变焦镜头",
-  version: "1.1.0",
+  version: "1.2.0",
   category: "camera",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",

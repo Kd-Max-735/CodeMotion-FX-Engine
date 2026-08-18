@@ -334,6 +334,24 @@ describe("effect tool frame compositor", () => {
     expect(redCentroidX(backward)).toBeLessThan(redCentroidX(source));
   });
 
+  it("keeps the central dolly zoom subject intact without duplicated parts", () => {
+    const source = gradientSource();
+    const render = (positionZ: number) => composeEffectToolFrame(metadata({
+      operation: "camera_dolly_zoom",
+      position: { x: 0, y: 0, z: positionZ },
+      rotationDegrees: { x: 0, y: 0, z: 0 },
+      progress: 1,
+      verticalFovDegrees: positionZ < 0 ? 72 : 28
+    }), detailedRequest, "dolly_zoom", source, { source_video: source });
+    for (const output of [render(-8), render(8)]) {
+      for (const [x, y] of [[48, 12], [38, 32], [58, 32], [48, 52]] as const) {
+        const offset = (y * detailedRequest.width + x) * 4;
+        expect([...output.slice(offset, offset + 4)]).toEqual([...source.slice(offset, offset + 4)]);
+      }
+      expect(changedPixelCount(source, output)).toBeGreaterThan(500);
+    }
+  });
+
   it.each([
     ["dolly_zoom", {
       operation: "camera_dolly_zoom", position: { x: 0, y: 0, z: 6 },
