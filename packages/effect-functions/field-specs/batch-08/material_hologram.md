@@ -42,8 +42,9 @@
 
 | inputSlot | kind | 必需 | 说明 |
 | --- | --- | --- | --- |
-| `target_layer` | `data` | 是 | 服务端解析并锁定的目标材质表面 |
-| `depth_map` | `depth-map` | 是 | 服务端授权并锁定的深度采样 |
+| `source_image` | `image` | 是 | 用户上传并由服务端授权解码的一张投影图片 |
+| `target_layer` | `data` | 是 | 服务端从投影图片派生并锁定的材质表面，不占上传位 |
+| `depth_map` | `depth-map` | 是 | 服务端从投影图片亮度派生并锁定的深度采样，不占上传位 |
 
 ## 选择策略
 

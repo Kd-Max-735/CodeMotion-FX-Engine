@@ -84,6 +84,8 @@ export function metadataResult<Output>(output: Output): EffectRenderResult<Outpu
 
 export interface AudioAnalysisBinding {
   readonly version: "audio-analysis-v1";
+  readonly sampleRate?: number;
+  readonly duration?: number;
   readonly frequencyBins?: readonly number[];
   readonly previousFrequencyBins?: readonly number[];
   readonly waveformSamples?: readonly number[];
@@ -92,6 +94,8 @@ export interface AudioAnalysisBinding {
 
 const AUDIO_ANALYSIS_FIELDS = new Set([
   "version",
+  "sampleRate",
+  "duration",
   "frequencyBins",
   "previousFrequencyBins",
   "waveformSamples",
@@ -132,4 +136,18 @@ export function audioSeries(
     throw new TypeError(`${field} must contain 1-${maximumLength} finite normalized samples.`);
   }
   return value as readonly number[];
+}
+
+export function audioScalar(
+  context: ServerEffectRenderContext,
+  field: "sampleRate" | "duration",
+  fallback: number
+): number {
+  const authorized = context.inputs.audio_analysis;
+  if (authorized === undefined || Array.isArray(authorized) || !isRecord(authorized)
+    || authorized.slot !== "audio_analysis" || authorized.kind !== "audio"
+    || authorized.locked !== true || authorized.tenantId !== context.tenantId
+    || authorized.userId !== context.userId || !isRecord(authorized.binding)) return fallback;
+  const value = authorized.binding[field];
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }

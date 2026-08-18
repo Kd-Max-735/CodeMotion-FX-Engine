@@ -1,5 +1,5 @@
 import {
-  Check, ChevronDown, Clock3, Copy, Download, FileImage, LoaderCircle, Menu, Paperclip,
+  Check, ChevronDown, Clock3, Copy, Download, FileAudio, FileImage, LoaderCircle, Menu, Paperclip,
   Plus, Search, Send, Settings, Square, Video, Wrench, X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
@@ -33,7 +33,7 @@ function errorMessage(error: unknown): string {
     const missing = error.requirements.map((item) => `${item.description || item.name}（${item.kind}）`).join("、");
     return missing.length === 0
       ? "当前工具缺少必需输入，已安全停止执行。"
-      : `缺少必需输入：${missing}。请上传该工具要求的图片或视频素材，派生资源由服务器生成。`;
+      : `缺少必需输入：${missing}。请上传该工具要求的图片、视频或音频素材，派生资源由服务器生成。`;
   }
   if (error instanceof BrowserApiError) {
     if (error.code === "ARK_PROVIDER_UNAVAILABLE") return "Ark 尚未配置，请检查服务器 ARK_API_KEY。";
@@ -50,7 +50,7 @@ const MAX_MANY_IMAGES = 32;
 export function imageUploadRequirement(tool: SelectedEffectToolView): Readonly<{ min: number; max: number }> {
   const required = tool.inputRequirements.filter((slot) => slot.required);
   const slots = (required.length > 0 ? required : tool.inputRequirements.filter((slot) => !slot.required))
-    .filter((slot) => slot.acceptsUploadedImage || slot.acceptsUploadedVideo);
+    .filter((slot) => slot.acceptsUploadedImage || slot.acceptsUploadedVideo || slot.acceptsUploadedAudio);
   return Object.freeze(slots.reduce((range, slot) => ({
     min: range.min + (slot.required ? slot.cardinality === "many" ? MIN_MANY_IMAGES : 1 : 0),
     max: range.max + (slot.cardinality === "many" ? MAX_MANY_IMAGES : 1)
@@ -60,14 +60,25 @@ export function imageUploadRequirement(tool: SelectedEffectToolView): Readonly<{
 function uploadSlots(tool: SelectedEffectToolView) {
   const required = tool.inputRequirements.filter((slot) => slot.required);
   return (required.length > 0 ? required : tool.inputRequirements.filter((slot) => !slot.required))
-    .filter((slot) => slot.acceptsUploadedImage || slot.acceptsUploadedVideo);
+    .filter((slot) => slot.acceptsUploadedImage || slot.acceptsUploadedVideo || slot.acceptsUploadedAudio);
 }
 
 function uploadAccept(tool: SelectedEffectToolView): string {
   const mimes = new Set(uploadSlots(tool).flatMap((slot) => slot.acceptedMimeTypes));
   if (mimes.size > 0) return [...mimes].join(",");
-  const acceptsVideo = uploadSlots(tool).some((slot) => slot.acceptsUploadedVideo);
-  return acceptsVideo ? "image/*,video/*" : "image/*";
+  const accepted = new Set<string>();
+  uploadSlots(tool).forEach((slot) => {
+    if (slot.acceptsUploadedImage) accepted.add("image/*");
+    if (slot.acceptsUploadedVideo) accepted.add("video/*");
+    if (slot.acceptsUploadedAudio) accepted.add("audio/*");
+  });
+  return [...accepted].join(",");
+}
+
+function assetMatchesSlot(asset: BrowserAssetSummaryV1, slot: SelectedEffectToolView["inputRequirements"][number]): boolean {
+  if (slot.acceptsUploadedAudio || slot.kind === "audio") return asset.kind === "audio";
+  if (slot.acceptsUploadedVideo || slot.kind === "video") return asset.kind === "video";
+  return slot.acceptsUploadedImage && (asset.kind === "image" || asset.kind === "svg");
 }
 
 function compatibleAssetIds(
@@ -78,8 +89,7 @@ function compatibleAssetIds(
   const remaining = [...assets];
   const ordered: string[] = [];
   for (const slot of slots) {
-    const matches = remaining.filter((asset) => slot.acceptsUploadedVideo
-      ? asset.kind === "video" : asset.kind === "image" || asset.kind === "svg");
+    const matches = remaining.filter((asset) => assetMatchesSlot(asset, slot));
     const selected = slot.cardinality === "many" ? matches.slice(0, MAX_MANY_IMAGES) : matches.slice(0, 1);
     ordered.push(...selected.map((asset) => asset.assetId));
     for (const asset of selected) remaining.splice(remaining.findIndex((item) => item.assetId === asset.assetId), 1);
@@ -134,8 +144,7 @@ export function turnInputIdsForAssets(
   const remaining = [...assets];
   const ordered: string[] = [];
   for (const slot of slots) {
-    const matches = remaining.filter((asset) => slot.acceptsUploadedVideo
-      ? asset.kind === "video" : asset.kind === "image" || asset.kind === "svg");
+    const matches = remaining.filter((asset) => assetMatchesSlot(asset, slot));
     const count = slot.cardinality === "many" ? Math.min(MAX_MANY_IMAGES, matches.length) : Math.min(1, matches.length);
     const selected = matches.slice(0, count);
     ordered.push(...selected.map((asset) => asset.assetId));
@@ -275,7 +284,7 @@ export function EffectToolConsole() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string>();
-  const imageAssets = useMemo(() => assets.filter((asset) => asset.kind === "image" || asset.kind === "svg" || asset.kind === "video"), [assets]);
+  const imageAssets = useMemo(() => assets.filter((asset) => ["image", "svg", "video", "audio"].includes(asset.kind)), [assets]);
   const selectedTool = tools.find((item) => item.toolName === selectedToolName) ?? tools[0];
   const selectedAssets = selectedAssetIds.flatMap((assetId) => {
     const asset = imageAssets.find((item) => item.assetId === assetId);
@@ -348,7 +357,8 @@ export function EffectToolConsole() {
     const uploaded: BrowserAssetSummaryV1[] = [];
     try {
       for (const file of files) {
-        const purpose = file.type.startsWith("video/") ? "reference-video" : "reference-image";
+        const purpose = file.type.startsWith("audio/") ? "reference-audio"
+          : file.type.startsWith("video/") ? "reference-video" : "reference-image";
         uploaded.push(await mediaAssetApi.upload(file, purpose));
       }
     } catch (cause) { setError(errorMessage(cause)); }
@@ -457,7 +467,7 @@ export function EffectToolConsole() {
           {entries.length === 0 && !loading && <div className="empty-state"><div className="empty-mark"><span>›</span><i>_</i></div><h1>想要制作什么视频特效？</h1><p>选择一个工具并描述需求。服务器只会向 Doubao 提供该工具的参数定义。</p><div className="starter-prompts"><button type="button" onClick={() => setPrompt("让效果更明显一些，生成 5 秒视频")}>生成所选特效</button><button type="button" onClick={() => setPrompt("这个工具有哪些参数？")}>询问参数</button></div></div>}
           {loading && <div className="empty-state compact"><LoaderCircle className="spin" size={23} /><p>正在连接服务器</p></div>}
           {entries.map((entry) => entry.role === "user" ? (
-            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>{entry.tool.displayName} · {entry.tool.toolName}</span></div>{entry.assets && <div className="user-assets">{entry.assets.map((asset) => <span className="user-file" key={asset.assetId}><FileImage size={13} />{asset.displayName}</span>)}</div>}</div></article>
+            <article key={entry.id} className="message user"><div className="user-message"><div className="user-bubble-row"><button className="copy-prompt" type="button" title="复制提示词" onClick={() => void navigator.clipboard.writeText(entry.content)}><Copy size={15} /></button><div className="user-bubble">{entry.content}</div></div><div className="user-tools"><span>{entry.tool.displayName} · {entry.tool.toolName}</span></div>{entry.assets && <div className="user-assets">{entry.assets.map((asset) => <span className="user-file" key={asset.assetId}>{asset.kind === "audio" ? <FileAudio size={13} /> : asset.kind === "video" ? <Video size={13} /> : <FileImage size={13} />}{asset.displayName}</span>)}</div>}</div></article>
           ) : (
             <article key={entry.id} className="message agent-message"><div className="agent-avatar">AE</div><div className="agent-content"><div className="turn-duration"><Clock3 size={13} /><span>{entry.tool.displayName} · 已思考 <b>{formatElapsed(entry.elapsedMs)}</b></span></div>{entry.showThinking && entry.turn.reasoningContent && <details className="process-section" open><summary><span className="section-icon thinking-icon" /><strong>深度思考</strong><span className="process-summary">理解需求并判断是否调用 {entry.tool.toolName}</span><ChevronDown className="process-chevron" size={13} /></summary><div className="process-timeline"><div className="thinking-row completed"><span className="thinking-dot" /><p>{entry.turn.reasoningContent}</p><small>完成</small></div></div></details>}{entry.turn.kind === "tool_call" && <ToolResult turn={entry.turn} tool={entry.tool} />}{entry.turn.content && <section className="final-response"><div className="section-heading"><span className="section-icon final-icon"><Check size={12} /></span><strong>{entry.turn.kind === "tool_call" ? "最终回复" : "回复"}</strong></div><div className="assistant-text markdown-body"><p>{entry.turn.content}</p></div></section>}</div></article>
           ))}
@@ -468,7 +478,7 @@ export function EffectToolConsole() {
           <form className="composer-shell" onSubmit={(event) => void submit(event)}>
             <div className="selected-tool-tray">
               {selectedTool && <span><Wrench size={12} /><b>{selectedTool.displayName}</b><code>{selectedTool.toolName}</code></span>}
-              {selectedAssets.map((asset) => <button type="button" title="移除素材" key={asset.assetId} onClick={() => setSelectedAssetIds((current) => current.filter((assetId) => assetId !== asset.assetId))}>{asset.kind === "video" ? <Video size={12} /> : <FileImage size={12} />}{asset.displayName}<X size={11} /></button>)}
+              {selectedAssets.map((asset) => <button type="button" title="移除素材" key={asset.assetId} onClick={() => setSelectedAssetIds((current) => current.filter((assetId) => assetId !== asset.assetId))}>{asset.kind === "audio" ? <FileAudio size={12} /> : asset.kind === "video" ? <Video size={12} /> : <FileImage size={12} />}{asset.displayName}<X size={11} /></button>)}
               {uploadRequirement.max > 0 && <span className="asset-count">素材 {selectedAssetIds.length}/{uploadRequirement.max}</span>}
             </div>
             <textarea rows={1} maxLength={4_000} placeholder="描述视频特效需求" value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={onComposerKeyDown} />

@@ -32,6 +32,7 @@ export interface SelectedEffectInputRequirementView {
   readonly acceptedMimeTypes: readonly string[];
   readonly acceptsUploadedImage: boolean;
   readonly acceptsUploadedVideo?: boolean;
+  readonly acceptsUploadedAudio?: boolean;
 }
 
 export interface SelectedEffectToolView {
@@ -252,7 +253,8 @@ function inputRequirement(value: unknown): SelectedEffectInputRequirementView {
     || typeof item.description !== "string" || !Array.isArray(item.acceptedMimeTypes)
     || item.acceptedMimeTypes.some((mime) => typeof mime !== "string")
     || typeof item.acceptsUploadedImage !== "boolean"
-    || (item.acceptsUploadedVideo !== undefined && typeof item.acceptsUploadedVideo !== "boolean")) {
+    || (item.acceptsUploadedVideo !== undefined && typeof item.acceptsUploadedVideo !== "boolean")
+    || (item.acceptsUploadedAudio !== undefined && typeof item.acceptsUploadedAudio !== "boolean")) {
     throw new BrowserApiError(500, "INVALID_RESPONSE", false);
   }
   return Object.freeze({
@@ -263,7 +265,8 @@ function inputRequirement(value: unknown): SelectedEffectInputRequirementView {
     description: item.description,
     acceptedMimeTypes: Object.freeze([...(item.acceptedMimeTypes as string[])]),
     acceptsUploadedImage: item.acceptsUploadedImage,
-    acceptsUploadedVideo: item.acceptsUploadedVideo === true
+    acceptsUploadedVideo: item.acceptsUploadedVideo === true,
+    acceptsUploadedAudio: item.acceptsUploadedAudio === true
   });
 }
 

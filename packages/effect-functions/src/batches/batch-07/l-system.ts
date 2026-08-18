@@ -64,7 +64,8 @@ export const lSystemDefinition: EffectToolDefinition<LSystemParams> = {
     { presetId: "batch07.lsystem.snowflake", displayName: "科赫折线", params: { ...defaults, pattern: "koch", iterations: 5, angle: 90, step: 2.5, speed: 0 } },
     { presetId: "batch07.lsystem.dragon", displayName: "龙形曲线", params: { ...defaults, pattern: "dragon", iterations: 6, angle: 90, step: 4, strokeColor: "#D00000" } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: false, cardinality: "one",
+    description: "Optional server-authorized image used beneath the growing L-system." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",

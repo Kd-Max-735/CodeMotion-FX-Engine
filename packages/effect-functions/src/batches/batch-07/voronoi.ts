@@ -40,7 +40,8 @@ export const voronoiDefinition: EffectToolDefinition<VoronoiParams> = {
     { presetId: "batch07.voronoi.mosaic", displayName: "细密马赛克", params: { ...defaults, seed: 52, pointCount: 72, gridSize: 48, jitter: 1, edgeWidth: 0.035 } },
     { presetId: "batch07.voronoi.stone", displayName: "缓动石纹", params: { ...defaults, pointCount: 14, jitter: 0.45, speed: 0.65, cellColor: "#ADB5BD", edgeColor: "#212529" } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: false, cardinality: "one",
+    description: "Optional server-authorized image refracted through animated Voronoi cells." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",

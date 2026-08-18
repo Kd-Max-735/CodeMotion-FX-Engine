@@ -122,6 +122,7 @@ export interface EffectToolInputRequirementView {
   readonly acceptedMimeTypes: readonly string[];
   readonly acceptsUploadedImage: boolean;
   readonly acceptsUploadedVideo: boolean;
+  readonly acceptsUploadedAudio: boolean;
 }
 
 export interface EffectToolCatalogItem extends EffectToolListItem {
@@ -338,7 +339,25 @@ function isServerDerivedInputSlot(
       && (slot.name === "from_match_mask" || slot.name === "to_match_mask")
     || definition.toolName === "background_remove_compose" && slot.name === "foreground_matte"
     || definition.toolName === "image_depth_parallax" && slot.name === "source_depth"
-    || definition.toolName === "smart_crop_animate" && slot.name === "subject_tracks";
+    || definition.toolName === "smart_crop_animate" && slot.name === "subject_tracks"
+    || definition.toolName === "onset_trigger" && slot.name === "target_effect"
+    || definition.toolName === "vocal_reactive_text"
+      && (slot.name === "text_layer" || slot.name === "text_font")
+    || ["chart_reveal", "live_binding", "number_counter"].includes(definition.toolName)
+      && slot.kind === "data"
+    || ["glass", "hologram", "metal"].includes(definition.toolName)
+      && slot.name !== "source_image";
+}
+
+function isSyntheticDerivedInputSlot(
+  definition: EffectToolDefinition,
+  slot: EffectInputSlotDefinition
+): boolean {
+  return definition.toolName === "onset_trigger" && slot.name === "target_effect"
+    || definition.toolName === "vocal_reactive_text"
+      && (slot.name === "text_layer" || slot.name === "text_font")
+    || ["chart_reveal", "live_binding", "number_counter"].includes(definition.toolName)
+      && slot.kind === "data";
 }
 
 function acceptsUploadedImage(
@@ -358,6 +377,14 @@ function acceptsUploadedVideo(
   return slot.kind === "video";
 }
 
+function acceptsUploadedAudio(
+  definition: EffectToolDefinition,
+  slot: EffectInputSlotDefinition
+): boolean {
+  if (isServerDerivedInputSlot(definition, slot)) return false;
+  return slot.kind === "audio";
+}
+
 function derivedInputResourceId(
   definition: EffectToolDefinition,
   slot: EffectInputSlotDefinition,
@@ -368,6 +395,10 @@ function derivedInputResourceId(
     ? slot.name === "to_match_mask" ? "to_video" : "from_video"
       : definition.toolName === "depth_of_field" ? "source_frame"
       : definition.toolName === "paint_on" ? "source_image"
+      : definition.toolName === "onset_trigger" || definition.toolName === "vocal_reactive_text"
+        ? "audio_analysis"
+      : ["glass", "hologram", "metal"].includes(definition.toolName)
+        ? "source_image"
       : definition.toolName === "background_remove_compose" && slot.name === "foreground_matte"
         ? "foreground_video"
       : definition.toolName === "image_depth_parallax" && slot.name === "source_depth"
@@ -388,7 +419,8 @@ function requirementView(
     description: slot.description,
     acceptedMimeTypes: Object.freeze([...(slot.acceptedMimeTypes ?? [])]),
     acceptsUploadedImage: acceptsUploadedImage(definition, slot),
-    acceptsUploadedVideo: acceptsUploadedVideo(definition, slot)
+    acceptsUploadedVideo: acceptsUploadedVideo(definition, slot),
+    acceptsUploadedAudio: acceptsUploadedAudio(definition, slot)
   });
 }
 
@@ -519,41 +551,73 @@ function audioBinding(
 ): Record<string, unknown> {
   const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
   const samples: number[] = [];
-  let square = 0;
-  let peak = 0;
   for (let offset = 0; offset + 1 < pcm.byteLength; offset += 4) {
     const value = view.getInt16(offset, true) / 32768;
     samples.push(value);
-    square += value * value;
-    peak = Math.max(peak, Math.abs(value));
   }
-  const rms = samples.length === 0 ? 0 : Math.min(1, Math.sqrt(square / samples.length));
   if (definition?.toolName === "spectrum_bars" || definition?.toolName === "waveform") {
-    const series = samples.slice(0, 8_192);
+    const seriesLength = Math.min(65_536, samples.length);
+    const series = Array.from({ length: seriesLength }, (_, index) =>
+      samples[Math.min(samples.length - 1, Math.floor(index / Math.max(1, seriesLength - 1)
+        * Math.max(0, samples.length - 1)))]!);
     const waveformSamples = series.length > 0 ? series : [0];
     const frequencyBins = waveformSamples.map((value) => Math.min(1, Math.abs(value)));
     return {
       version: "audio-analysis-v1",
+      sampleRate: waveformSamples.length / duration,
+      duration,
       frequencyBins,
       previousFrequencyBins: frequencyBins.map((value) => value * 0.92),
       waveformSamples,
       previousWaveformSamples: waveformSamples.map((value) => value * 0.92)
     };
   }
+  const frameSize = 2_400;
+  const frameCount = Math.max(1, Math.ceil(samples.length / frameSize));
+  let priorEnergy = 0;
+  const frames = Array.from({ length: frameCount }, (_, frameIndex) => {
+    const start = frameIndex * frameSize;
+    const end = Math.min(samples.length, start + frameSize);
+    let energy = 0;
+    let localPeak = 0;
+    let low = 0;
+    let middle = 0;
+    let high = 0;
+    let average = 0;
+    for (let index = start; index < end; index += 1) {
+      const value = samples[index]!;
+      const previous = samples[Math.max(start, index - 1)]!;
+      average = average * 0.94 + value * 0.06;
+      energy += value * value;
+      localPeak = Math.max(localPeak, Math.abs(value));
+      low += average * average;
+      high += (value - previous) ** 2;
+      middle += (value - average) ** 2;
+    }
+    const count = Math.max(1, end - start);
+    const frameRms = Math.min(1, Math.sqrt(energy / count));
+    const bass = Math.min(1, Math.sqrt(low / count) * 2.2);
+    const highBand = Math.min(1, Math.sqrt(high / count) * 1.8);
+    const mid = Math.min(1, Math.sqrt(middle / count) * 1.5);
+    const onsetStrength = Math.min(1, Math.max(0, frameRms - priorEnergy) * 6);
+    const beatConfidence = Math.min(1, onsetStrength * 0.75 + bass * 0.45);
+    priorEnergy = priorEnergy * 0.55 + frameRms * 0.45;
+    return {
+      time: Math.min(duration, start / 48_000),
+      rms: frameRms,
+      peak: localPeak,
+      bass,
+      mid,
+      vocal: Math.min(1, mid * 0.72 + frameRms * 0.38),
+      high: highBand,
+      beatConfidence,
+      onsetStrength
+    };
+  });
   return {
     version: "audio-analysis-v1",
     duration,
-    frames: [{
-      time: 0,
-      rms,
-      peak,
-      bass: rms,
-      mid: rms,
-      vocal: rms,
-      high: rms,
-      beatConfidence: 0,
-      onsetStrength: 0
-    }]
+    frames
   };
 }
 
@@ -1150,6 +1214,17 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
       typeof value === "string" ? [value] : Array.isArray(value) ? value : [])
       .find((value): value is string => typeof value === "string" && RESOURCE_ID.test(value));
     for (const slot of definition.inputSlots) {
+      if (isSyntheticDerivedInputSlot(definition, slot)) {
+        output[slot.name] = Object.freeze({
+          slot: slot.name,
+          kind: slot.kind,
+          tenantId: principal.tenantId,
+          userId: principal.userId,
+          locked: true as const,
+          binding: previewDataBinding(definition, slot, new Uint8Array(render.width * render.height * 4), render)
+        });
+        continue;
+      }
       const derivedResourceId = derivedInputResourceId(definition, slot, raw);
       const value = raw[slot.name] ?? derivedResourceId ?? (slot.required && previewResourceId !== undefined
         ? slot.cardinality === "many" ? [previewResourceId] : previewResourceId
@@ -1190,8 +1265,11 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     cache?: EffectToolResolveCache
   ): Promise<unknown> {
     const existing = definition.primaryBackend.backendId === EXISTING_BACKEND;
+    const derivedFromImage = ["glass", "hologram", "metal"].includes(definition.toolName)
+      && isServerDerivedInputSlot(definition, slot);
     const mediaKind = slot.kind === "image" || slot.kind === "video" || slot.kind === "audio"
       || slot.kind === "mask" || slot.kind === "depth-map" || slot.kind === "texture" || slot.kind === "lut"
+      || derivedFromImage
       || existing && ["source_layer", "source_frame", "target_frame", "overlay_layer",
         "displacement_map", "mask_layer", "matte_layer", "brush_texture"].includes(slot.name);
     if (!mediaKind && this.serverResources !== undefined) {
@@ -1204,10 +1282,12 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     }
     const media = await mediaPromise;
     if (slot.kind === "audio" && media.asset.type === "audio") {
-      const pcm = await decodeAudioPreview(media, 0.1, signal === undefined ? {} : { signal });
+      const analysisDuration = Math.min(10,
+        Math.max(0.1, Number(media.asset.metadata.duration ?? 0.1)));
+      const pcm = await decodeAudioPreview(media, analysisDuration, signal === undefined ? {} : { signal });
       return audioBinding(
         pcm,
-        Math.max(0.1, Number(media.asset.metadata.duration ?? 0.1)),
+        analysisDuration,
         definition
       );
     }

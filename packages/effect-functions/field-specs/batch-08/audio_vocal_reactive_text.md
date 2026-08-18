@@ -38,9 +38,9 @@
 
 | inputSlot | kind | 必需 | 说明 |
 | --- | --- | --- | --- |
-| `audio_analysis` | `audio` | 是 | 服务端从已授权真实音频生成并锁定的频段分析 |
-| `text_layer` | `data` | 是 | 服务端解析并锁定的文字图层 |
-| `text_font` | `font` | 是 | 服务端授权并锁定的字体 |
+| `audio_analysis` | `audio` | 是 | 用户上传音频后，服务端解码并生成锁定的真实频段分析 |
+| `text_layer` | `data` | 是 | 服务端自动创建并锁定的文字表现，不占上传位 |
+| `text_font` | `font` | 是 | 服务端授权并锁定的内置字体，不占上传位 |
 
 ## 选择策略
 

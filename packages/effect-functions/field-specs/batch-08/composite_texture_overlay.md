@@ -40,8 +40,8 @@
 
 | inputSlot | kind | 必需 | 说明 |
 | --- | --- | --- | --- |
-| `base_layer` | `data` | 是 | 服务端解析并锁定的基础图层采样 |
-| `overlay_texture` | `texture` | 是 | 服务端授权、解码并锁定的叠加纹理 |
+| `base_image` | `image` | 是 | 用户上传、服务端授权并逐像素解码的基础图片 |
+| `overlay_image` | `image` | 是 | 用户上传、服务端授权并逐像素解码的纹理图片 |
 
 ## 选择策略
 

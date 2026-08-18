@@ -75,7 +75,8 @@ export const noiseFieldDefinition: EffectToolDefinition<NoiseFieldParams> = {
     { presetId: "batch07.noise.terrain", displayName: "地形", params: { ...defaults, gridSize: 40, scale: 4.5, octaves: 5, persistence: 0.58, speed: 0 } },
     { presetId: "batch07.noise.turbulence", displayName: "湍流", params: { ...defaults, seed: 91, scale: 7, octaves: 6, persistence: 0.7, speed: 1.2 } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: false, cardinality: "one",
+    description: "Optional server-authorized image displaced and colored by the noise field." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",

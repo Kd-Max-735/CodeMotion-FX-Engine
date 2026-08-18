@@ -64,6 +64,7 @@ export const GLASS_DEFINITION: EffectToolDefinition<GlassParams, AuthorizedEffec
     { presetId: "glass.prism", displayName: "棱镜玻璃", params: { blur: 4, refraction: 0.72, tint: "mint", tintStrength: 0.3, border: 3.5, opacity: 0.68 } }
   ],
   inputSlots: [
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized image receiving the glass material." },
     { name: "target_layer", kind: "data", required: true, cardinality: "one", description: "Server-resolved material surface." },
     { name: "backdrop_layer", kind: "data", required: true, cardinality: "one", description: "Server-resolved backdrop sampled behind the glass." }
   ],

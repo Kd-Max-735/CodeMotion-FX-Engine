@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, audioSeries, clamp,
+import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, audioScalar, audioSeries, clamp,
   metadataResult, normalizeColor, round, schema, valid } from "./shared.js";
 
 export interface SpectrumBarsParams extends JsonObject {
@@ -17,12 +17,18 @@ const defaults: SpectrumBarsParams = {
   barCount: 48, gain: 1, smoothing: 0.55, falloff: 1.1, logarithmic: true,
   barColor: "#00F5D4", backgroundColor: "#001219"
 };
-function sampledAverage(values: readonly number[], start: number, end: number): number {
-  const first = Math.min(values.length - 1, Math.floor(start));
-  const last = Math.min(values.length - 1, Math.max(first, Math.ceil(end) - 1));
-  let sum = 0;
-  for (let index = first; index <= last; index += 1) sum += values[index]!;
-  return sum / (last - first + 1);
+function spectralMagnitude(samples: readonly number[], offset: number, bin: number): number {
+  const windowSize = Math.min(256, samples.length);
+  let real = 0;
+  let imaginary = 0;
+  for (let index = 0; index < windowSize; index += 1) {
+    const sample = samples[(offset + index + samples.length) % samples.length]!;
+    const window = 0.5 - 0.5 * Math.cos(index / Math.max(1, windowSize - 1) * Math.PI * 2);
+    const angle = Math.PI * 2 * bin * index / windowSize;
+    real += sample * window * Math.cos(angle);
+    imaginary -= sample * window * Math.sin(angle);
+  }
+  return Math.min(1, Math.hypot(real, imaginary) / Math.max(1, windowSize * 0.16));
 }
 
 export const spectrumBarsDefinition: EffectToolDefinition<SpectrumBarsParams> = {
@@ -56,16 +62,17 @@ export const spectrumBarsDefinition: EffectToolDefinition<SpectrumBarsParams> = 
     backgroundColor: normalizeColor(params.backgroundColor) }),
   validateParams: () => valid(),
   render: (context, params) => {
-    const bins = audioSeries(context, "frequencyBins", 8192, 0, 1);
-    const previous = audioSeries(context, "previousFrequencyBins", 8192, 0, 1, false);
+    const samples = audioSeries(context, "waveformSamples", 65_536, -1, 1);
+    const sampleRate = audioScalar(context, "sampleRate", 48_000);
+    const duration = audioScalar(context, "duration", samples.length / sampleRate);
+    const offset = Math.floor((context.time % duration) / duration * samples.length) % samples.length;
+    const previousOffset = offset - Math.floor(sampleRate / Math.max(1, context.fps));
     const bars = Array.from({ length: params.barCount }, (_, index) => {
-      const startRatio = params.logarithmic ? (Math.exp(index / params.barCount * Math.log(10)) - 1) / 9
-        : index / params.barCount;
-      const endRatio = params.logarithmic ? (Math.exp((index + 1) / params.barCount * Math.log(10)) - 1) / 9
-        : (index + 1) / params.barCount;
-      const current = sampledAverage(bins, startRatio * bins.length, endRatio * bins.length);
-      const prior = previous.length === 0 ? current
-        : sampledAverage(previous, startRatio * previous.length, endRatio * previous.length);
+      const ratio = (index + 0.5) / params.barCount;
+      const bin = Math.max(1, Math.round(params.logarithmic
+        ? Math.exp(ratio * Math.log(112)) : 1 + ratio * 111));
+      const current = spectralMagnitude(samples, offset, bin);
+      const prior = spectralMagnitude(samples, previousOffset, bin);
       const smoothed = current * (1 - params.smoothing) + prior * params.smoothing;
       return round(clamp((smoothed * params.gain) ** params.falloff, 0, 1), 5);
     });

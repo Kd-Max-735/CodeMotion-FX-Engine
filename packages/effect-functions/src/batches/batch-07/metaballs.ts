@@ -41,7 +41,8 @@ export const metaballsDefinition: EffectToolDefinition<MetaballsParams> = {
     { presetId: "batch07.metaballs.mercury", displayName: "水银", params: { ...defaults, seed: 8, ballCount: 14, radius: 0.08, threshold: 1.4, speed: 1.1, fillColor: "#E9ECEF", backgroundColor: "#212529" } },
     { presetId: "batch07.metaballs.amoeba", displayName: "缓慢变形", params: { ...defaults, ballCount: 5, radius: 0.2, threshold: 0.85, speed: 0.2, fillColor: "#80FFDB", backgroundColor: "#10002B" } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: false, cardinality: "one",
+    description: "Optional server-authorized image refracted by the animated metaballs." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",

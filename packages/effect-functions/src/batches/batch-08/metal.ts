@@ -61,6 +61,7 @@ export const METAL_DEFINITION: EffectToolDefinition<MetalParams, AuthorizedEffec
     { presetId: "metal.gold", displayName: "暖金属", params: { roughness: 0.24, specular: 0.9, brushed: 0.32, anisotropy: 0.42, tone: "gold" } }
   ],
   inputSlots: [
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized image receiving the metal material." },
     { name: "target_layer", kind: "data", required: true, cardinality: "one", description: "Server-resolved material surface." },
     { name: "environment_texture", kind: "texture", required: true, cardinality: "one", description: "Required server-authorized reflection environment." }
   ],

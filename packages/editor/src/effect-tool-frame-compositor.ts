@@ -17,7 +17,11 @@ const POLISHED_STRUCTURED_TOOLS = new Set([
   "sim_collision_shatter", "sim_fluid_lite", "sim_rigid_body_2d", "sim_rope",
   "sim_soft_body", "sim_spring",
   "dolly", "dolly_zoom", "handheld", "object_match_cut", "orbit", "page_turn",
-  "pan_tilt", "parallax_layers", "portal", "zoom_tunnel"
+  "pan_tilt", "parallax_layers", "portal", "zoom_tunnel",
+  "fractal", "l_system", "metaballs", "noise_field", "sacred_geometry",
+  "spectrum_bars", "spiral_tunnel", "voronoi", "waveform", "wave_surface",
+  "beat_pulse", "onset_trigger", "vocal_reactive_text", "texture_overlay",
+  "chart_reveal", "live_binding", "number_counter", "glass", "hologram", "metal"
 ]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -482,6 +486,84 @@ function numericGrid(
   if (width < 1 || height < 1 || !Array.isArray(values) || values.length !== width * height
     || values.some((entry) => typeof entry !== "number" || !Number.isFinite(entry))) return undefined;
   return { width, height, values: values as number[] };
+}
+
+function wrappedFramePixel(
+  frame: Uint8Array,
+  request: FrameRequest,
+  x: number,
+  y: number
+): readonly [number, number, number, number] {
+  const px = ((Math.round(x) % request.width) + request.width) % request.width;
+  const py = ((Math.round(y) % request.height) + request.height) % request.height;
+  const offset = (py * request.width + px) * 4;
+  return [frame[offset]!, frame[offset + 1]!, frame[offset + 2]!, frame[offset + 3]!];
+}
+
+function blendChannel(base: number, overlay: number, mode: string): number {
+  const a = base / 255;
+  const b = overlay / 255;
+  const value = mode === "multiply" ? a * b
+    : mode === "screen" ? a + b - a * b
+      : mode === "overlay" ? a <= 0.5 ? 2 * a * b : 1 - 2 * (1 - a) * (1 - b)
+        : mode === "soft_light" ? b <= 0.5
+          ? a - (1 - 2 * b) * a * (1 - a)
+          : a + (2 * b - 1) * (Math.sqrt(a) - a)
+        : b;
+  return clampByte(value * 255);
+}
+
+const SEVEN_SEGMENTS: Readonly<Record<string, readonly number[]>> = Object.freeze({
+  "0": [0, 1, 2, 3, 4, 5], "1": [1, 2], "2": [0, 1, 6, 4, 3],
+  "3": [0, 1, 2, 3, 6], "4": [5, 6, 1, 2], "5": [0, 5, 6, 2, 3],
+  "6": [0, 5, 4, 3, 2, 6], "7": [0, 1, 2], "8": [0, 1, 2, 3, 4, 5, 6],
+  "9": [0, 1, 2, 3, 5, 6]
+});
+
+function drawSevenSegmentText(
+  output: Uint8ClampedArray,
+  request: FrameRequest,
+  text: string,
+  color: readonly number[],
+  scale = 1
+): void {
+  const height = Math.max(28, Math.min(request.height * 0.34, 96 * scale));
+  const width = height * 0.56;
+  const gap = width * 0.2;
+  const total = text.length * width + Math.max(0, text.length - 1) * gap;
+  let left = (request.width - total) / 2;
+  const top = request.height * 0.33;
+  const thickness = Math.max(1.6, height * 0.045);
+  const segments = [
+    [0.12, 0.04, 0.88, 0.04], [0.92, 0.08, 0.92, 0.48],
+    [0.92, 0.52, 0.92, 0.92], [0.12, 0.96, 0.88, 0.96],
+    [0.08, 0.52, 0.08, 0.92], [0.08, 0.08, 0.08, 0.48],
+    [0.12, 0.5, 0.88, 0.5]
+  ] as const;
+  for (const character of text) {
+    if (character === ".") {
+      drawDisc(output, request.width, request.height, left + width * 0.5, top + height * 0.96,
+        thickness * 1.35, color, 0.96);
+      left += width * 0.42;
+      continue;
+    }
+    if (character === "%") {
+      drawRing(output, request, left + width * 0.28, top + height * 0.28,
+        width * 0.12, color, 0.9, thickness);
+      drawRing(output, request, left + width * 0.72, top + height * 0.72,
+        width * 0.12, color, 0.9, thickness);
+      drawLine(output, request.width, request.height, left + width * 0.2, top + height * 0.82,
+        left + width * 0.8, top + height * 0.18, color, 0.9, thickness);
+      left += width + gap;
+      continue;
+    }
+    for (const index of SEVEN_SEGMENTS[character] ?? []) {
+      const segment = segments[index]!;
+      drawLine(output, request.width, request.height, left + segment[0] * width, top + segment[1] * height,
+        left + segment[2] * width, top + segment[3] * height, color, 0.92, thickness);
+    }
+    left += width + gap;
+  }
 }
 
 function hueColor(hue: number): readonly [number, number, number, number] {
@@ -1084,6 +1166,465 @@ function simulationFrame(
   return false;
 }
 
+function batch0708Frame(
+  output: Uint8ClampedArray,
+  value: Record<string, unknown>,
+  request: FrameRequest,
+  toolName: string,
+  source?: Uint8Array,
+  inputFrames?: Readonly<Record<string, Uint8Array>>
+): boolean {
+  const colors = Array.isArray(value.colors) ? value.colors : [];
+  const primary = hexColor(colors[0], [64, 226, 255, 255]);
+  const secondary = hexColor(colors[1], [8, 16, 30, 255]);
+
+  if (["fractal", "metaballs", "noise_field", "voronoi", "wave_surface"].includes(toolName)) {
+    const key = toolName === "fractal" ? "escape" : toolName === "metaballs" ? "field"
+      : toolName === "noise_field" ? "values" : toolName === "wave_surface" ? "heights" : "cells";
+    const grid = numericGrid(value, key);
+    if (grid === undefined) return false;
+    const edges = Array.isArray(value.edges) ? value.edges as readonly number[] : undefined;
+    const slopes = Array.isArray(value.slopes) ? value.slopes as readonly number[] : undefined;
+    const minimum = Math.min(...grid.values);
+    const maximum = Math.max(...grid.values);
+    const range = Math.max(1e-6, maximum - minimum);
+    const snapshot = source === undefined ? undefined : new Uint8Array(source);
+    for (let y = 0; y < request.height; y += 1) {
+      const gy = Math.min(grid.height - 1, Math.floor(y / request.height * grid.height));
+      for (let x = 0; x < request.width; x += 1) {
+        const gx = Math.min(grid.width - 1, Math.floor(x / request.width * grid.width));
+        const index = gy * grid.width + gx;
+        const raw = grid.values[index]!;
+        const normalized = (raw - minimum) / range;
+        const offset = (y * request.width + x) * 4;
+        if (toolName === "noise_field") {
+          const displacement = (normalized - 0.5) * 18;
+          const sample = snapshot === undefined
+            ? secondary : wrappedFramePixel(snapshot, request, x + displacement, y + displacement * 0.58);
+          const mist = 0.18 + normalized * 0.3;
+          for (let channel = 0; channel < 3; channel += 1) {
+            output[offset + channel] = clampByte(sample[channel]! * (1 - mist)
+              + (secondary[channel]! + (primary[channel]! - secondary[channel]!) * normalized) * mist);
+          }
+        } else if (toolName === "metaballs") {
+          const inside = Math.max(0, Math.min(1, (raw - 0.72) * 2.6));
+          const edge = Math.exp(-Math.abs(raw - 1) * 12);
+          const sample = snapshot === undefined ? secondary
+            : wrappedFramePixel(snapshot, request, x + Math.sin(y * 0.035 + request.time * 2) * inside * 9,
+              y + Math.cos(x * 0.028 - request.time * 1.7) * inside * 7);
+          for (let channel = 0; channel < 3; channel += 1) {
+            output[offset + channel] = clampByte(sample[channel]! * (1 - inside * 0.36)
+              + primary[channel]! * inside * 0.28 + 245 * edge * 0.34);
+          }
+        } else if (toolName === "voronoi") {
+          const edge = Math.max(0, Math.min(1, Number(edges?.[index] ?? 0)));
+          const cellColor = hueColor((raw * 47 + request.time * 18) % 360);
+          const base = snapshot === undefined ? secondary : [output[offset]!, output[offset + 1]!, output[offset + 2]!, 255];
+          for (let channel = 0; channel < 3; channel += 1) {
+            output[offset + channel] = clampByte(base[channel]! * (edge > 0 ? 0.28 : 0.7)
+              + (edge > 0 ? primary[channel]! : cellColor[channel]!) * (edge > 0 ? 0.72 : 0.3));
+          }
+        } else if (toolName === "wave_surface") {
+          const slope = Math.max(0, Math.min(1, Number(slopes?.[index] ?? 0) * 0.55));
+          const displacement = (normalized - 0.5) * 22;
+          const sample = snapshot === undefined ? secondary
+            : wrappedFramePixel(snapshot, request, x + displacement * 0.34, y + displacement);
+          const highlight = Math.max(0, normalized * 0.7 + slope * 0.5);
+          for (let channel = 0; channel < 3; channel += 1) {
+            output[offset + channel] = clampByte(sample[channel]! * 0.58
+              + secondary[channel]! * (1 - normalized) * 0.22 + primary[channel]! * highlight * 0.48);
+          }
+        } else {
+          const band = raw >= 0.999 ? 0.02 : 0.28 + 0.72 * (0.5 + 0.5 * Math.sin(raw * 42));
+          const base = snapshot === undefined ? secondary : [output[offset]!, output[offset + 1]!, output[offset + 2]!, 255];
+          for (let channel = 0; channel < 3; channel += 1) {
+            const color = secondary[channel]! + (primary[channel]! - secondary[channel]!) * band;
+            output[offset + channel] = clampByte(base[channel]! * 0.34 + color * 0.66);
+          }
+        }
+        output[offset + 3] = 255;
+      }
+    }
+    return true;
+  }
+
+  if (toolName === "l_system") {
+    const segments = (Array.isArray(value.segments) ? value.segments : []).map(record)
+      .filter((entry): entry is Record<string, unknown> => entry !== undefined);
+    if (segments.length === 0) return false;
+    shadeFrame(output, source === undefined ? 0.38 : 0.64, [5, 14, 12]);
+    const coordinates = segments.flatMap((segment) => [Number(segment.x1), Number(segment.y1), Number(segment.x2), Number(segment.y2)]);
+    const xs = coordinates.filter((_, index) => index % 2 === 0);
+    const ys = coordinates.filter((_, index) => index % 2 === 1);
+    const minX = Math.min(...xs); const maxX = Math.max(...xs);
+    const minY = Math.min(...ys); const maxY = Math.max(...ys);
+    const scale = Math.min(request.width * 0.78 / Math.max(1, maxX - minX), request.height * 0.78 / Math.max(1, maxY - minY));
+    const reveal = Math.min(1, 0.12 + request.time / 3);
+    const count = Math.max(1, Math.floor(segments.length * reveal));
+    const branchColor = hexColor(value.strokeColor, primary);
+    segments.slice(0, count).forEach((segment, index) => {
+      const x1 = (Number(segment.x1) - (minX + maxX) / 2) * scale + request.width / 2;
+      const y1 = (Number(segment.y1) - (minY + maxY) / 2) * scale + request.height * 0.88;
+      const x2 = (Number(segment.x2) - (minX + maxX) / 2) * scale + request.width / 2;
+      const y2 = (Number(segment.y2) - (minY + maxY) / 2) * scale + request.height * 0.88;
+      const depth = 1 - index / Math.max(1, segments.length);
+      drawLine(output, request.width, request.height, x1, y1, x2, y2, [5, 38, 25, 255], 0.7, 4.6 * depth + 1.2);
+      drawLine(output, request.width, request.height, x1, y1, x2, y2, branchColor, 0.72, 2.2 * depth + 0.7);
+      if (index % Math.max(5, Math.floor(segments.length / 80)) === 0) {
+        drawDisc(output, request.width, request.height, x2, y2, 2.5 + depth * 2.5,
+          [132, 255, 154, 255], 0.42 + depth * 0.25);
+      }
+    });
+    return true;
+  }
+
+  if (toolName === "sacred_geometry") {
+    shadeFrame(output, source === undefined ? 0.25 : 0.55, secondary);
+    const circles = Array.isArray(value.circles) ? value.circles : [];
+    const lines = Array.isArray(value.lines) ? value.lines : [];
+    const centerX = request.width / 2; const centerY = request.height / 2;
+    const unit = Math.min(request.width, request.height) * 0.44;
+    circles.forEach((entry, index) => {
+      const circle = record(entry);
+      if (circle === undefined) return;
+      const x = centerX + Number(circle.x) * unit;
+      const y = centerY - Number(circle.y) * unit;
+      const radius = Math.abs(Number(circle.radius)) * unit;
+      drawRing(output, request, x, y, radius, primary, 0.14, 4.5);
+      drawRing(output, request, x, y, radius, index % 3 === 0 ? [255, 255, 246, 255] : primary, 0.74, 1.15);
+    });
+    lines.forEach((entry) => {
+      const line = record(entry); const from = finitePoint(line?.from); const to = finitePoint(line?.to);
+      if (from === undefined || to === undefined) return;
+      drawLine(output, request.width, request.height, centerX + from.x * unit, centerY - from.y * unit,
+        centerX + to.x * unit, centerY - to.y * unit, primary, 0.18, 5);
+      drawLine(output, request.width, request.height, centerX + from.x * unit, centerY - from.y * unit,
+        centerX + to.x * unit, centerY - to.y * unit, [255, 250, 224, 255], 0.72, 1.05);
+    });
+    drawRing(output, request, centerX, centerY, unit * 0.98, primary, 0.72, 1.6);
+    drawRing(output, request, centerX, centerY, unit * 0.68, [255, 248, 214, 255], 0.34, 0.9);
+    return true;
+  }
+
+  if (toolName === "spiral_tunnel") {
+    const points = pointArray(value.points);
+    if (points.length < 3) return false;
+    shadeFrame(output, source === undefined ? 0.18 : 0.48, secondary);
+    const centerX = request.width / 2; const centerY = request.height / 2;
+    const scale = Math.min(request.width, request.height) * 0.48;
+    for (let index = points.length - 2; index >= 0; index -= 1) {
+      const a = points[index]!; const b = points[index + 1]!;
+      const depth = 1 - index / points.length;
+      drawLine(output, request.width, request.height, centerX + a.x * scale, centerY - a.y * scale,
+        centerX + b.x * scale, centerY - b.y * scale, primary, 0.08 + depth * 0.72, 0.7 + depth * 4.5);
+      if (index % 9 === 0) drawDisc(output, request.width, request.height,
+        centerX + a.x * scale, centerY - a.y * scale, 1.2 + depth * 5,
+        [255, 255, 245, 255], 0.35 + depth * 0.5);
+    }
+    for (let ring = 0; ring < 9; ring += 1) {
+      const phase = (ring / 9 + request.time * 0.22) % 1;
+      drawRing(output, request, centerX, centerY, 8 + phase * scale * 0.92,
+        ring % 2 === 0 ? primary : [122, 118, 255, 255], (1 - phase) * 0.32, 1 + phase * 2.2);
+    }
+    return true;
+  }
+
+  if (toolName === "spectrum_bars") {
+    const bars = Array.isArray(value.bars) ? value.bars.filter((entry): entry is number => typeof entry === "number") : [];
+    if (bars.length === 0) return false;
+    clearFrame(output, secondary);
+    const gap = Math.max(1, request.width * 0.0025);
+    const width = (request.width - gap * (bars.length + 1)) / bars.length;
+    const baseline = request.height * 0.82;
+    bars.forEach((entry, index) => {
+      const amount = Math.max(0.025, Math.min(1, entry));
+      const height = amount * request.height * 0.64;
+      const left = gap + index * (width + gap);
+      const color = index % 5 === 0 ? [255, 82, 170, 255] : primary;
+      for (let x = Math.floor(left); x <= left + width; x += 1) {
+        for (let y = Math.floor(baseline - height); y <= baseline; y += 1) {
+          const vertical = (baseline - y) / Math.max(1, height);
+          blendPixel(output, request.width, request.height, x, y, color, 0.45 + vertical * 0.5);
+        }
+      }
+      drawDisc(output, request.width, request.height, left + width / 2,
+        baseline - height - 5, Math.max(1.5, width * 0.32), color, 0.78);
+    });
+    drawLine(output, request.width, request.height, 0, baseline + 3, request.width, baseline + 3,
+      [220, 250, 255, 255], 0.28, 1.2);
+    return true;
+  }
+
+  if (toolName === "waveform") {
+    const points = pointArray(value.points); const mirrored = pointArray(value.mirrored);
+    if (points.length < 2) return false;
+    clearFrame(output, secondary);
+    const thickness = typeof value.thickness === "number" ? value.thickness : 2;
+    const centerY = request.height / 2;
+    for (let index = 1; index < points.length; index += 1) {
+      const a = pointToPixel(points[index - 1]!, request.width, request.height);
+      const b = pointToPixel(points[index]!, request.width, request.height);
+      const from = Math.floor(Math.min(a[0], b[0])); const to = Math.ceil(Math.max(a[0], b[0]));
+      for (let x = from; x <= to; x += 1) {
+        const ratio = (x - a[0]) / Math.max(1, b[0] - a[0]);
+        const y = a[1] + (b[1] - a[1]) * ratio;
+        drawLine(output, request.width, request.height, x, centerY, x, y, primary, 0.12, 1);
+      }
+    }
+    drawPolyline(output, points, request, primary, 0.24, thickness * 4.2);
+    drawPolyline(output, points, request, [242, 255, 255, 255], 0.94, thickness);
+    if (mirrored.length > 1) {
+      drawPolyline(output, mirrored, request, [255, 92, 184, 255], 0.22, thickness * 4);
+      drawPolyline(output, mirrored, request, [255, 210, 240, 255], 0.78, thickness);
+    }
+    return true;
+  }
+
+  if (toolName === "beat_pulse" || toolName === "onset_trigger" || toolName === "vocal_reactive_text") {
+    const energy = Math.max(0, Math.min(1.5, Number(value.pulse ?? value.triggerStrength ?? value.energy ?? 0)));
+    clearFrame(output, [5, 9, 18, 255]);
+    const centerX = request.width / 2; const centerY = request.height / 2;
+    const baseRadius = Math.min(request.width, request.height) * (0.12 + energy * 0.16);
+    if (toolName === "vocal_reactive_text") {
+      const columns = 11;
+      for (let index = 0; index < columns; index += 1) {
+        const local = energy * (0.55 + 0.45 * Math.sin(index * 1.7 + request.time * 6) ** 2);
+        const height = request.height * (0.08 + local * 0.34);
+        const x = centerX + (index - (columns - 1) / 2) * request.width * 0.045;
+        drawLine(output, request.width, request.height, x, centerY - height / 2, x, centerY + height / 2,
+          index % 2 === 0 ? [68, 236, 255, 255] : [255, 92, 196, 255], 0.74, 5);
+        drawDisc(output, request.width, request.height, x, centerY - height / 2, 4,
+          [245, 255, 255, 255], 0.72);
+      }
+      drawRing(output, request, centerX, centerY, baseRadius * 1.7, [82, 230, 255, 255], 0.26, 2);
+      const glyphs: Readonly<Record<string, readonly string[]>> = {
+        V: ["10001", "10001", "10001", "10001", "01010", "01010", "00100"],
+        O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+        I: ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
+        C: ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
+        E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"]
+      };
+      const label = "VOICE";
+      const cell = Math.max(3, Math.min(9, request.height * (0.011 + energy * 0.006)));
+      const wordWidth = label.length * cell * 6 - cell;
+      const startX = centerX - wordWidth / 2;
+      const startY = centerY - cell * 3.5;
+      [...label].forEach((character, letterIndex) => glyphs[character]!.forEach((row, rowIndex) => {
+        [...row].forEach((bit, columnIndex) => {
+          if (bit !== "1") return;
+          const x = startX + (letterIndex * 6 + columnIndex) * cell;
+          const y = startY + rowIndex * cell;
+          drawDisc(output, request.width, request.height, x, y, cell * 0.82,
+            letterIndex % 2 === 0 ? [74, 232, 255, 255] : [255, 104, 206, 255], 0.18 + energy * 0.28);
+          drawDisc(output, request.width, request.height, x, y, cell * 0.42,
+            [242, 255, 255, 255], 0.72 + energy * 0.18);
+        });
+      }));
+    } else {
+      for (let ring = 0; ring < 5; ring += 1) {
+        const travel = (request.time * (toolName === "onset_trigger" ? 2.8 : 1.25) + ring / 5) % 1;
+        drawRing(output, request, centerX, centerY, baseRadius + travel * Math.min(request.width, request.height) * 0.34,
+          ring % 2 === 0 ? [66, 230, 255, 255] : [255, 78, 174, 255],
+          Math.max(0.04, energy) * (1 - travel) * 0.75, 1.5 + energy * 3);
+      }
+      const spokes = toolName === "onset_trigger" ? 28 : 16;
+      for (let index = 0; index < spokes; index += 1) {
+        const angle = index / spokes * Math.PI * 2 + request.time * 0.35;
+        const length = baseRadius * (1.1 + energy * (1 + (index % 4) * 0.18));
+        drawLine(output, request.width, request.height,
+          centerX + Math.cos(angle) * baseRadius * 0.38, centerY + Math.sin(angle) * baseRadius * 0.38,
+          centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length,
+          [210, 250, 255, 255], 0.18 + energy * 0.56, 1.1 + energy * 1.6);
+      }
+      drawDisc(output, request.width, request.height, centerX, centerY, baseRadius * 0.42,
+        [80, 210, 255, 255], 0.2 + energy * 0.34);
+    }
+    return true;
+  }
+
+  if (toolName === "texture_overlay") {
+    const base = inputFrames?.base_image ?? source;
+    const overlay = inputFrames?.overlay_image;
+    if (base === undefined || overlay === undefined || base.length !== output.length || overlay.length !== output.length) return false;
+    const uvOffset = Array.isArray(value.uvOffset) ? value.uvOffset : [0, 0];
+    const uvScale = Array.isArray(value.uvScale) ? Number(value.uvScale[0]) : 1;
+    const opacity = Math.max(0, Math.min(1, Number(value.opacity ?? 0.45)));
+    const mode = typeof value.blendMode === "string" ? value.blendMode : "overlay";
+    for (let y = 0; y < request.height; y += 1) for (let x = 0; x < request.width; x += 1) {
+      const offset = (y * request.width + x) * 4;
+      const texture = wrappedFramePixel(overlay, request,
+        x * uvScale + Number(uvOffset[0] ?? 0) * request.width,
+        y * uvScale + Number(uvOffset[1] ?? 0) * request.height);
+      const textureAlpha = opacity * texture[3] / 255;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const blended = blendChannel(base[offset + channel]!, texture[channel]!, mode);
+        output[offset + channel] = clampByte(base[offset + channel]! * (1 - textureAlpha) + blended * textureAlpha);
+      }
+      output[offset + 3] = 255;
+    }
+    return true;
+  }
+
+  if (toolName === "chart_reveal") {
+    const items = (Array.isArray(value.items) ? value.items : []).map(record)
+      .filter((entry): entry is Record<string, unknown> => entry !== undefined);
+    if (items.length === 0) return false;
+    clearFrame(output, [8, 14, 24, 255]);
+    const values = items.map((item) => Math.max(0, Number(item.value ?? 0)) * Math.max(0, Math.min(1, Number(item.reveal ?? 1))));
+    const maximum = Math.max(1e-6, ...values);
+    const chartType = typeof value.chartType === "string" ? value.chartType : "bar";
+    const palette = [[66, 220, 255, 255], [255, 88, 176, 255], [126, 244, 170, 255], [255, 196, 84, 255]] as const;
+    if (chartType === "pie") {
+      const total = Math.max(1e-6, ...[values.reduce((sum, entry) => sum + entry, 0)]);
+      let angle = -Math.PI / 2;
+      const radius = Math.min(request.width, request.height) * 0.3;
+      values.forEach((entry, index) => {
+        const end = angle + entry / total * Math.PI * 2;
+        for (let cursor = angle; cursor < end; cursor += 0.008) {
+          drawLine(output, request.width, request.height, request.width / 2, request.height / 2,
+            request.width / 2 + Math.cos(cursor) * radius, request.height / 2 + Math.sin(cursor) * radius,
+            palette[index % palette.length]!, 0.82, 1.5);
+        }
+        angle = end;
+      });
+      drawDisc(output, request.width, request.height, request.width / 2, request.height / 2,
+        radius * 0.42, [8, 14, 24, 255], 1);
+    } else {
+      const left = request.width * 0.12; const right = request.width * 0.9;
+      const bottom = request.height * 0.82; const top = request.height * 0.16;
+      const points = values.map((entry, index) => ({
+        x: left + index / Math.max(1, values.length - 1) * (right - left),
+        y: bottom - entry / maximum * (bottom - top)
+      }));
+      if (chartType === "bar") points.forEach((point, index) => {
+        const width = (right - left) / Math.max(2, values.length) * 0.62;
+        for (let x = point.x - width / 2; x <= point.x + width / 2; x += 1) {
+          drawLine(output, request.width, request.height, x, bottom, x, point.y,
+            palette[index % palette.length]!, 0.76, 1);
+        }
+      });
+      else {
+        if (chartType === "area") points.forEach((point, index) => {
+          if (index === 0) return;
+          const previous = points[index - 1]!;
+          for (let x = Math.floor(previous.x); x <= point.x; x += 1) {
+            const ratio = (x - previous.x) / Math.max(1, point.x - previous.x);
+            const y = previous.y + (point.y - previous.y) * ratio;
+            drawLine(output, request.width, request.height, x, bottom, x, y, primary, 0.14, 1);
+          }
+        });
+        drawScreenPolyline(output, points, request, primary, 0.24, 7);
+        drawScreenPolyline(output, points, request, [238, 255, 255, 255], 0.92, 2);
+        points.forEach((point, index) => drawDisc(output, request.width, request.height,
+          point.x, point.y, 4, palette[index % palette.length]!, 0.9));
+      }
+      drawLine(output, request.width, request.height, left, bottom, right, bottom, [186, 204, 220, 255], 0.5, 1);
+    }
+    return true;
+  }
+
+  if (toolName === "live_binding") {
+    clearFrame(output, [7, 13, 22, 255]);
+    const raw = Number(value.value ?? 0);
+    const amount = Math.max(0, Math.min(1, Math.abs(raw + Math.sin(request.time * 1.7) * 0.12)));
+    const centerX = request.width / 2; const centerY = request.height * 0.55;
+    const radius = Math.min(request.width, request.height) * 0.27;
+    for (let index = 0; index < 72; index += 1) {
+      const ratio = index / 71; const angle = Math.PI * (0.75 + ratio * 1.5);
+      const active = ratio <= amount;
+      drawLine(output, request.width, request.height,
+        centerX + Math.cos(angle) * radius * 0.78, centerY + Math.sin(angle) * radius * 0.78,
+        centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius,
+        active ? hueColor(170 - ratio * 120) : [56, 68, 82, 255], active ? 0.9 : 0.48, 2.4);
+    }
+    const needle = Math.PI * (0.75 + amount * 1.5);
+    drawLine(output, request.width, request.height, centerX, centerY,
+      centerX + Math.cos(needle) * radius * 0.72, centerY + Math.sin(needle) * radius * 0.72,
+      [248, 252, 255, 255], 0.9, 2.2);
+    drawDisc(output, request.width, request.height, centerX, centerY, 7, [72, 226, 255, 255], 0.9);
+    return true;
+  }
+
+  if (toolName === "number_counter") {
+    clearFrame(output, [7, 12, 20, 255]);
+    const formatted = typeof value.formatted === "string" ? value.formatted : String(value.value ?? 0);
+    const progress = Math.max(0, Math.min(1, Number(value.progress ?? 0)));
+    drawSevenSegmentText(output, request, formatted.slice(0, 10), [104, 238, 255, 255], 1);
+    drawSevenSegmentText(output, request, formatted.slice(0, 10), [238, 255, 255, 255], 0.96);
+    const width = request.width * 0.58; const left = (request.width - width) / 2;
+    drawLine(output, request.width, request.height, left, request.height * 0.72,
+      left + width, request.height * 0.72, [54, 70, 88, 255], 0.7, 2.2);
+    drawLine(output, request.width, request.height, left, request.height * 0.72,
+      left + width * progress, request.height * 0.72, [255, 88, 174, 255], 0.9, 3.2);
+    return true;
+  }
+
+  if (["glass", "hologram", "metal"].includes(toolName)) {
+    const frame = inputFrames?.source_image ?? source;
+    if (frame === undefined || frame.length !== output.length) return false;
+    if (toolName === "glass") {
+      const blur = Math.max(0, Math.min(18, Number(value.blurSigma ?? 4)));
+      const refraction = Math.max(0, Number(value.indexOfRefraction ?? 1.2) - 1);
+      const border = Math.max(0, Math.min(1, Number(value.borderHighlight ?? 0.2)));
+      const tint = Array.isArray(value.rgba) ? value.rgba as readonly number[] : [1, 1, 1, 1];
+      for (let y = 0; y < request.height; y += 1) for (let x = 0; x < request.width; x += 1) {
+        const wave = Math.sin(y * 0.045 + request.time * 1.8) * refraction * 18;
+        const samples = [-blur, 0, blur].map((offset) => wrappedFramePixel(frame, request, x + wave + offset, y + offset * 0.35));
+        const target = (y * request.width + x) * 4;
+        for (let channel = 0; channel < 3; channel += 1) {
+          const average = samples.reduce((sum, sample) => sum + sample[channel]!, 0) / samples.length;
+          const caustic = Math.max(0, Math.sin(x * 0.024 + y * 0.018 - request.time * 2.2)) * border * 56;
+          output[target + channel] = clampByte(average * 0.78
+            + Number(tint[channel] ?? 1) * 255 * 0.12 + (channel === 2 ? 12 : 4) + caustic);
+        }
+      }
+      drawRing(output, request, request.width / 2, request.height / 2,
+        Math.min(request.width, request.height) * 0.43, [236, 252, 255, 255], 0.34 + border * 0.42, 2.2);
+    } else if (toolName === "hologram") {
+      const emissive = Array.isArray(value.emissive) ? value.emissive as readonly number[] : [0.1, 0.9, 1, 0.7];
+      const glitch = Number(value.glitchOffset ?? 0);
+      const flicker = Math.max(0.2, Number(value.flickerLevel ?? 1));
+      for (let y = 0; y < request.height; y += 1) {
+        const scan = 0.48 + 0.52 * Math.sin(y * 0.31 - request.time * 18);
+        const shift = Math.abs(glitch) > 0.01 && (y + request.frame * 7) % 47 < 7 ? glitch * request.width * 0.22 : 0;
+        for (let x = 0; x < request.width; x += 1) {
+          const sample = wrappedFramePixel(frame, request, x + shift, y);
+          const luminance = (sample[0] * 0.21 + sample[1] * 0.72 + sample[2] * 0.07) / 255;
+          const offset = (y * request.width + x) * 4;
+          for (let channel = 0; channel < 3; channel += 1) {
+            output[offset + channel] = clampByte(sample[channel]! * 0.16
+              + Number(emissive[channel] ?? 0.8) * 255 * luminance * flicker * (0.58 + scan * 0.42));
+          }
+          output[offset + 3] = 255;
+        }
+      }
+      for (let y = request.frame % 9; y < request.height; y += 9) {
+        drawLine(output, request.width, request.height, 0, y, request.width, y,
+          [180, 255, 255, 255], 0.18, 0.7);
+      }
+    } else {
+      const f0 = Array.isArray(value.f0) ? value.f0 as readonly number[] : [0.9, 0.9, 0.86, 1];
+      const roughness = Math.max(0.02, Math.min(1, Number(value.roughness ?? 0.32)));
+      const brush = Math.max(8, Number(value.brushFrequency ?? 48));
+      const reflection = Math.max(0, Math.min(1, Number(value.reflectedLuminance ?? 0.7)));
+      for (let y = 0; y < request.height; y += 1) for (let x = 0; x < request.width; x += 1) {
+        const offset = (y * request.width + x) * 4;
+        const luminance = (frame[offset]! * 0.21 + frame[offset + 1]! * 0.72 + frame[offset + 2]! * 0.07) / 255;
+        const sweep = Math.max(0, Math.cos((x / request.width - (request.time * 0.17 % 1)) * Math.PI * 3)) ** (4 + roughness * 12);
+        const brushed = 0.82 + Math.sin(y * brush / request.height * Math.PI * 2) * 0.08 * (1 - roughness);
+        for (let channel = 0; channel < 3; channel += 1) {
+          output[offset + channel] = clampByte((frame[offset + channel]! * 0.28
+            + Number(f0[channel] ?? 0.8) * 255 * (0.3 + luminance * 0.34 + sweep * reflection * 0.55)) * brushed);
+        }
+        output[offset + 3] = 255;
+      }
+    }
+    return true;
+  }
+
+  return false;
+}
+
 function polishedStructuredFrame(
   output: Uint8ClampedArray,
   value: Record<string, unknown>,
@@ -1092,6 +1633,7 @@ function polishedStructuredFrame(
   source?: Uint8Array,
   inputFrames?: Readonly<Record<string, Uint8Array>>
 ): boolean {
+  if (batch0708Frame(output, value, request, toolName, source, inputFrames)) return true;
   if (batch05Frame(output, value, request, toolName, source, inputFrames)) return true;
   if (simulationFrame(output, value, request, toolName, source)) return true;
   if (toolName === "shape_boolean_animate") {

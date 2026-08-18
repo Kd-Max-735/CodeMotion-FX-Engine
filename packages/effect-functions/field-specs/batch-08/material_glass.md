@@ -40,8 +40,9 @@
 
 | inputSlot | kind | 必需 | 说明 |
 | --- | --- | --- | --- |
-| `target_layer` | `data` | 是 | 服务端解析并锁定的目标材质表面 |
-| `backdrop_layer` | `data` | 是 | 服务端解析并锁定的玻璃后方图层采样 |
+| `source_image` | `image` | 是 | 用户上传并由服务端授权解码的一张基础图片 |
+| `target_layer` | `data` | 是 | 服务端从基础图片派生并锁定的目标材质表面，不占上传位 |
+| `backdrop_layer` | `data` | 是 | 服务端从基础图片派生并锁定的玻璃背景，不占上传位 |
 
 ## 选择策略
 

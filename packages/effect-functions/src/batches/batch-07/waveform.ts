@@ -1,6 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
-import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, audioSeries, clamp,
+import { COLOR_SCHEMA, REJECT_FALLBACK, SERVER_CPU_BACKEND, audioScalar, audioSeries, clamp,
   metadataResult, normalizeColor, round, schema, valid } from "./shared.js";
 
 export interface WaveformParams extends JsonObject {
@@ -58,13 +58,16 @@ export const waveformDefinition: EffectToolDefinition<WaveformParams> = {
   validateParams: () => valid(),
   render: (context, params) => {
     const samples = audioSeries(context, "waveformSamples", 65_536, -1, 1);
-    const previous = audioSeries(context, "previousWaveformSamples", 65_536, -1, 1, false);
+    const sampleRate = audioScalar(context, "sampleRate", 48_000);
+    const duration = audioScalar(context, "duration", samples.length / sampleRate);
+    const windowLength = Math.max(params.sampleCount, Math.min(samples.length, Math.round(sampleRate / params.horizontalScale)));
+    const start = Math.floor((context.time % duration) / duration * samples.length) % samples.length;
     const points = Array.from({ length: params.sampleCount }, (_, index) => {
       const ratio = index / Math.max(1, params.sampleCount - 1);
-      const sourcePosition = ratio * (samples.length - 1);
+      const sourcePosition = (start + ratio * (windowLength - 1)) % samples.length;
       const current = interpolate(samples, sourcePosition);
-      const prior = previous.length === 0 ? current
-        : interpolate(previous, ratio * (previous.length - 1));
+      const priorPosition = (sourcePosition - sampleRate / Math.max(1, context.fps) + samples.length) % samples.length;
+      const prior = interpolate(samples, priorPosition);
       const value = clamp((current * (1 - params.smoothing) + prior * params.smoothing) * params.gain, -1, 1);
       return { x: round((ratio - 0.5) * 2 * params.horizontalScale, 5), y: round(value, 5) };
     });

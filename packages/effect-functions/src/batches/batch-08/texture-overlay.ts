@@ -1,7 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { AuthorizedEffectInputs, EffectToolDefinition } from "../../types.js";
-import { GPU_BACKEND, JSON_SCHEMA, clamp, round, singleBinding } from "./common.js";
-import { parsePixelLayer, parseTextureSample, type Rgba } from "./visual-inputs.js";
+import { GPU_BACKEND, JSON_SCHEMA, round, singleBinding } from "./common.js";
 
 export interface TextureOverlayParams extends JsonObject {
   blendMode: "normal" | "multiply" | "screen" | "overlay" | "soft_light";
@@ -13,42 +12,12 @@ export interface TextureOverlayParams extends JsonObject {
 }
 
 export interface TextureOverlayOutput {
-  readonly rgba: Rgba;
   readonly uvOffset: readonly [number, number];
   readonly uvScale: readonly [number, number];
   readonly textureSize: readonly [number, number];
   readonly blendMode: TextureOverlayParams["blendMode"];
+  readonly opacity: number;
   readonly premultipliedAlpha: boolean;
-}
-
-function blendChannel(base: number, source: number, mode: TextureOverlayParams["blendMode"]): number {
-  if (mode === "multiply") return base * source;
-  if (mode === "screen") return base + source - base * source;
-  if (mode === "overlay") return base <= 0.5 ? 2 * base * source : 1 - 2 * (1 - base) * (1 - source);
-  if (mode === "soft_light") {
-    return source <= 0.5
-      ? base - (1 - 2 * source) * base * (1 - base)
-      : base + (2 * source - 1) * (Math.sqrt(base) - base);
-  }
-  return source;
-}
-
-function composite(base: Rgba, texture: Rgba, params: TextureOverlayParams): Rgba {
-  const sourceAlpha = clamp(texture[3] * params.opacity);
-  const baseAlpha = base[3];
-  const outputAlpha = sourceAlpha + baseAlpha * (1 - sourceAlpha);
-  const premultiplied = ([0, 1, 2] as const).map((channel) => {
-    const blended = blendChannel(base[channel], texture[channel], params.blendMode);
-    return clamp(
-      sourceAlpha * (1 - baseAlpha) * texture[channel]
-      + sourceAlpha * baseAlpha * blended
-      + (1 - sourceAlpha) * baseAlpha * base[channel]
-    );
-  });
-  const rgb = params.premultipliedAlpha || outputAlpha === 0
-    ? premultiplied
-    : premultiplied.map((channel) => clamp(channel / outputAlpha));
-  return Object.freeze([round(rgb[0]!), round(rgb[1]!), round(rgb[2]!), round(outputAlpha)]);
 }
 
 const defaults: TextureOverlayParams = Object.freeze({
@@ -87,8 +56,8 @@ export const TEXTURE_OVERLAY_DEFINITION: EffectToolDefinition<TextureOverlayPara
     { presetId: "texture-overlay.ink", displayName: "浓重墨理", params: { blendMode: "multiply", opacity: 0.7, scale: 1.1, motion: 0, motionAngle: 0, premultipliedAlpha: true } }
   ],
   inputSlots: [
-    { name: "base_layer", kind: "data", required: true, cardinality: "one", description: "Server-resolved base layer sample." },
-    { name: "overlay_texture", kind: "texture", required: true, cardinality: "one", description: "Server-authorized overlay texture and decoded sample." }
+    { name: "base_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized decoded base image." },
+    { name: "overlay_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized decoded texture image." }
   ],
   primaryBackend: GPU_BACKEND,
   fallbackStrategy: { kind: "reject", reason: "Texture compositing requires the deterministic server GPU path." },
@@ -96,8 +65,8 @@ export const TEXTURE_OVERLAY_DEFINITION: EffectToolDefinition<TextureOverlayPara
   normalizeParams: (params) => ({ blendMode: params.blendMode, opacity: round(params.opacity), scale: round(params.scale), motion: round(params.motion), motionAngle: round(params.motionAngle), premultipliedAlpha: params.premultipliedAlpha }),
   validateParams: () => ({ valid: true }),
   render: (context, params) => {
-    const base = parsePixelLayer(singleBinding(context, "base_layer"));
-    const texture = parseTextureSample(singleBinding(context, "overlay_texture"));
+    singleBinding(context, "base_image");
+    singleBinding(context, "overlay_image");
     const radians = params.motionAngle * Math.PI / 180;
     const distance = params.motion === 0
       ? 0
@@ -107,11 +76,11 @@ export const TEXTURE_OVERLAY_DEFINITION: EffectToolDefinition<TextureOverlayPara
       kind: "texture",
       backendId: GPU_BACKEND.backendId,
       output: Object.freeze({
-        rgba: composite(base.sample, texture.sample, params),
         uvOffset: Object.freeze([round(Math.cos(radians) * distance), round(Math.sin(radians) * distance)]) as readonly [number, number],
         uvScale: Object.freeze([uvScale, uvScale]) as readonly [number, number],
-        textureSize: Object.freeze([texture.width, texture.height]) as readonly [number, number],
+        textureSize: Object.freeze([context.width, context.height]) as readonly [number, number],
         blendMode: params.blendMode,
+        opacity: params.opacity,
         premultipliedAlpha: params.premultipliedAlpha
       }),
       degraded: false,

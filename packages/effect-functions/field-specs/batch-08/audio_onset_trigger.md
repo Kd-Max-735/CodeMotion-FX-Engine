@@ -36,8 +36,8 @@
 
 | inputSlot | kind | 必需 | 说明 |
 | --- | --- | --- | --- |
-| `audio_analysis` | `audio` | 是 | 服务端从已授权真实音频生成并锁定的起音分析 |
-| `target_effect` | `data` | 是 | 服务端解析并锁定的目标特效句柄 |
+| `audio_analysis` | `audio` | 是 | 用户上传音频后，服务端解码并生成锁定的真实起音分析 |
+| `target_effect` | `data` | 是 | 服务端自动解析并锁定的目标表现，不占上传位 |
 
 ## 选择策略
 

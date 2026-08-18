@@ -47,7 +47,8 @@ export const sacredGeometryDefinition: EffectToolDefinition<SacredGeometryParams
     { presetId: "batch07.sacred.metatron", displayName: "梅塔特隆", params: { ...defaults, pattern: "metatron", rings: 3, symmetry: 12, rotation: 15, strokeColor: "#F8F9FA", backgroundColor: "#212529" } },
     { presetId: "batch07.sacred.yantra", displayName: "室利延陀罗", params: { ...defaults, pattern: "sri_yantra", rings: 9, symmetry: 3, scale: 0.9, speed: -0.08, strokeColor: "#FFB703", backgroundColor: "#6A040F" } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: false, cardinality: "one",
+    description: "Optional server-authorized image used beneath the layered sacred geometry." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",

@@ -17,7 +17,7 @@ export interface FractalParams extends JsonObject {
 
 const defaults: FractalParams = {
   gridSize: 32, iterations: 80, centerX: -0.5, centerY: 0, zoom: 1,
-  rotation: 0, speed: 0, insideColor: "#081C15", outsideColor: "#D8F3DC"
+  rotation: 0, speed: 0.18, insideColor: "#081C15", outsideColor: "#D8F3DC"
 };
 export const fractalDefinition: EffectToolDefinition<FractalParams> = {
   effectId: "fx.gen.fractal",
@@ -42,7 +42,8 @@ export const fractalDefinition: EffectToolDefinition<FractalParams> = {
     { presetId: "batch07.fractal.seahorse", displayName: "海马谷", params: { ...defaults, gridSize: 48, iterations: 160, centerX: -0.745, centerY: 0.11, zoom: 35 } },
     { presetId: "batch07.fractal.orbit", displayName: "旋转轨道", params: { ...defaults, iterations: 120, zoom: 3, rotation: 28, speed: 0.25, insideColor: "#240046", outsideColor: "#FF9E00" } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: false, cardinality: "one",
+    description: "Optional server-authorized image used beneath the animated fractal." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",

@@ -40,7 +40,8 @@ export const spiralTunnelDefinition: EffectToolDefinition<SpiralTunnelParams> = 
     { presetId: "batch07.spiral.tight", displayName: "密集光轨", params: { ...defaults, turns: 18, pointsPerTurn: 72, radius: 0.55, depth: 3.2, speed: 1.4 } },
     { presetId: "batch07.spiral.reverse", displayName: "反向宽隧道", params: { ...defaults, turns: 7, radius: 1.3, twist: -75, speed: -0.6, strokeColor: "#00F5D4" } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: false, cardinality: "one",
+    description: "Optional server-authorized image drawn into the spiral tunnel depth." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",

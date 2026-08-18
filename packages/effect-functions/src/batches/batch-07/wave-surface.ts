@@ -59,7 +59,8 @@ export const waveSurfaceDefinition: EffectToolDefinition<WaveSurfaceParams> = {
     { presetId: "batch07.wave.ripple", displayName: "中心涟漪", params: { ...defaults, mode: "radial", gridSize: 48, amplitude: 0.35, frequencyX: 5.5, damping: 1.2, speed: 1.5 } },
     { presetId: "batch07.wave.fabric", displayName: "斜向织物", params: { ...defaults, mode: "diagonal", amplitude: 0.22, frequencyX: 7, frequencyY: 5, damping: 0.1, speed: 0.35, crestColor: "#F8F9FA", troughColor: "#6C757D" } }
   ],
-  inputSlots: [],
+  inputSlots: [{ name: "background_image", kind: "image", required: false, cardinality: "one",
+    description: "Optional server-authorized image shaded by the animated wave surface." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",

@@ -82,6 +82,7 @@ export const HOLOGRAM_DEFINITION: EffectToolDefinition<HologramParams, Authorize
     { presetId: "hologram.deep", displayName: "深层扫描", params: { scanline: 0.86, flicker: 0.14, glitch: 0.16, depth: 0.9, brightness: 1.3, opacity: 0.74, colorMode: "green" } }
   ],
   inputSlots: [
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized image used as the hologram projection." },
     { name: "target_layer", kind: "data", required: true, cardinality: "one", description: "Server-resolved material surface." },
     { name: "depth_map", kind: "depth-map", required: true, cardinality: "one", description: "Required server-authorized depth sample for parallax." }
   ],

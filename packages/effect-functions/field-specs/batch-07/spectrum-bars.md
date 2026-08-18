@@ -26,7 +26,7 @@
 | `barColor` | `#RRGGBB` | 六位十六进制 | `#00F5D4` | 柱体颜色 |
 | `backgroundColor` | `#RRGGBB` | 六位十六进制 | `#001219` | 背景颜色 |
 
-服务端另行绑定必需的 `audio_analysis` 音频输入槽（`kind: audio`）。绑定必须是 owner-scoped、已锁定的精确 `audio-analysis-v1` 对象，其中包含 1–8192 个有限且位于 0–1 的 `frequencyBins`，并可选同约束的 `previousFrequencyBins`。该槽不属于模型参数；没有真实授权分析时直接拒绝，不生成替代频谱。
+用户必须上传一份音频，服务端将其绑定到 `audio_analysis` 输入槽（`kind: audio`），解码真实 PCM 并逐帧计算频谱。绑定是 owner-scoped、已锁定的精确 `audio-analysis-v1` 对象。该槽不属于模型参数；没有真实授权音频时直接拒绝，不生成替代频谱。
 
 ## 5. 表达映射
 
@@ -55,4 +55,4 @@
 
 ## 9. 不能处理的内容
 
-不能接收或定位音频文件，不能解码、上传或选择音轨，不能输出 `audio_analysis` 数据、资源 ID、路径或 URL；不能替代波形工具，也不能调用其他效果。
+模型不能接收或定位音频文件，不能输出 `audio_analysis` 数据、资源 ID、路径或 URL；用户上传的音频只由服务器授权、解码和分析。不能替代波形工具，也不能调用其他效果。
