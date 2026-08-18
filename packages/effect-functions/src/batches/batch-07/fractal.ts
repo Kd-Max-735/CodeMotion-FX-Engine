@@ -11,19 +11,20 @@ export interface FractalParams extends JsonObject {
   zoom: number;
   rotation: number;
   speed: number;
+  strength: number;
   insideColor: string;
   outsideColor: string;
 }
 
 const defaults: FractalParams = {
-  gridSize: 32, iterations: 80, centerX: -0.5, centerY: 0, zoom: 1,
-  rotation: 0, speed: 0.18, insideColor: "#081C15", outsideColor: "#D8F3DC"
+  gridSize: 48, iterations: 120, centerX: -0.5, centerY: 0, zoom: 1,
+  rotation: 0, speed: 0.18, strength: 0.65, insideColor: "#081C15", outsideColor: "#D8F3DC"
 };
 export const fractalDefinition: EffectToolDefinition<FractalParams> = {
   effectId: "fx.gen.fractal",
   toolName: "fractal",
   displayName: "分形",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "generative",
   parameterSchema: schema({
     gridSize: { type: "integer", minimum: 8, maximum: 64, default: defaults.gridSize },
@@ -33,6 +34,7 @@ export const fractalDefinition: EffectToolDefinition<FractalParams> = {
     zoom: { type: "number", minimum: 0.25, maximum: 200, default: defaults.zoom },
     rotation: { type: "number", minimum: -180, maximum: 180, default: defaults.rotation },
     speed: { type: "number", minimum: -2, maximum: 2, default: defaults.speed },
+    strength: { type: "number", minimum: 0, maximum: 1, default: defaults.strength },
     insideColor: { ...COLOR_SCHEMA, default: defaults.insideColor },
     outsideColor: { ...COLOR_SCHEMA, default: defaults.outsideColor }
   }),
@@ -42,14 +44,15 @@ export const fractalDefinition: EffectToolDefinition<FractalParams> = {
     { presetId: "batch07.fractal.seahorse", displayName: "海马谷", params: { ...defaults, gridSize: 48, iterations: 160, centerX: -0.745, centerY: 0.11, zoom: 35 } },
     { presetId: "batch07.fractal.orbit", displayName: "旋转轨道", params: { ...defaults, iterations: 120, zoom: 3, rotation: 28, speed: 0.25, insideColor: "#240046", outsideColor: "#FF9E00" } }
   ],
-  inputSlots: [{ name: "background_image", kind: "image", required: false, cardinality: "one",
-    description: "Optional server-authorized image used beneath the animated fractal." }],
+  inputSlots: [{ name: "background_image", kind: "image", required: true, cardinality: "one",
+    description: "Server-authorized image refracted and shaded by the animated fractal field." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params, centerX: round(params.centerX, 6),
     centerY: round(params.centerY, 6), zoom: round(params.zoom, 4),
     rotation: round(params.rotation, 3), speed: round(params.speed, 4),
+    strength: round(params.strength, 4),
     insideColor: normalizeColor(params.insideColor), outsideColor: normalizeColor(params.outsideColor) }),
   validateParams: (params) => params.gridSize * params.gridSize * params.iterations <= 1_048_576
     ? valid() : invalid("$", "gridSize squared times iterations must not exceed 1,048,576"),
@@ -73,10 +76,15 @@ export const fractalDefinition: EffectToolDefinition<FractalParams> = {
           zx = nextX;
           count += 1;
         }
-        escape.push(round(count / params.iterations, 5));
+        const magnitudeSquared = zx * zx + zy * zy;
+        const smoothCount = count < params.iterations && magnitudeSquared > 1
+          ? count + 1 - Math.log2(Math.log2(Math.sqrt(magnitudeSquared)))
+          : params.iterations;
+        escape.push(round(Math.max(0, Math.min(1, smoothCount / params.iterations)), 6));
       }
     }
-    return metadataResult({ algorithm: "mandelbrot_escape_time", width: params.gridSize,
-      height: params.gridSize, escape, colors: [params.insideColor, params.outsideColor] });
+    return metadataResult({ algorithm: "smooth_mandelbrot_refraction", width: params.gridSize,
+      height: params.gridSize, escape, strength: params.strength,
+      colors: [params.insideColor, params.outsideColor] });
   }
 };

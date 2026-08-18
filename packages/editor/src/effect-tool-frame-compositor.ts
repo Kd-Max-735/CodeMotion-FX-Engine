@@ -497,6 +497,22 @@ function numericGrid(
   return { width, height, values: values as number[] };
 }
 
+function bilinearGridValue(
+  grid: Readonly<{ width: number; height: number; values: readonly number[] }>,
+  x: number,
+  y: number,
+  request: FrameRequest
+): number {
+  const gx = Math.max(0, Math.min(grid.width - 1, x / Math.max(1, request.width - 1) * (grid.width - 1)));
+  const gy = Math.max(0, Math.min(grid.height - 1, y / Math.max(1, request.height - 1) * (grid.height - 1)));
+  const x0 = Math.floor(gx); const y0 = Math.floor(gy);
+  const x1 = Math.min(grid.width - 1, x0 + 1); const y1 = Math.min(grid.height - 1, y0 + 1);
+  const tx = gx - x0; const ty = gy - y0;
+  const top = grid.values[y0 * grid.width + x0]! * (1 - tx) + grid.values[y0 * grid.width + x1]! * tx;
+  const bottom = grid.values[y1 * grid.width + x0]! * (1 - tx) + grid.values[y1 * grid.width + x1]! * tx;
+  return top * (1 - ty) + bottom * ty;
+}
+
 function wrappedFramePixel(
   frame: Uint8Array,
   request: FrameRequest,
@@ -1203,7 +1219,7 @@ function batch0708Frame(
       for (let x = 0; x < request.width; x += 1) {
         const gx = Math.min(grid.width - 1, Math.floor(x / request.width * grid.width));
         const index = gy * grid.width + gx;
-        const raw = grid.values[index]!;
+        const raw = toolName === "fractal" ? bilinearGridValue(grid, x, y, request) : grid.values[index]!;
         const normalized = (raw - minimum) / range;
         const offset = (y * request.width + x) * 4;
         if (toolName === "noise_field") {
@@ -1244,11 +1260,24 @@ function batch0708Frame(
               + secondary[channel]! * (1 - normalized) * 0.22 + primary[channel]! * highlight * 0.48);
           }
         } else {
-          const band = raw >= 0.999 ? 0.02 : 0.28 + 0.72 * (0.5 + 0.5 * Math.sin(raw * 42));
-          const base = snapshot === undefined ? secondary : [output[offset]!, output[offset + 1]!, output[offset + 2]!, 255];
+          const strength = Math.max(0, Math.min(1, Number(value.strength ?? 0.65)));
+          const left = bilinearGridValue(grid, x - 2, y, request);
+          const right = bilinearGridValue(grid, x + 2, y, request);
+          const top = bilinearGridValue(grid, x, y - 2, request);
+          const bottom = bilinearGridValue(grid, x, y + 2, request);
+          const gradientX = right - left;
+          const gradientY = bottom - top;
+          const edge = Math.min(1, Math.hypot(gradientX, gradientY) * 38);
+          const displacement = strength * 42;
+          const base = snapshot === undefined ? secondary
+            : wrappedFramePixel(snapshot, request, x + gradientX * displacement, y + gradientY * displacement);
+          const detail = raw >= 0.999 ? 0.04
+            : 0.5 + 0.5 * Math.sin(raw * 180 + Math.log1p(raw * 600) * 9);
+          const overlayAmount = strength * (0.16 + detail * 0.22 + edge * 0.3);
           for (let channel = 0; channel < 3; channel += 1) {
-            const color = secondary[channel]! + (primary[channel]! - secondary[channel]!) * band;
-            output[offset + channel] = clampByte(base[channel]! * 0.34 + color * 0.66);
+            const color = secondary[channel]! + (primary[channel]! - secondary[channel]!) * detail;
+            output[offset + channel] = clampByte(base[channel]! * (1 - overlayAmount)
+              + color * overlayAmount + 238 * edge * strength * 0.22);
           }
         }
         output[offset + 3] = 255;
