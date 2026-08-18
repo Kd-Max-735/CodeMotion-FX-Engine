@@ -1800,16 +1800,18 @@ function polishedStructuredFrame(
 
   if (toolName === "dash_flow") {
     const segments = Array.isArray(value.segments) ? value.segments : [];
+    const color = hexColor(value.color, [32, 220, 255, 255]);
+    const thickness = typeof value.thickness === "number"
+      ? Math.max(0.5, Math.min(30, value.thickness)) : 3;
     let rendered = false;
-    segments.forEach((entry, index) => {
+    segments.forEach((entry) => {
       const segment = record(entry);
       const points = pointArray(segment?.points);
       if (points.length < 2) return;
       rendered = true;
-      drawPolyline(output, points, request, [8, 28, 52, 255], 0.32, 5.2);
-      drawPolyline(output, points, request, index % 2 === 0
-        ? [32, 220, 255, 255] : [104, 255, 198, 255], 0.64, 2.8);
-      drawPolyline(output, points, request, [231, 255, 252, 255], 0.86, 0.9);
+      drawPolyline(output, points, request, [8, 18, 28, 255], 0.32, thickness + 2.4);
+      drawPolyline(output, points, request, color, 0.88, thickness);
+      drawPolyline(output, points, request, [255, 255, 255, 255], 0.42, Math.max(0.5, thickness * 0.28));
     });
     return rendered;
   }

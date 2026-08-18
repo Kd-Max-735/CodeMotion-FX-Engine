@@ -70,8 +70,7 @@ const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
 const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   blob_morph: Object.freeze(["source_shape"]),
   bounce: Object.freeze(["source_layer"]),
-  brush_reveal: Object.freeze(["brush_texture"]),
-  dash_flow: Object.freeze(["source_path"])
+  brush_reveal: Object.freeze(["brush_texture"])
 });
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
@@ -1020,9 +1019,6 @@ function previewDataBinding(
   const sample = previewColor(pixels);
   const path = previewPath(render);
   if (definition.toolName === "blob_morph" && slot.name === "source_shape") {
-    return { points: pixelContour(pixels, render), closed: true };
-  }
-  if (definition.toolName === "dash_flow" && slot.name === "source_path") {
     return { points: pixelContour(pixels, render), closed: true };
   }
   if (definition.toolName === "electric_arc" && slot.name === "terminals") {
