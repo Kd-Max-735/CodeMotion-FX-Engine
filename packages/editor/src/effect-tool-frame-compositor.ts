@@ -21,7 +21,8 @@ const POLISHED_STRUCTURED_TOOLS = new Set([
   "fractal", "l_system", "metaballs", "noise_field", "sacred_geometry",
   "spectrum_bars", "spiral_tunnel", "voronoi", "waveform", "wave_surface",
   "beat_pulse", "onset_trigger", "vocal_reactive_text", "texture_overlay",
-  "chart_reveal", "live_binding", "number_counter", "glass", "hologram", "metal"
+  "chart_reveal", "live_binding", "number_counter", "glass", "hologram", "metal",
+  "echo_trail"
 ]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -1635,6 +1636,26 @@ function polishedStructuredFrame(
   source?: Uint8Array,
   inputFrames?: Readonly<Record<string, Uint8Array>>
 ): boolean {
+  if (toolName === "echo_trail") {
+    const histories = Array.isArray(value.histories) ? [...value.histories].reverse() : [];
+    const blendMode = typeof value.blendMode === "string" ? value.blendMode : "normal";
+    for (const entry of histories) {
+      const history = record(entry);
+      const frameKey = typeof history?.frameKey === "string" ? history.frameKey : "";
+      const frame = inputFrames?.[frameKey];
+      if (frame === undefined || frame.length !== output.length) continue;
+      blendHistoricalFrame(
+        frame,
+        output,
+        request,
+        typeof history?.offsetX === "number" ? history.offsetX : 0,
+        typeof history?.offsetY === "number" ? history.offsetY : 0,
+        typeof history?.opacity === "number" ? history.opacity : 0,
+        blendMode
+      );
+    }
+    return true;
+  }
   if (batch0708Frame(output, value, request, toolName, source, inputFrames)) return true;
   if (batch05Frame(output, value, request, toolName, source, inputFrames)) return true;
   if (simulationFrame(output, value, request, toolName, source)) return true;
@@ -1915,6 +1936,38 @@ function shiftedSource(
       blendPixel(output, request.width, request.height, x, y, [
         source[sourceOffset]!, source[sourceOffset + 1]!, source[sourceOffset + 2]!, source[sourceOffset + 3]!
       ], opacity);
+    }
+  }
+}
+
+function blendHistoricalFrame(
+  history: Uint8Array,
+  output: Uint8ClampedArray,
+  request: FrameRequest,
+  shiftX: number,
+  shiftY: number,
+  opacity: number,
+  mode: string
+): void {
+  const alpha = Math.max(0, Math.min(1, opacity));
+  for (let y = 0; y < request.height; y += 1) {
+    const sourceY = Math.round(y - shiftY);
+    if (sourceY < 0 || sourceY >= request.height) continue;
+    for (let x = 0; x < request.width; x += 1) {
+      const sourceX = Math.round(x - shiftX);
+      if (sourceX < 0 || sourceX >= request.width) continue;
+      const sourceOffset = (sourceY * request.width + sourceX) * 4;
+      const targetOffset = (y * request.width + x) * 4;
+      const sourceAlpha = history[sourceOffset + 3]! / 255;
+      const mix = alpha * sourceAlpha;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const base = output[targetOffset + channel]!;
+        const historical = history[sourceOffset + channel]!;
+        const blended = mode === "add" ? Math.min(255, base + historical)
+          : mode === "screen" ? blendChannel(base, historical, "screen") : historical;
+        output[targetOffset + channel] = clampByte(base * (1 - mix) + blended * mix);
+      }
+      output[targetOffset + 3] = 255;
     }
   }
 }
@@ -2654,10 +2707,6 @@ function adapterPreview(
       output[offset] = clampByte(source[offset]! * foreground + 24 * (1 - foreground));
       output[offset + 1] = clampByte(source[offset + 1]! * foreground + 46 * (1 - foreground));
       output[offset + 2] = clampByte(source[offset + 2]! * foreground + 58 * (1 - foreground));
-    }
-  } else if (source !== undefined && toolName === "echo_trail") {
-    for (let trail = 4; trail >= 1; trail -= 1) {
-      shiftedSource(source, output, request, Math.round(Math.sin(phase - trail * 0.4) * trail * 7), trail * 3, 0.1);
     }
   } else if (source !== undefined && toolName === "image_depth_parallax") {
     for (let y = 0; y < request.height; y += 1) {

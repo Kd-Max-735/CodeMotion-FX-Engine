@@ -27,6 +27,7 @@ const MAX_VIDEO_DURATION_SECONDS = 3_600;
 const MAX_EFFECT_DIMENSION = 4_096;
 const DEFAULT_GPU_SAMPLE_INTERVAL_MS = 1_000;
 const GPU_QUERY_TIMEOUT_MS = 2_000;
+const MAX_HISTORY_FRAME_CACHE_BYTES = 192 * 1024 * 1024;
 
 export type EffectToolVideoTaskStatus = "queued" | "running" | "completed" | "failed";
 
@@ -556,6 +557,29 @@ export class EffectToolVideoService {
       );
       let sourcePixels: Uint8Array | undefined;
       const preparedMedia = new Map<string, VerifiedStoredMedia>();
+      const historicalFrameCache = new Map<string, Uint8Array>();
+      let historicalFrameCacheBytes = 0;
+      const cachedFrame = (key: string): Uint8Array | undefined => {
+        const pixels = historicalFrameCache.get(key);
+        if (pixels === undefined) return undefined;
+        historicalFrameCache.delete(key);
+        historicalFrameCache.set(key, pixels);
+        return pixels;
+      };
+      const cacheFrame = (key: string, pixels: Uint8Array): void => {
+        const existing = historicalFrameCache.get(key);
+        if (existing !== undefined) historicalFrameCacheBytes -= existing.byteLength;
+        historicalFrameCache.delete(key);
+        historicalFrameCache.set(key, pixels);
+        historicalFrameCacheBytes += pixels.byteLength;
+        while (historicalFrameCacheBytes > MAX_HISTORY_FRAME_CACHE_BYTES) {
+          const oldestKey = historicalFrameCache.keys().next().value as string | undefined;
+          if (oldestKey === undefined || oldestKey === key && historicalFrameCache.size === 1) break;
+          const oldest = historicalFrameCache.get(oldestKey)!;
+          historicalFrameCache.delete(oldestKey);
+          historicalFrameCacheBytes -= oldest.byteLength;
+        }
+      };
       if (task.prepared === undefined) {
         if (initialMedia === undefined || task.sourceAssetIds.length !== 1) {
           throw new Error("The source image binding is unavailable.");
@@ -615,6 +639,7 @@ export class EffectToolVideoService {
         renderFrame: async (request, signal) => {
           let frameInputs = task.prepared?.inputs;
           let frameSource = sourcePixels;
+          const supplementalFrames: Record<string, Uint8Array> = {};
           if (task.prepared?.inputIds !== undefined) {
             const mutableInputs: Record<string, AuthorizedEffectInputs[string]> = { ...task.prepared.inputs };
             for (const slot of definition.inputSlots.filter((item) => item.kind === "video")) {
@@ -641,6 +666,28 @@ export class EffectToolVideoService {
               if (duration > 0) sampleTime = Math.min(Math.max(0, duration - 1 / request.fps), sampleTime);
               const pixels = await this.decodeFrame(media, { ...request, time: sampleTime, frame: Math.floor(sampleTime * request.fps) },
                 signal === undefined ? {} : { signal });
+              const currentFrameNumber = Math.floor(sampleTime * request.fps);
+              cacheFrame(`${assetId}:${currentFrameNumber}`, pixels);
+              if (definition.toolName === "echo_trail" && slot.name === "source_video") {
+                const trailCount = Math.max(2, Math.min(32, Math.trunc(Number(params.trailCount ?? 10))));
+                const spacing = Math.max(1 / request.fps, Math.min(2, Number(params.spacing ?? 0.12)));
+                for (let historyIndex = 1; historyIndex <= trailCount; historyIndex += 1) {
+                  const historyTime = request.time - historyIndex * spacing;
+                  if (historyTime < 0) continue;
+                  const historyFrameNumber = Math.floor(historyTime * request.fps);
+                  const cacheKey = `${assetId}:${historyFrameNumber}`;
+                  let historyPixels = cachedFrame(cacheKey);
+                  if (historyPixels === undefined) {
+                    historyPixels = await this.decodeFrame(media, {
+                      ...request,
+                      time: historyFrameNumber / request.fps,
+                      frame: historyFrameNumber
+                    }, signal === undefined ? {} : { signal });
+                    cacheFrame(cacheKey, historyPixels);
+                  }
+                  supplementalFrames[`echo_history_${historyIndex}`] = historyPixels;
+                }
+              }
               const original = task.prepared.inputs[slot.name];
               const authorized = Array.isArray(original) ? original[0] : original;
               if (authorized !== undefined) {
@@ -719,12 +766,15 @@ export class EffectToolVideoService {
               progress: Math.min(1, completedFrames / metadata.frameCount)
             }
           });
+          const resolvedInputFrames = frameInputs === undefined
+            ? supplementalFrames
+            : { ...authorizedInputFrameData(frameInputs), ...supplementalFrames };
           return composeEffectToolFrame(
             result,
             request,
             definition.toolName,
             frameSource,
-            frameInputs === undefined ? undefined : authorizedInputFrameData(frameInputs)
+            Object.keys(resolvedInputFrames).length === 0 ? undefined : Object.freeze(resolvedInputFrames)
           );
         }
       });

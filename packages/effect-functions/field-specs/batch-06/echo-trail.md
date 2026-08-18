@@ -4,30 +4,30 @@
 
 从服务端视频解码器读取当前帧及多个更早的真实历史帧，按衰减、位移和混合模式合成拖影。视频资源由服务端绑定。
 
-## 服务器资源要求与接入状态
+## 服务器资源要求
 
 - 必需输入槽：`source_video`，一个支持历史帧随机访问的 owner-authorized、locked `video`；单张图片不能伪装多个历史采样。
-- 接入状态：**BLOCKED**。等待窗口 12 提供历史帧解码与 normal/screen/add 多帧合成适配器；当前安全失败，不输出历史采样清单假帧。
+- 导出服务按当前输出时刻减去 `spacing × 历史序号` 随机访问真实视频帧。不得用当前帧平移、摇摆或复制伪造历史帧。
 
 ## JSON 示例
 
 ```json
-{"type":"echo_trail","data":{"trailCount":8,"spacing":0.1,"decay":0.75,"offsetX":0.015,"offsetY":-0.005,"blendMode":"screen"}}
+{"type":"echo_trail","data":{"trailCount":10,"spacing":0.12,"decay":0.78,"offsetX":0,"offsetY":0,"blendMode":"normal"}}
 ```
 
 ## 参数字段
 
 | 字段 | 类型与范围 | 默认值 | 推荐值 | 中性值 | 含义 |
 | --- | --- | ---: | --- | ---: | --- |
-| `trailCount` | integer，2–32 | 6 | 4–12 | 2 | 当前帧在内的采样数量 |
-| `spacing` | number，>0–2 秒 | 0.08 | 0.04–0.2 | 0.08 | 相邻历史帧时间间隔 |
-| `decay` | number，0.05–1 | 0.7 | 0.55–0.85 | 0.05 | 每级透明度保留比例 |
-| `offsetX/Y` | number，各 -0.5–0.5 | 0.01 / 0 | -0.05–0.05 | 0 | 每级画面空间偏移 |
-| `blendMode` | `normal` / `screen` / `add` | `screen` | `screen` | `normal` | 历史帧混合方式 |
+| `trailCount` | integer，2–32 | 10 | 8–20 | 2 | 当前帧之外的真实历史帧数量 |
+| `spacing` | number，>0–2 秒 | 0.12 | 0.08–0.3 | 0.12 | 相邻历史帧时间间隔；总跨度约为数量乘间隔 |
+| `decay` | number，0.05–1 | 0.78 | 0.6–0.88 | 0.05 | 每级透明度保留比例，并叠加平滑尾端包络 |
+| `offsetX/Y` | number，各 -0.5–0.5 | 0 / 0 | -0.05–0.05 | 0 | 可选的每级额外空间偏移；默认不移动历史帧 |
+| `blendMode` | `normal` / `screen` / `add` | `normal` | `normal` / `screen` | `normal` | 历史帧混合方式 |
 
 ## 选择规则与优先级
 
-“更多分身”提高 `trailCount`，“拖得更长”可同时提高数量和 `spacing`。“紧密残影”减小间隔；方向词映射到 `offsetX/Y` 符号。亮、霓虹倾向 `screen` 或 `add`。优先级：明确数量/间隔 > 拖影方向与长度 > 亮度风格 > 默认值。
+“更多分身”提高 `trailCount`，“拖得更长”可同时提高数量和 `spacing`。“紧密残影”减小间隔；方向词只在用户明确要求额外偏移时映射到 `offsetX/Y`，否则保持零，让视频中的真实运动决定残影位置。亮、霓虹倾向 `screen` 或 `add`，自然运动残影使用 `normal`。优先级：明确数量/间隔 > 历史跨度 > 透明度衰减 > 可选偏移 > 混合风格。
 
 ## 用户表达示例
 
