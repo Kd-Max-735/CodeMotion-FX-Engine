@@ -60,7 +60,7 @@ const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
 const HAN_TEXT = /\p{Script=Han}/u;
 const SENSITIVE_PATH = /(?:https?:\/\/|file:\/\/|[a-z]:\\|\/(?:home|tmp|var|etc|users)\/)/iu;
 const IMAGE_DERIVED_TEXT_TOOLS = new Set([
-  "character_cascade", "kinetic_typography", "scramble_decode", "text_morph",
+  "kinetic_typography", "scramble_decode", "text_morph",
   "text_extrude_3d", "text_path_reveal", "typewriter", "word_explode"
 ]);
 const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
@@ -71,7 +71,6 @@ const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = O
   blob_morph: Object.freeze(["source_shape"]),
   bounce: Object.freeze(["source_layer"]),
   brush_reveal: Object.freeze(["brush_texture"]),
-  character_cascade: Object.freeze(["text_raster"]),
   dash_flow: Object.freeze(["source_path"])
 });
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;

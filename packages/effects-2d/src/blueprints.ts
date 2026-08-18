@@ -161,7 +161,10 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "light", 5),
   b("T02", "fx.text.characterCascade", "Character Cascade", "text", "Staggered glyph-cell cascade.", [
     number("stagger", 0.04, 0, 2, 0.01, "seconds"), choice("axis", "y", ["x", "y"]),
-    number("offset", 0.25, -2, 2, 0.01, "canvas"), choice("selector", "character", ["character", "word", "line", "paragraph"])
+    number("offset", 0.25, -2, 2, 0.01, "canvas"), choice("selector", "character", ["character", "word", "line", "paragraph"]),
+    text("text", "文字级联", 80), choice("fontFamily", "song", ["song", "kai", "sans"]),
+    number("fontSize", 72, 12, 240, 1, "pixels"), number("positionX", 0.5, 0, 1, 0.01, "canvas"),
+    number("positionY", 0.5, 0, 1, 0.01, "canvas"), text("color", "#ffffff", 16)
   ], "light", 5),
   b("T03", "fx.text.kineticTypography", "Kinetic Typography", "text", "Beat-driven cell scaling and layout.", [
     choice("layoutMode", "grid", ["grid", "radial", "stack"]), text("beatMap", "0,0.5,1"),

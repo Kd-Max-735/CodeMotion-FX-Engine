@@ -1,7 +1,9 @@
 import type { JsonObject, JsonSchema } from "@codemotion/core";
 import {
   P0_EFFECTS,
+  createServerTextRasterSourceV1,
   normalizeEffectParams,
+  rasterizeLayerInput,
   type EffectRuntimeOptions,
   type P0CatalogEffectDefinition,
   type PixelSurface
@@ -104,6 +106,7 @@ const RESOURCE_FIELDS: Readonly<Record<string, readonly string[]>> = Object.free
 
 const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   M05: "1.1.0",
+  T02: "1.1.0",
   D02: "1.1.0",
   D04: "1.1.0"
 });
@@ -119,6 +122,9 @@ function slot(
 function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlotDefinition[] {
   if (effect.sourceId === "T08") {
     return Object.freeze([slot("text_raster", "data", "Server-rasterized glyph geometry and pixels.")]);
+  }
+  if (effect.sourceId === "T02") {
+    return Object.freeze([slot("source_image", "image", "Owner-authorized background image.")]);
   }
   if (effect.sourceId === "D02") {
     return Object.freeze([
@@ -159,6 +165,10 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
   const schema = structuredClone(effect.parameterSchema) as JsonObject;
   const properties = schema.properties as JsonObject;
   for (const name of RESOURCE_FIELDS[effect.effectId] ?? []) delete properties[name];
+  if (effect.sourceId === "T02") {
+    (properties.text as JsonObject).minLength = 1;
+    (properties.color as JsonObject).pattern = "^#[0-9A-Fa-f]{6}$";
+  }
   if (Array.isArray(schema.required)) {
     schema.required = schema.required.filter((name) => typeof name === "string" && name in properties);
   }
@@ -182,6 +192,7 @@ function rasterBinding(context: ServerEffectRenderContext, name: string): Existi
 }
 
 function primarySlotName(effect: P0CatalogEffectDefinition): string {
+  if (effect.sourceId === "T02") return "source_image";
   if (effect.sourceId === "D02") return "source_frame";
   if (effect.category === "text") return "text_raster";
   if (effect.category === "vector" || effect.category === "draw") return "vector_source";
@@ -189,6 +200,32 @@ function primarySlotName(effect: P0CatalogEffectDefinition): string {
     return "source_frame";
   }
   return "source_layer";
+}
+
+function characterCascadeBinding(
+  context: ServerEffectRenderContext,
+  params: Readonly<JsonObject>
+): ExistingRasterBinding {
+  const background = rasterBinding(context, "source_image");
+  const source = createServerTextRasterSourceV1({
+    text: params.text as string,
+    fontFamily: params.fontFamily as "song" | "kai" | "sans",
+    fontSize: params.fontSize as number,
+    color: params.color as string,
+    positionX: params.positionX as number,
+    positionY: params.positionY as number,
+    width: context.width,
+    height: context.height
+  });
+  const layerId = `single-tool:character-cascade:${context.requestId}`;
+  const rasterInput: EffectRuntimeOptions["rasterInput"] = Object.freeze({
+    ...background.rasterInput,
+    layerId,
+    layerType: "text" as const,
+    source,
+    time: Object.freeze({ ...background.rasterInput.time, layerId })
+  });
+  return Object.freeze({ surface: rasterizeLayerInput(rasterInput), rasterInput });
 }
 
 function internalParams(
@@ -287,7 +324,9 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
           quality: context.quality
         });
       } else {
-        const primary = rasterBinding(context, primarySlotName(effect));
+        const primary = effect.sourceId === "T02"
+          ? characterCascadeBinding(context, params)
+          : rasterBinding(context, primarySlotName(effect));
         const secondaryName = secondarySlotName(effect);
         const secondary = secondaryName === undefined ? undefined : rasterBinding(context, secondaryName);
         const brush = effect.sourceId === "D02"
