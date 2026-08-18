@@ -102,7 +102,7 @@ const RESOURCE_FIELDS: Readonly<Record<string, readonly string[]>> = Object.free
   "fx.composite.displacementMap": Object.freeze(["map"])
 });
 
-const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({ M05: "1.1.0" });
+const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({ M05: "1.1.0", D02: "1.1.0" });
 
 function slot(
   name: string,
@@ -115,6 +115,13 @@ function slot(
 function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlotDefinition[] {
   if (effect.sourceId === "T08") {
     return Object.freeze([slot("text_raster", "data", "Server-rasterized glyph geometry and pixels.")]);
+  }
+  if (effect.sourceId === "D02") {
+    return Object.freeze([
+      slot("source_frame", "image", "Owner-authorized starting image."),
+      slot("target_frame", "image", "Owner-authorized target image revealed by the brush."),
+      slot("brush_texture", "texture", "Server-derived brush bristle coverage.")
+    ]);
   }
   const primary = effect.category === "text"
     ? slot("text_raster", "data", "Server-rasterized text layer and glyph coverage.")
@@ -132,7 +139,6 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   if (effect.sourceId === "T04") slots.push(slot("motion_path", "data", "Server-bound text motion path."));
   if (effect.sourceId === "V02") slots.push(slot("morph_paths", "data", "Server-bound source and target vector paths."));
   if (effect.sourceId === "D01") slots.push(slot("stroke_path", "data", "Server-bound handwriting path."));
-  if (effect.sourceId === "D02") slots.push(slot("brush_texture", "texture", "Owner-authorized brush texture and coverage."));
   if (effect.sourceId === "H01") slots.push(slot("mask_layer", "mask", "Owner-authorized reveal mask."));
   if (effect.sourceId === "H02") slots.push(slot("matte_layer", "mask", "Owner-authorized track matte."));
   if (effect.sourceId === "H03") slots.push(slot("overlay_layer", "image", "Owner-authorized overlay layer."));
@@ -172,6 +178,7 @@ function rasterBinding(context: ServerEffectRenderContext, name: string): Existi
 }
 
 function primarySlotName(effect: P0CatalogEffectDefinition): string {
+  if (effect.sourceId === "D02") return "source_frame";
   if (effect.category === "text") return "text_raster";
   if (effect.category === "vector" || effect.category === "draw") return "vector_source";
   if (effect.category === "light" || effect.category === "post" || effect.category === "transition") {
@@ -219,6 +226,7 @@ function effectTime(effectId: string, context: ServerEffectRenderContext) {
 }
 
 function secondarySlotName(effect: P0CatalogEffectDefinition): string | undefined {
+  if (effect.sourceId === "D02") return "target_frame";
   if (effect.category === "transition") return "target_frame";
   if (effect.sourceId === "H01") return "mask_layer";
   if (effect.sourceId === "H02") return "matte_layer";

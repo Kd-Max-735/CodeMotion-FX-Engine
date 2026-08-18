@@ -317,6 +317,7 @@ function assertRuntimeInput(
   }
   if ((blueprint.category === "vector" || blueprint.category === "draw")
     && !(blueprint.sourceId === "D01" && kind === "text")
+    && blueprint.sourceId !== "D02"
     && kind !== "shape" && kind !== "svg") {
     throw new TypeError(`${blueprint.effectId} requires a real Shape/SVG path source.`);
   }
@@ -325,7 +326,8 @@ function assertRuntimeInput(
     && kind !== "image" && kind !== "video") {
     throw new TypeError(`${blueprint.effectId} requires decoded RGBA image/video input.`);
   }
-  if (blueprint.category === "transition" || blueprint.category === "composite") {
+  if (blueprint.category === "transition" || blueprint.category === "composite"
+    || blueprint.sourceId === "D02") {
     if (!options.secondary || !options.secondaryRasterInput) {
       throw new TypeError(`${blueprint.effectId} requires independent source and secondary inputs.`);
     }
@@ -340,6 +342,13 @@ function assertRuntimeInput(
     }
   }
   if (blueprint.sourceId === "D02") {
+    if (kind !== "image" && kind !== "video") {
+      throw new TypeError("Brush Reveal requires a decoded starting image.");
+    }
+    const secondaryKind = options.secondaryRasterInput!.source.kind;
+    if (secondaryKind !== "image" && secondaryKind !== "video") {
+      throw new TypeError("Brush Reveal requires a decoded target image.");
+    }
     const brush = options.brushCoverage;
     if (!brush || brush.width < 1 || brush.height < 1
       || brush.data.length !== brush.width * brush.height) {
@@ -881,6 +890,39 @@ function renderVectorOrDraw(
   const output = emptyLike(source);
   const isDraw = blueprint.category === "draw";
   const raster = options.rasterInput.source;
+  if (blueprint.sourceId === "D02") {
+    const target = options.secondary!;
+    const brush = options.brushCoverage!;
+    const progress = effectProgress(blueprint, params, options);
+    const size = numberParam(params, "size", 0.12);
+    const roughness = numberParam(params, "roughness", 0.35);
+    const bands = Math.max(2, Math.min(24, Math.round(1 / Math.max(0.045, size))));
+    const settle = smoothstep(0.88, 1, progress);
+    for (let y = 0; y < source.height; y += 1) {
+      for (let x = 0; x < source.width; x += 1) {
+        const u = source.width === 1 ? 0.5 : x / (source.width - 1);
+        const v = source.height === 1 ? 0.5 : y / (source.height - 1);
+        const band = Math.min(bands - 1, Math.floor(v * bands));
+        const localV = fract(v * bands);
+        const travel = band % 2 === 0 ? u : 1 - u;
+        const bandProgress = clamp(progress * (bands + 0.7) - band);
+        const bristleJitter = (effectRandom(options, "D02.bristles",
+          Math.floor(x / 3), band * 97 + Math.floor(localV * 31), 1, 0, false) - 0.5)
+          * roughness * 0.24;
+        const frontier = bandProgress * (1 + size * 1.8) - size * 0.9 + bristleJitter;
+        const painted = smoothstep(frontier + size * (0.18 + roughness * 0.24),
+          frontier - size * 0.3, travel);
+        const bx = Math.min(brush.width - 1,
+          Math.floor(fract(u / Math.max(0.025, size)) * brush.width));
+        const by = Math.min(brush.height - 1, Math.floor(localV * brush.height));
+        const brushAlpha = brush.data[by * brush.width + bx]! / 255;
+        const textured = painted * (0.58 + brushAlpha * 0.42);
+        const coverage = textured + (1 - textured) * settle;
+        write(output, x, y, mixColor(read(source, x, y), read(target, x, y), coverage));
+      }
+    }
+    return output;
+  }
   if (blueprint.sourceId === "D01" && raster.kind === "text") {
     const progress = effectProgress(blueprint, params, options);
     const pressure = numberParam(params, "pressure", 0.7);

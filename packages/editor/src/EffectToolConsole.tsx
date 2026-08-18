@@ -111,6 +111,10 @@ export function inputSlotDisplayName(toolName: string, slotName: string): string
     if (slotName === "source_layer") return "基础图片";
     if (slotName === "displacement_map") return "置换贴图";
   }
+  if (toolName === "brush_reveal") {
+    if (slotName === "source_frame") return "起始图片";
+    if (slotName === "target_frame") return "目标图片";
+  }
   return slotName;
 }
 

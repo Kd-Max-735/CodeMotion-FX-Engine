@@ -64,13 +64,13 @@ const IMAGE_DERIVED_TEXT_TOOLS = new Set([
   "text_extrude_3d", "text_path_reveal", "typewriter", "word_explode"
 ]);
 const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
-  "path_trim", "path_morph", "radial_burst", "shape_repeater", "brush_reveal", "chalk_stroke",
+  "path_trim", "path_morph", "radial_burst", "shape_repeater", "chalk_stroke",
   "handwriting", "ink_spread"
 ]);
 const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   blob_morph: Object.freeze(["source_shape"]),
   bounce: Object.freeze(["source_layer"]),
-  brush_reveal: Object.freeze(["vector_source", "brush_texture"]),
+  brush_reveal: Object.freeze(["brush_texture"]),
   chalk_stroke: Object.freeze(["vector_source"]),
   character_cascade: Object.freeze(["text_raster"]),
   dash_flow: Object.freeze(["source_path"])
