@@ -526,11 +526,13 @@ function renderMotion(
         const range = numberParam(params, "range", 0.04);
         const frequency = numberParam(params, "frequency", 1);
         const phase = numberParam(params, "phase", 0);
-        const amount = Math.sin(seconds * TAU * frequency + phase) * range;
+        const angle = seconds * TAU * frequency + phase;
+        const horizontal = Math.sin(angle) * range;
+        const vertical = Math.cos(angle) * range;
         const axis = stringParam(params, "axis", "y");
         rgba = transformedSample(source, u, v, (su, sv) => [
-          su - (axis === "x" || axis === "both" ? amount : 0),
-          sv - (axis === "y" || axis === "both" ? amount : 0)
+          su - (axis === "x" || axis === "both" ? horizontal : 0),
+          sv - (axis === "y" ? horizontal : axis === "both" ? vertical : 0)
         ]);
       } else {
         rgba = transformedSample(
