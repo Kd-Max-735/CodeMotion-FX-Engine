@@ -106,10 +106,15 @@ const EXPECTED = Object.freeze({
   handwriting: {
     effectId: "fx.draw.handwriting",
     properties: {
+      text: { ...text("手写文字", 80), minLength: 1 },
+      fontFamily: choice("kai", ["song", "kai", "sans"]),
+      fontSize: number(72, 12, 240, 1), positionX: number(0.5, 0, 1, 0.01),
+      positionY: number(0.5, 0, 1, 0.01),
+      color: { ...text("#202020", 16), pattern: "^#[0-9A-Fa-f]{6}$" },
       pressure: number(0.7, 0, 1, 0.01), speedVariation: number(0.25, 0, 1, 0.01),
       progress: number(0.5, 0, 1, 0.01)
     },
-    slots: [["vector_source", "data"], ["stroke_path", "data"]]
+    slots: [["source_image", "image"]]
   },
   ink_spread: {
     effectId: "fx.draw.inkSpread",
@@ -117,13 +122,13 @@ const EXPECTED = Object.freeze({
       diffusion: number(0.55, 0, 1, 0.01), edgeNoise: number(0.2, 0, 1, 0.01),
       absorption: number(0.65, 0, 1, 0.01), progress: number(0.5, 0, 1, 0.01)
     },
-    slots: [["vector_source", "data"]]
+    slots: [["source_image", "image"]]
   },
   lens_flare: {
     effectId: "fx.light.lensFlare",
     properties: {
-      source: vector([0.72, 0.28]), ghosts: number(5, 0, 16, 1),
-      streak: number(0.45, 0, 2, 0.01), chromatic: number(0.08, 0, 1, 0.01)
+      source: vector([0.72, 0.28]), ghosts: number(2, 0, 8, 1),
+      streak: number(0.18, 0, 1, 0.01), chromatic: number(0.03, 0, 0.5, 0.01)
     },
     slots: [["source_frame", "image"]]
   },
@@ -220,8 +225,8 @@ const DOC_INPUT_TERMS: Readonly<Record<string, readonly string[]>> = Object.free
   displacement_map: ["置换图和源画面由服务端绑定"],
   energy_pulse: ["源画面和动画时间由服务端绑定"],
   gaussian_blur: ["源图片或视频由服务端绑定"],
-  handwriting: ["路径几何和文字内容由服务端绑定"],
-  ink_spread: ["源图形由服务端绑定"],
+  handwriting: ["文字内容、字体栅格和书写路径由服务端"],
+  ink_spread: ["源图片由服务端绑定"],
   lens_flare: ["源画面由服务端绑定"],
   liquid_wipe: ["A、B 两路素材由服务端绑定"],
   mask_reveal: ["遮罩与源画面由服务端绑定"],

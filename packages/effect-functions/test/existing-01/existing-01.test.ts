@@ -49,7 +49,7 @@ const EXPECTED_INPUT_SLOTS: Readonly<Record<Existing01ToolName, readonly string[
   elastic: ["source_layer"],
   fade: ["source_layer"],
   float: ["source_layer"],
-  kinetic_typography: ["text_raster"],
+  kinetic_typography: ["source_image"],
   path_morph: ["vector_source", "morph_paths"],
   path_trim: ["vector_source"],
   radial_burst: ["vector_source"],
@@ -67,7 +67,6 @@ const EXPECTED_INPUT_SLOTS: Readonly<Record<Existing01ToolName, readonly string[
 });
 
 const STRUCTURED_RESOURCE_TOOLS = Object.freeze([
-  "kinetic_typography",
   "path_morph",
   "path_trim",
   "radial_burst",
@@ -342,7 +341,9 @@ describe("existing-01 execution safety", () => {
           return definition.render(...args);
         }
       } as EffectToolDefinition;
-      expect(definition.inputSlots.every((slot) => slot.kind === (toolName === "character_cascade" ? "image" : "data")), toolName)
+      expect(definition.inputSlots.every((slot) => slot.kind === (
+        toolName === "character_cascade" || toolName === "kinetic_typography" ? "image" : "data"
+      )), toolName)
         .toBe(true);
       await expect(executeSelectedEffectTool(
         observed,
