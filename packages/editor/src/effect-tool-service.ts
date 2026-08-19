@@ -73,7 +73,12 @@ const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
   "path_trim", "path_morph", "radial_burst", "shape_repeater",
   "handwriting", "ink_spread"
 ]);
-const SAM_DERIVED_MASK_TOOLS = new Set(["marker_stroke", "chalk_stroke"]);
+const SAM_DERIVED_MASK_SOURCES: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
+  marker_stroke: Object.freeze({ subject_mask: "source_image" }),
+  chalk_stroke: Object.freeze({ subject_mask: "source_image" }),
+  neon_glow: Object.freeze({ subject_mask: "source_image" })
+});
+const SAM_DERIVED_MASK_TOOLS = new Set(Object.keys(SAM_DERIVED_MASK_SOURCES));
 const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   blob_morph: Object.freeze(["source_shape"]),
   bounce: Object.freeze(["source_layer"]),
@@ -86,7 +91,8 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   kinetic_typography: "source_image",
   lens_flare: "source_frame",
   marker_stroke: "source_image",
-  chalk_stroke: "source_image"
+  chalk_stroke: "source_image",
+  neon_glow: "source_image"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
@@ -367,7 +373,7 @@ function isServerDerivedInputSlot(
   slot: EffectInputSlotDefinition
 ): boolean {
   return isSyntheticDerivedInputSlot(definition, slot)
-    || SAM_DERIVED_MASK_TOOLS.has(definition.toolName) && slot.name === "subject_mask"
+    || SAM_DERIVED_MASK_SOURCES[definition.toolName]?.[slot.name] !== undefined
     || definition.toolName === "depth_of_field" && slot.name === "depth_field"
     || definition.toolName === "paint_on" && slot.name === "stroke_plan"
     || ["dolly", "dolly_zoom", "orbit", "pan_tilt", "parallax_layers"].includes(definition.toolName)
@@ -434,11 +440,11 @@ function derivedInputResourceId(
   inputIds: Readonly<Record<string, unknown>>
 ): string | undefined {
   if (!isServerDerivedInputSlot(definition, slot)) return undefined;
-  const sourceSlot = definition.toolName === "object_match_cut"
+  const samSourceSlot = SAM_DERIVED_MASK_SOURCES[definition.toolName]?.[slot.name];
+  const sourceSlot = samSourceSlot ?? (definition.toolName === "object_match_cut"
     ? slot.name === "to_match_mask" ? "to_video" : "from_video"
       : definition.toolName === "depth_of_field" ? "source_frame"
       : definition.toolName === "paint_on" ? "source_image"
-      : SAM_DERIVED_MASK_TOOLS.has(definition.toolName) && slot.name === "subject_mask" ? "source_image"
       : definition.toolName === "onset_trigger" || definition.toolName === "vocal_reactive_text"
         ? "audio_analysis"
       : ["glass", "hologram", "metal"].includes(definition.toolName)
@@ -446,7 +452,7 @@ function derivedInputResourceId(
       : definition.toolName === "background_remove_compose" && slot.name === "foreground_matte"
         ? "foreground_video"
       : definition.toolName === "image_depth_parallax" && slot.name === "source_depth"
-        ? "source_image" : "source_video";
+        ? "source_image" : "source_video");
   const value = inputIds[sourceSlot];
   return typeof value === "string" && RESOURCE_ID.test(value) ? value : undefined;
 }
@@ -1399,7 +1405,7 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
         });
         continue;
       }
-      if (SAM_DERIVED_MASK_TOOLS.has(definition.toolName) && slot.name === "subject_mask"
+      if (SAM_DERIVED_MASK_SOURCES[definition.toolName]?.[slot.name] !== undefined
         && effectParams === undefined) continue;
       const derivedResourceId = derivedInputResourceId(definition, slot, raw);
       const value = raw[slot.name] ?? derivedResourceId ?? (slot.required && previewResourceId !== undefined
@@ -1458,7 +1464,7 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
       cache?.media.set(resourceId, mediaPromise);
     }
     const media = await mediaPromise;
-    if (SAM_DERIVED_MASK_TOOLS.has(definition.toolName) && slot.name === "subject_mask") {
+    if (SAM_DERIVED_MASK_SOURCES[definition.toolName]?.[slot.name] !== undefined) {
       const target = effectParams?.target;
       if (this.segmentation === undefined || typeof target !== "string") {
         throw new Error("SAM3.1 segmentation is unavailable for this effect.");

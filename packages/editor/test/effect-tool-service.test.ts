@@ -859,14 +859,20 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(6);
 
+    const neonGlow = EFFECT_TOOL_REGISTRY.getByToolName("neon_glow")!;
+    await expect(resolver.visionImage(principal, neonGlow, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(7);
+
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(6);
+    expect(resolveMedia).toHaveBeenCalledTimes(7);
   });
 
-  it.each(["marker_stroke", "chalk_stroke"])(
+  it.each(["marker_stroke", "chalk_stroke", "neon_glow"])(
     "derives the locked %s subject mask from the owner-authorized source image and normalized target",
     async (toolName) => {
       const width = 4; const height = 2;
@@ -1420,7 +1426,7 @@ describe("server single effect-tool service", () => {
           { name: "stroke_plan", kind: "data", required: true, acceptsUploadedImage: false }
         ]
       });
-      for (const toolName of ["marker_stroke", "chalk_stroke"]) {
+      for (const toolName of ["marker_stroke", "chalk_stroke", "neon_glow"]) {
         expect(catalog.tools.find((item) => item.toolName === toolName)).toMatchObject({
           inputRequirements: [
             { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },

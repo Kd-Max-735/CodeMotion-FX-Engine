@@ -170,9 +170,13 @@ const EXPECTED = Object.freeze({
     effectId: "fx.light.neonGlow",
     properties: {
       color: text("#42C8FF", 16), radius: number(0.08, 0, 0.5, 0.005),
-      intensity: number(1.8, 0, 8, 0.05), flicker: number(0.12, 0, 1, 0.01)
+      intensity: number(1.8, 0, 8, 0.05), flicker: number(0.12, 0, 1, 0.01),
+      target: {
+        type: "string", minLength: 1, maxLength: 80,
+        pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$", default: "main subject"
+      }
     },
-    slots: [["source_frame", "image"]]
+    slots: [["source_image", "image"], ["subject_mask", "mask"]]
   },
   pixel_dissolve: {
     effectId: "fx.transition.pixelDissolve",
@@ -241,7 +245,7 @@ const DOC_INPUT_TERMS: Readonly<Record<string, readonly string[]>> = Object.free
   liquid_wipe: ["A、B 两路素材由服务端绑定"],
   mask_reveal: ["底层画面、目标画面与可选自定义遮罩由服务端绑定"],
   motion_blur: ["源画面和实际素材由服务端绑定"],
-  neon_glow: ["源图片、文字或图形由服务端绑定"],
+  neon_glow: ["SAM3.1", "source_image", "subject_mask"],
   pixel_dissolve: ["A、B 两路素材由服务端绑定"],
   radial_blur: ["源画面由服务端绑定"],
   radial_wipe: ["A、B 两路素材由服务端绑定"],
@@ -580,6 +584,52 @@ describe("existing-02 field specifications and adapter contracts", () => {
     expect(changed(inside, 1, 6)).toBe(false);
     expect(changed(heldHalf, 3, 5)).toBe(true);
     expect(changed(heldHalf, 12, 5)).toBe(false);
+  });
+
+  it("renders neon only around the SAM-selected subject while preserving the uploaded image", async () => {
+    const definition = definitions().get("neon_glow")!;
+    const width = 24; const height = 16;
+    const sourceData = new Uint8ClampedArray(width * height * 4);
+    for (let index = 0; index < width * height; index += 1) {
+      sourceData.set([24, 36, 48, 255], index * 4);
+    }
+    const source = {
+      width, height, data: sourceData, colorSpace: "srgb" as const, alphaMode: "straight" as const
+    };
+    const mask = new Uint8Array(width * height);
+    for (let y = 4; y <= 11; y += 1) for (let x = 7; x <= 16; x += 1) mask[y * width + x] = 255;
+    const input = (slotName: string, kind: EffectInputKind, binding: unknown) => ({
+      slot: slotName,
+      kind,
+      tenantId: "tenant-existing-02",
+      userId: "user-existing-02",
+      locked: true as const,
+      binding
+    });
+    const render = async (intensity: number) => (await definition.render({
+      ...contextFor(definition, {
+        source_image: input("source_image", "image", { surface: source, rasterInput: {} }),
+        subject_mask: input("subject_mask", "mask", { width, height, data: mask })
+      }),
+      width,
+      height
+    }, {
+      ...definition.defaults,
+      intensity,
+      flicker: 0,
+      radius: 0.08,
+      color: "#00FF88"
+    })).output as typeof source;
+
+    expect(definition.version).toBe("2.0.0");
+    expect(Array.from((await render(0)).data)).toEqual(Array.from(source.data));
+    const glowing = await render(2);
+    const boundary = (6 * width + 7) * 4;
+    const farBackground = 0;
+    expect(Array.from(glowing.data.slice(boundary, boundary + 3)))
+      .not.toEqual(Array.from(source.data.slice(boundary, boundary + 3)));
+    expect(Array.from(glowing.data.slice(farBackground, farBackground + 4)))
+      .toEqual(Array.from(source.data.slice(farBackground, farBackground + 4)));
   });
 
   it("maps exactly the assigned 20 snake_case tools to one independent Markdown file", async () => {

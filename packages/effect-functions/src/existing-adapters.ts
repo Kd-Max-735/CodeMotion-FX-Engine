@@ -115,6 +115,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   D01: "1.1.0",
   D03: "1.1.0",
   D04: "2.0.0",
+  L01: "2.0.0",
   L03: "1.1.0",
   L04: "1.3.0",
   H01: "2.0.0"
@@ -145,6 +146,12 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   if (effect.sourceId === "D04") {
     return Object.freeze([
       slot("source_image", "image", "Owner-authorized image receiving the chalk effect."),
+      slot("subject_mask", "mask", "Server-derived SAM3.1 mask for the requested visible target.")
+    ]);
+  }
+  if (effect.sourceId === "L01") {
+    return Object.freeze([
+      slot("source_image", "image", "Owner-authorized image receiving object-scoped neon glow."),
       slot("subject_mask", "mask", "Server-derived SAM3.1 mask for the requested visible target.")
     ]);
   }
@@ -229,6 +236,15 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
     };
     properties.placement = { type: "string", enum: ["outline", "inside"], default: "outline" };
   }
+  if (effect.sourceId === "L01") {
+    properties.target = {
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$",
+      default: "main subject"
+    };
+  }
   if (effect.sourceId === "T02" || effect.sourceId === "T03" || effect.sourceId === "D01") {
     (properties.text as JsonObject).minLength = 1;
     (properties.color as JsonObject).pattern = "^#[0-9A-Fa-f]{6}$";
@@ -236,6 +252,7 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
   if (Array.isArray(schema.required)) {
     schema.required = schema.required.filter((name) => typeof name === "string" && name in properties);
     if (effect.sourceId === "D04") schema.required.push("target", "placement");
+    if (effect.sourceId === "L01") schema.required.push("target");
   }
   return schema as JsonSchema;
 }
@@ -262,6 +279,7 @@ function primarySlotName(effect: P0CatalogEffectDefinition): string {
   if (effect.sourceId === "T03") return "source_image";
   if (effect.sourceId === "D03") return "source_image";
   if (effect.sourceId === "D04") return "source_image";
+  if (effect.sourceId === "L01") return "source_image";
   if (effect.sourceId === "D02") return "source_frame";
   if (effect.category === "text") return "text_raster";
   if (effect.category === "vector" || effect.category === "draw") return "vector_source";
@@ -465,6 +483,41 @@ function chalkStrokeFrame(context: ServerEffectRenderContext, params: Readonly<J
   return { ...source, data: output };
 }
 
+function neonGlowFrame(context: ServerEffectRenderContext, params: Readonly<JsonObject>): PixelSurface {
+  const source = rasterBinding(context, "source_image").surface;
+  const intensity = params.intensity as number;
+  if (intensity <= 0) return { ...source, data: new Uint8ClampedArray(source.data) };
+  const mask = directMaskValues(context, "subject_mask");
+  const distances = maskBoundaryDistances(mask, context.width, context.height);
+  const color = chalkColor(params.color as string);
+  const radius = Math.max(1, (params.radius as number) * Math.min(context.width, context.height));
+  const flickerAmount = params.flicker as number;
+  const flicker = Math.max(0.08, 1 - flickerAmount * (0.28 + 0.22 * Math.sin(
+    context.time * Math.PI * 17 + context.seed * 0.0001
+  )));
+  const output = new Uint8ClampedArray(source.data);
+  for (let index = 0; index < mask.length; index += 1) {
+    const distance = distances[index]!;
+    if (distance > radius * 3.2) continue;
+    const inside = mask[index]! / 255;
+    const coreWidth = Math.max(0.75, radius * 0.09);
+    const core = Math.exp(-(distance * distance) / (2 * coreWidth * coreWidth));
+    const bloom = Math.exp(-distance / Math.max(1, radius * 0.72));
+    const selectedBody = inside * Math.exp(-distance / Math.max(1, radius * 1.35)) * 0.16;
+    const light = Math.min(1, (core * 0.82 + bloom * 0.38 + selectedBody) * intensity * flicker);
+    if (light <= 0.002) continue;
+    const offset = index * 4;
+    const alpha = Math.min(0.94, light * 0.72);
+    for (let channel = 0; channel < 3; channel += 1) {
+      output[offset + channel] = Math.round(Math.min(255,
+        source.data[offset + channel]! * (1 - alpha) + color[channel]! * alpha
+          + color[channel]! * light * 0.2
+      ));
+    }
+  }
+  return { ...source, data: output };
+}
+
 function directPixelSurface(context: ServerEffectRenderContext, name: string): PixelSurface {
   const binding = singleBinding<Record<string, unknown>>(context, name);
   const surface = binding.surface as PixelSurface | undefined;
@@ -599,6 +652,11 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
           target: "main subject",
           placement: "outline"
         })
+    : effect.sourceId === "L01"
+      ? Object.freeze({
+          ...withoutResourceFields(effect.effectId, effect.defaultPreset),
+          target: "main subject"
+        })
     : Object.freeze(withoutResourceFields(effect.effectId, effect.defaultPreset));
   return Object.freeze({
     effectId: effect.effectId,
@@ -623,11 +681,11 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
     normalizeParams(params: Readonly<JsonObject>): JsonObject {
       const normalized = effect.sourceId === "H01"
         ? { ...params }
-        : effect.sourceId === "D04"
+        : effect.sourceId === "D04" || effect.sourceId === "L01"
           ? {
               ...normalizeEffectParams(effect.effectId, params),
               target: (params.target as string).trim().toLowerCase(),
-              placement: params.placement
+              ...(effect.sourceId === "D04" ? { placement: params.placement } : {})
             }
         : effect.sourceId === "T08"
         ? normalizeTextExtrude3DParams(params)
@@ -643,6 +701,8 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         output = maskRevealFrame(context, params);
       } else if (effect.sourceId === "D04") {
         output = chalkStrokeFrame(context, params);
+      } else if (effect.sourceId === "L01") {
+        output = neonGlowFrame(context, params);
       } else if (effect.sourceId === "T08") {
         const input = singleBinding<TextExtrude3DRasterInput>(context, "text_raster");
         output = effect.renderPixels(input, resolved, {
