@@ -1073,12 +1073,12 @@ function renderLight(
         const rings = Math.max(1, Math.round(numberParam(params, "rings", 4)));
         const falloff = numberParam(params, "falloff", 0.2);
         const duration = Math.max(0.1, numberParam(params, "duration", 3));
-        const pulseProgress = clamp(seconds / duration);
-        const pulseLifetime = 2 / (rings + 1);
+        const pulseLifetimeSeconds = Math.min(1.4, Math.max(0.45, duration / Math.max(2, rings)));
+        const emissionSpan = Math.max(0, duration - pulseLifetimeSeconds);
         let refraction = 0;
         for (let ringIndex = 0; ringIndex < rings; ringIndex += 1) {
-          const emissionStart = ringIndex / (rings + 1);
-          const phase = (pulseProgress - emissionStart) / pulseLifetime;
+          const emissionStart = rings === 1 ? 0 : emissionSpan * ringIndex / (rings - 1);
+          const phase = (seconds - emissionStart) / pulseLifetimeSeconds;
           if (phase < 0 || phase > 1) continue;
           const ringRadius = radius * phase;
           const envelope = Math.sin(Math.PI * phase) ** 0.42;

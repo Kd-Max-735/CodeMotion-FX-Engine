@@ -91,21 +91,13 @@ function bindingFor(context: ServerEffectRenderContext, slot: string): unknown {
 export type VisualAnchorName = "coordinates" | "subject_left" | "subject_right"
   | "subject_top" | "subject_bottom" | "subject_center" | "brightest";
 
-export function visualAnchors(
-  context: ServerEffectRenderContext,
-  slot: string
+export function visualAnchorsFromPixels(
+  width: number,
+  height: number,
+  data: Uint8Array | Uint8ClampedArray
 ): Readonly<Record<Exclude<VisualAnchorName, "coordinates">, Point>> {
-  const binding = bindingFor(context, slot);
-  if (!isRecord(binding) || !Number.isInteger(binding.width) || !Number.isInteger(binding.height)) {
-    throw new TypeError(`Input slot ${slot} must expose decoded image pixels.`);
-  }
-  const width = binding.width as number;
-  const height = binding.height as number;
-  const raw = binding.data;
-  const data = raw instanceof Uint8Array || raw instanceof Uint8ClampedArray
-    ? raw : Array.isArray(raw) ? Uint8Array.from(raw as number[]) : undefined;
-  if (width < 1 || height < 1 || data?.length !== width * height * 4) {
-    throw new TypeError(`Input slot ${slot} contains invalid decoded image pixels.`);
+  if (width < 1 || height < 1 || data.length !== width * height * 4) {
+    throw new TypeError("Visual anchor analysis requires valid decoded image pixels.");
   }
   const background = [0, 0, 0];
   let backgroundCount = 0;
@@ -117,7 +109,13 @@ export function visualAnchors(
   }
   for (let channel = 0; channel < 3; channel += 1) background[channel]! /= Math.max(1, backgroundCount);
   let minX = width - 1; let maxX = 0; let minY = height - 1; let maxY = 0; let foregroundCount = 0;
-  let brightWeight = 0; let brightX = 0; let brightY = 0;
+  let bestScore = -Infinity;
+  const scores = new Float32Array(width * height);
+  const luminanceAt = (x: number, y: number) => {
+    const offset = (Math.min(height - 1, Math.max(0, y)) * width + Math.min(width - 1, Math.max(0, x))) * 4;
+    return (data[offset]! * 0.2126 + data[offset + 1]! * 0.7152 + data[offset + 2]! * 0.0722) / 255;
+  };
+  const sampleRadius = Math.max(2, Math.round(Math.min(width, height) / 28));
   for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
     const offset = (y * width + x) * 4;
     const difference = Math.hypot(data[offset]! - background[0]!, data[offset + 1]! - background[1]!,
@@ -126,11 +124,23 @@ export function visualAnchors(
       minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
       foregroundCount += 1;
     }
-    const luminance = (data[offset]! * 0.2126 + data[offset + 1]! * 0.7152 + data[offset + 2]! * 0.0722) / 255;
-    const weight = Math.max(0, luminance - 0.78) ** 3;
-    brightWeight += weight; brightX += x * weight; brightY += y * weight;
+    const luminance = luminanceAt(x, y);
+    const neighborhood = (luminanceAt(x - sampleRadius, y) + luminanceAt(x + sampleRadius, y)
+      + luminanceAt(x, y - sampleRadius) + luminanceAt(x, y + sampleRadius)) / 4;
+    const localContrast = Math.max(0, luminance - neighborhood);
+    const nx = x / Math.max(1, width - 1); const ny = y / Math.max(1, height - 1);
+    const centerBias = 1 - Math.min(1, Math.hypot(nx - 0.5, ny - 0.5) / Math.SQRT1_2);
+    const score = luminance * 0.55 + localContrast * 1.35 + difference * 0.18 + centerBias * 0.025;
+    scores[y * width + x] = score;
+    bestScore = Math.max(bestScore, score);
   }
   if (foregroundCount === 0) { minX = width * 0.2; maxX = width * 0.8; minY = height * 0.2; maxY = height * 0.8; }
+  let brightWeight = 0; let brightX = 0; let brightY = 0;
+  const scoreFloor = bestScore - 0.07;
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const weight = Math.max(0, scores[y * width + x]! - scoreFloor) ** 2;
+    brightWeight += weight; brightX += x * weight; brightY += y * weight;
+  }
   const normalizeX = (x: number) => round(x / Math.max(1, width - 1), 5);
   const normalizeY = (y: number) => round(y / Math.max(1, height - 1), 5);
   const centerX = (minX + maxX) / 2; const centerY = (minY + maxY) / 2;
@@ -145,6 +155,25 @@ export function visualAnchors(
     subject_center: { x: normalizeX(centerX), y: normalizeY(centerY) },
     brightest
   });
+}
+
+export function visualAnchors(
+  context: ServerEffectRenderContext,
+  slot: string
+): Readonly<Record<Exclude<VisualAnchorName, "coordinates">, Point>> {
+  const binding = bindingFor(context, slot);
+  if (!isRecord(binding) || !Number.isInteger(binding.width) || !Number.isInteger(binding.height)) {
+    throw new TypeError(`Input slot ${slot} must expose decoded image pixels.`);
+  }
+  const width = binding.width as number;
+  const height = binding.height as number;
+  const raw = binding.data;
+  const data = raw instanceof Uint8Array || raw instanceof Uint8ClampedArray
+    ? raw : Array.isArray(raw) ? Uint8Array.from(raw as number[]) : undefined;
+  if (data === undefined) {
+    throw new TypeError(`Input slot ${slot} contains invalid decoded image pixels.`);
+  }
+  return visualAnchorsFromPixels(width, height, data);
 }
 
 function finitePoint(value: unknown): Point | undefined {

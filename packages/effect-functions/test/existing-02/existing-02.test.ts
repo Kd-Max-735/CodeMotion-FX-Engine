@@ -89,7 +89,9 @@ const EXPECTED = Object.freeze({
     effectId: "fx.light.energyPulse",
     properties: {
       center: vector([0.5, 0.5]), radius: number(0.34, 0, 2, 0.01),
-      falloff: number(0.2, 0.001, 1, 0.005), rings: number(4, 1, 32, 1)
+      falloff: number(0.2, 0.001, 1, 0.005), rings: number(4, 1, 32, 1),
+      duration: number(3, 0.1, 60, 0.1),
+      centerMode: choice("coordinates", ["coordinates", "brightest", "subject_center"])
     },
     slots: [["source_frame", "image"]]
   },

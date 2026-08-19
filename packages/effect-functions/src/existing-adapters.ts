@@ -19,6 +19,7 @@ import type {
   EffectToolDefinition,
   ServerEffectRenderContext
 } from "./types.js";
+import { visualAnchorsFromPixels } from "./batches/batch-01/common.js";
 
 interface ExistingIdentity {
   readonly toolName: string;
@@ -111,7 +112,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   T02: "1.1.0",
   D02: "1.1.0",
   D04: "1.1.0",
-  L04: "1.1.0"
+  L04: "1.2.0"
 });
 
 function slot(
@@ -246,6 +247,13 @@ function internalParams(
   if (effect.sourceId === "D01") output.path = singleBinding<ExistingPathBinding>(context, "stroke_path").path;
   if (effect.sourceId === "D02") {
     output.brushTexture = singleBinding<ExistingBrushBinding>(context, "brush_texture").reference;
+  }
+  if (effect.sourceId === "L04" && params.centerMode !== "coordinates") {
+    const source = rasterBinding(context, "source_frame").surface;
+    const anchors = visualAnchorsFromPixels(source.width, source.height, source.data);
+    output.center = params.centerMode === "brightest"
+      ? [anchors.brightest.x, anchors.brightest.y]
+      : [anchors.subject_center.x, anchors.subject_center.y];
   }
   if (effect.sourceId === "H01") output.mask = "context://mask";
   if (effect.sourceId === "H02") output.matteLayer = "context://secondary";

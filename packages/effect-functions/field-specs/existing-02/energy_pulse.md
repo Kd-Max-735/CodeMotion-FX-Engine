@@ -12,7 +12,8 @@
     "radius": 0.34,
     "falloff": 0.2,
     "rings": 4,
-    "duration": 3
+    "duration": 3,
+    "centerMode": "coordinates"
   }
 }
 ```
@@ -24,6 +25,7 @@
 | `falloff` | 是 | 数字 `0.001..1`，步长 `0.005` | 越大环带越宽、衰减越柔和 |
 | `rings` | 是 | 数字 `1..32`，步长 `1` | 控制一次视频内依次发射的脉冲次数，按次数词选择整数 |
 | `duration` | 是 | 数字 `0.1..60` 秒，步长 `0.1`，默认 `3` | 从第一圈发射到最后一圈消散的完整脉冲动画时长；不是导出视频总时长 |
+| `centerMode` | 是 | 枚举 `coordinates` / `brightest` / `subject_center` | 坐标、画面最亮显著区域或主体中心；非坐标模式由服务器分析授权图片 |
 
 ## 参数选择规则
 
@@ -31,19 +33,20 @@
 - “小范围/冲出画面”优先调 `radius`；`radius>1` 可让范围超出归一化画布。
 - “锐利冲击波”降低 `falloff`；“宽厚、柔和能量带”提高它。
 - “发射一次/连续发射多次”直接映射 `rings`；次数增加会缩短相邻脉冲的时间间隔，不会把它们压成同一圈的纹理。
-- 用户说“脉冲持续 N 秒”时设置 `duration=N`。动画按服务端效果时间除以 `duration` 推进；完成后底图保持不变，不循环。
+- 用户说“脉冲持续 N 秒”时设置 `duration=N`。`duration` 是多轮脉冲的完整发射窗口，每一轮保持自然扩散速度，不会因总时长增加而整体变慢；完成后底图保持不变，不循环。
 - 本工具 Schema 没有 `progress` 字段，不要生成它。
-- 模型不能读取上传图片。用户给出“左上、画面中央、横向 70% 纵向 30%”等方位或坐标时可可靠映射 `center`；只说“太阳中心、人物手中”等图片语义目标而没有方位时，不要声称已识别目标，保留默认中心或使用同时给出的画面方位。
+- 模型不能读取上传图片。用户给出“左上、画面中央、横向 70% 纵向 30%”等方位或坐标时使用 `centerMode=coordinates` 并映射 `center`；说“太阳中心、灯光中心、最亮处”时使用 `centerMode=brightest`，服务器以亮度和局部对比度定位；说“主体中心”时使用 `centerMode=subject_center`。这不是视觉模型级语义识别，不得声称能识别人手等任意部位。
 
 ## 自然语言示例
 
 | 用户表达 | `data` 参数结果 |
 | --- | --- |
-| 从中心发出一个锐利小脉冲，持续 2 秒 | `{"center":[0.5,0.5],"radius":0.18,"falloff":0.04,"rings":1,"duration":2}` |
-| 默认连续发射四次能量脉冲 | `{"center":[0.5,0.5],"radius":0.34,"falloff":0.2,"rings":4,"duration":3}` |
-| 从左下角连续发出六次柔和脉冲，持续 5 秒 | `{"center":[0.2,0.8],"radius":0.6,"falloff":0.4,"rings":6,"duration":5}` |
-| 右上角快速连续发射十二次冲击波 | `{"center":[0.8,0.2],"radius":0.8,"falloff":0.12,"rings":12,"duration":2}` |
-| 超出画面的宽厚双环 | `{"center":[0.5,0.5],"radius":1.4,"falloff":0.55,"rings":2,"duration":3}` |
+| 从中心发出一个锐利小脉冲，持续 2 秒 | `{"center":[0.5,0.5],"radius":0.18,"falloff":0.04,"rings":1,"duration":2,"centerMode":"coordinates"}` |
+| 默认连续发射四次能量脉冲 | `{"center":[0.5,0.5],"radius":0.34,"falloff":0.2,"rings":4,"duration":3,"centerMode":"coordinates"}` |
+| 从左下角连续发出六次柔和脉冲，持续 5 秒 | `{"center":[0.2,0.8],"radius":0.6,"falloff":0.4,"rings":6,"duration":5,"centerMode":"coordinates"}` |
+| 从太阳中心连续发出八次脉冲，持续 5 秒 | `{"center":[0.5,0.5],"radius":0.6,"falloff":0.16,"rings":8,"duration":5,"centerMode":"brightest"}` |
+| 右上角快速连续发射十二次冲击波 | `{"center":[0.8,0.2],"radius":0.8,"falloff":0.12,"rings":12,"duration":2,"centerMode":"coordinates"}` |
+| 超出画面的宽厚双环 | `{"center":[0.5,0.5],"radius":1.4,"falloff":0.55,"rings":2,"duration":3,"centerMode":"coordinates"}` |
 
 ## 推荐档位
 
@@ -53,6 +56,6 @@
 | 标准 | `0.34` | `0.2` | `4` |
 | 大而密集 | `0.8` | `0.4` | `8..12` |
 
-默认值为 `center=[0.5,0.5]`、`radius=0.34`、`falloff=0.2`、`rings=4`、`duration=3`。中心坐标是位置中性值；`radius=0` 是零基础半径，`falloff=0.001` 是最锐边界，`rings=1` 是单环。最大 `radius=2`、`falloff=1`、`rings=32`、`duration=60` 仅用于极端范围、极宽、极密或极慢效果。
+默认值为 `center=[0.5,0.5]`、`radius=0.34`、`falloff=0.2`、`rings=4`、`duration=3`、`centerMode=coordinates`。中心坐标是位置中性值；`radius=0` 是零基础半径，`falloff=0.001` 是最锐边界，`rings=1` 是单环。最大 `radius=2`、`falloff=1`、`rings=32`、`duration=60` 仅用于极端范围、极宽、极密或长时间效果。
 
 源画面和动画时间由服务端绑定，不生成图片、视频、纹理、资源 ID、路径或 URL。`duration` 只控制脉冲动画时间，导出视频总时长由外部导出设置控制。本工具不用于镜头鬼影、扫描光束或霓虹轮廓。
