@@ -109,7 +109,7 @@ export function visualAnchorsFromPixels(
   }
   for (let channel = 0; channel < 3; channel += 1) background[channel]! /= Math.max(1, backgroundCount);
   let minX = width - 1; let maxX = 0; let minY = height - 1; let maxY = 0; let foregroundCount = 0;
-  let bestScore = -Infinity;
+  let bestScore = -Infinity; let bestX = width / 2; let bestY = height / 2; let bestLuminance = 0.5;
   const scores = new Float32Array(width * height);
   const luminanceAt = (x: number, y: number) => {
     const offset = (Math.min(height - 1, Math.max(0, y)) * width + Math.min(width - 1, Math.max(0, x))) * 4;
@@ -132,20 +132,36 @@ export function visualAnchorsFromPixels(
     const centerBias = 1 - Math.min(1, Math.hypot(nx - 0.5, ny - 0.5) / Math.SQRT1_2);
     const score = luminance * 0.55 + localContrast * 1.35 + difference * 0.18 + centerBias * 0.025;
     scores[y * width + x] = score;
-    bestScore = Math.max(bestScore, score);
+    if (score > bestScore) {
+      bestScore = score; bestX = x; bestY = y; bestLuminance = luminance;
+    }
   }
   if (foregroundCount === 0) { minX = width * 0.2; maxX = width * 0.8; minY = height * 0.2; maxY = height * 0.8; }
-  let brightWeight = 0; let brightX = 0; let brightY = 0;
-  const scoreFloor = bestScore - 0.07;
-  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
-    const weight = Math.max(0, scores[y * width + x]! - scoreFloor) ** 2;
-    brightWeight += weight; brightX += x * weight; brightY += y * weight;
+  const brightRadius = Math.max(8, Math.min(width, height) * 0.22);
+  for (let pass = 0; pass < 2; pass += 1) {
+    let brightWeight = 0; let brightX = 0; let brightY = 0;
+    const threshold = Math.max(0.34, bestLuminance * 0.64);
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+      const distanceSquared = (x - bestX) ** 2 + (y - bestY) ** 2;
+      if (distanceSquared > brightRadius ** 2) continue;
+      const luminance = luminanceAt(x, y);
+      const brightness = Math.max(0, luminance - threshold);
+      if (brightness <= 0) continue;
+      const locality = Math.exp(-distanceSquared / (2 * (brightRadius * 0.55) ** 2));
+      const salience = Math.max(0, scores[y * width + x]! - bestScore + 0.24);
+      const weight = brightness ** 1.5 * locality * (0.7 + salience * 1.5);
+      brightWeight += weight; brightX += x * weight; brightY += y * weight;
+    }
+    if (brightWeight > 1e-6) {
+      bestX = brightX / brightWeight; bestY = brightY / brightWeight;
+      bestLuminance = luminanceAt(Math.round(bestX), Math.round(bestY));
+    }
   }
   const normalizeX = (x: number) => round(x / Math.max(1, width - 1), 5);
   const normalizeY = (y: number) => round(y / Math.max(1, height - 1), 5);
   const centerX = (minX + maxX) / 2; const centerY = (minY + maxY) / 2;
-  const brightest = brightWeight > 1e-6
-    ? { x: normalizeX(brightX / brightWeight), y: normalizeY(brightY / brightWeight) }
+  const brightest = Number.isFinite(bestX) && Number.isFinite(bestY)
+    ? { x: normalizeX(bestX), y: normalizeY(bestY) }
     : { x: normalizeX(centerX), y: normalizeY(centerY) };
   return Object.freeze({
     subject_left: { x: normalizeX(minX), y: normalizeY(centerY) },

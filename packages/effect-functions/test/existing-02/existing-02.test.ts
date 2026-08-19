@@ -91,7 +91,7 @@ const EXPECTED = Object.freeze({
       center: vector([0.5, 0.5]), radius: number(0.34, 0, 2, 0.01),
       falloff: number(0.2, 0.001, 1, 0.005), rings: number(4, 1, 32, 1),
       duration: number(3, 0.1, 60, 0.1),
-      centerMode: choice("coordinates", ["coordinates", "brightest", "subject_center"])
+      centerMode: choice("coordinates", ["coordinates", "brightest", "subject_center", "subject_left", "subject_right", "subject_top", "subject_bottom"])
     },
     slots: [["source_frame", "image"]]
   },
@@ -329,6 +329,16 @@ function expectDocumentedProperty(field: string, property: PropertyContract, tex
 }
 
 describe("existing-02 field specifications and adapter contracts", () => {
+  it("exposes coordinate and server-fallback positioning modes for energy_pulse", () => {
+    const definition = definitions().get("energy_pulse")!;
+    const schema = definition.parameterSchema as unknown as {
+      readonly properties: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+    };
+    expect(schema.properties.centerMode?.enum).toEqual([
+      "coordinates", "brightest", "subject_center", "subject_left", "subject_right", "subject_top", "subject_bottom"
+    ]);
+  });
+
   it("maps exactly the assigned 20 snake_case tools to one independent Markdown file", async () => {
     const byToolName = definitions();
     expect([...byToolName.keys()].sort()).toEqual(TOOL_NAMES);

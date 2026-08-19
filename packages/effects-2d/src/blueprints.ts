@@ -244,7 +244,7 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
     vector("center", [0.5, 0.5]), number("radius", 0.34, 0, 2, 0.01, "canvas"),
     number("falloff", 0.2, 0.001, 1, 0.005), number("rings", 4, 1, 32, 1, "count", "medium"),
     number("duration", 3, 0.1, 60, 0.1, "seconds"),
-    choice("centerMode", "coordinates", ["coordinates", "brightest", "subject_center"])
+    choice("centerMode", "coordinates", ["coordinates", "brightest", "subject_center", "subject_left", "subject_right", "subject_top", "subject_bottom"])
   ], "medium", 9),
 
   b("P01", "fx.post.gaussianBlur", "Gaussian Blur", "post", "Separable Gaussian approximation.", [

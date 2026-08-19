@@ -11,6 +11,7 @@ import {
   validateAndNormalizeEffectEnvelope
 } from "../../../src/validation.js";
 import { BATCH_01_DEFINITIONS } from "../../../src/batches/batch-01/index.js";
+import { visualAnchorsFromPixels } from "../../../src/batches/batch-01/common.js";
 
 const pathBinding = {
   points: [{ x: 12, y: 70 }, { x: 45, y: 22 }, { x: 86, y: 82 }, { x: 145, y: 30 }],
@@ -131,6 +132,24 @@ const fieldSpecNames: Readonly<Record<string, string>> = {
 };
 
 describe("batch-01 effect definitions", () => {
+  it("keeps the brightest fallback centered on one local salient region", () => {
+    const width = 80; const height = 60;
+    const pixels = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const bright = x >= 55 && x <= 70 && y >= 8 && y <= 22;
+      pixels[offset] = bright ? 255 : 12;
+      pixels[offset + 1] = bright ? 248 : 12;
+      pixels[offset + 2] = bright ? 225 : 12;
+      pixels[offset + 3] = 255;
+    }
+    const anchor = visualAnchorsFromPixels(width, height, pixels).brightest;
+    expect(anchor.x).toBeGreaterThan(0.65);
+    expect(anchor.x).toBeLessThan(0.92);
+    expect(anchor.y).toBeGreaterThan(0.08);
+    expect(anchor.y).toBeLessThan(0.45);
+  });
+
   it("exports exactly the ten assigned definitions with unique identities", () => {
     expect(BATCH_01_DEFINITIONS).toHaveLength(10);
     expect(new Set(BATCH_01_DEFINITIONS.map((definition) => definition.effectId)).size).toBe(10);

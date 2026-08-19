@@ -8,10 +8,10 @@ This document is the authoritative architecture for the current CodeMotion FX En
 
 1. The front end will eventually display tool names only. A user manually selects exactly one tool.
 2. One request executes exactly one effect tool. There is no effect stack, tool composition, implicit selection, retrieval, ranking, recommendation, or model-selected fallback in this path.
-3. The model reads only the selected tool's Chinese Markdown instruction and its closed parameter contract. It does not receive another tool's definition or a tool catalog.
+3. The model reads only the selected tool's Chinese Markdown instruction and its closed parameter contract. For an explicit server allowlist of tools with semantic positioning fields, the same sole model may additionally receive one owner-authorized image solely to translate the user's named visible target into normalized coordinates. It does not receive another tool's definition or a tool catalog.
 4. The sole model provider remains the server-side Volcengine Ark model `doubao-seed-2-0-lite-260428`.
 5. The model returns one native selected-tool call. Its arguments contain the selected effect parameters plus shared `output.durationSeconds` and `output.generationMode`; it cannot emit project structure, layers, resource identities, file paths, URLs, renderer choices, arbitrary frame rates, other export settings, or a second tool call.
-6. Resources and runtime inputs are authenticated, owner-authorized, server-bound, and locked outside the model envelope.
+6. Resources and runtime inputs are authenticated, owner-authorized, server-bound, and locked outside the model envelope. The positioning-image exception never places resource identity, bytes, path, URL, or model-generated resource references in Tool Call arguments.
 7. Preview, rendering, and export are server operations. No browser or DOM renderer is part of the current architecture.
 8. ReAct, Agent, multi-tool calls, multi-effect composition, and a front-end editor remain deferred until all 120 real effect functions are complete.
 
@@ -64,6 +64,7 @@ The two input channels are intentionally not assignable to one another:
 | Shared native `output.durationSeconds` | Ark model | Requested video duration only | Yes |
 | Shared native `output.generationMode` | Ark model | Exact `fast`, `standard`, or `fine` mode | Yes |
 | `AuthorizedEffectInputs` | Authenticated server | Owner-scoped, locked image/video/audio/mask/LUT/depth/font/model/texture/data bindings | No |
+| Positioning image (allowlisted tools only) | Authenticated server | One integrity-verified image supplied to the sole Ark request for coordinate grounding | Yes, transiently; never part of the model envelope |
 
 The package compiles with the ES server library and exposes no `Window`, `Document`, DOM node, canvas element, browser storage, or browser renderer type. The shared registry starts empty and imports no placeholder batch.
 
@@ -72,7 +73,7 @@ The package compiles with the ES server library and exposes no `Window`, `Docume
 1. Authenticate the session and enforce exact Origin, CSRF, scope, tenant, user, and audit rules before accepting a body or resource binding.
 2. Resolve the one user-selected `toolName` to one registered `EffectToolDefinition`; reject missing, ambiguous, unpublished, or stale definitions.
 3. Resolve the tool's declared `inputSlots` against owner-authorized server media/resource stores. Bind every resource to the authenticated tenant and user and lock it for this request.
-4. Load only that tool's reviewed Chinese Markdown and closed parameter Schema. Call only server-side Ark `doubao-seed-2-0-lite-260428`.
+4. Load only that tool's reviewed Chinese Markdown and closed parameter Schema. For an allowlisted semantic-positioning tool, resolve and integrity-check its declared primary image, then attach that image only to the same server-side Ark `doubao-seed-2-0-lite-260428` request. All other tools remain text-only.
 5. Parse the one native tool call, reject extra argument fields, require exact selected function name, separate `effectParams` from shared `output.durationSeconds` and `output.generationMode`, and reject non-finite or resource-bearing values.
 6. Validate raw effect parameters, apply only definition defaults to omitted optional fields, validate again, run `validateParams`, normalize, then revalidate Schema and `validateParams`; validate duration and generation mode independently against the shared contract and map the mode to a server-owned FPS.
 7. Verify required input slots, cardinality, kind, owner, lock state, server context, and declared server backend.

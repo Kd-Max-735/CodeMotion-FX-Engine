@@ -133,6 +133,31 @@ describe("selected-tool Ark Provider", () => {
     });
   });
 
+  it("attaches an authorized image only as multimodal user content for coordinate grounding", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => response());
+    const provider = new VolcengineArkSelectedToolProvider({
+      apiKey: "unit-test-key-that-is-not-real",
+      fetchImpl
+    });
+    await provider.respond({
+      ...request(),
+      visionImage: { mimeType: "image/png", base64Data: "AQIDBA==" }
+    });
+    const body = JSON.parse(String(fetchImpl.mock.calls[0]![1]?.body)) as {
+      messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>;
+    };
+    expect(body.messages[0]!.content).toContain("归一化坐标");
+    expect(body.messages[1]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "生成轻微火花" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,AQIDBA==" } }
+      ]
+    });
+    expect(JSON.stringify(body)).not.toContain("asset_");
+    expect(JSON.stringify(body)).not.toContain("file://");
+  });
+
   it("rejects a second call or any function name other than the selected tool", async () => {
     const wrongName = new VolcengineArkSelectedToolProvider({
       apiKey: "unit-test-key-that-is-not-real",

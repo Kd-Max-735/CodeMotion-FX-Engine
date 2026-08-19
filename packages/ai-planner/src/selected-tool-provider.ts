@@ -25,7 +25,13 @@ export interface SelectedToolParameterRequest {
   readonly prompt: string;
   readonly fieldSpec: string;
   readonly parameterSchema: JsonSchema;
+  readonly visionImage?: SelectedToolVisionImage;
   readonly signal?: AbortSignal;
+}
+
+export interface SelectedToolVisionImage {
+  readonly mimeType: "image/jpeg" | "image/png" | "image/webp";
+  readonly base64Data: string;
 }
 
 export interface SelectedToolParameterProvider {
@@ -203,11 +209,29 @@ function systemContent(request: SelectedToolParameterRequest): string {
     "若当前工具 Schema 确实包含会显示在画面中的文字内容字段，优先逐字使用用户明确提供的文案；用户未提供时，单一显示文字字段使用“笔唯思”。",
     "若显示文字字段明确成对为 sourceText 与 targetText 且用户未提供源、目标文案，使用 sourceText=penvis、targetText=笔唯思。不得把默认文案填入 charset、枚举、字体、路径、颜色或其他非显示文字字符串字段。",
     "不得在参数中输出素材、路径、URL、资源 ID、直接帧率、编码器或除 durationSeconds、generationMode 之外的导出设置。",
+    ...(request.visionImage === undefined ? [] : [
+      "用户消息附带了当前工具唯一获准查看的输入图片。仅当字段说明要求定位时分析该图，并把语义位置转换为左上角原点的归一化坐标：x 从左到右 0..1，y 从上到下 0..1。",
+      "优先定位用户明确点名的可见对象或部位，坐标取目标区域的视觉中心；不要臆造不可见目标，不要在工具参数或正文中复述图片数据。"
+    ]),
     "工具结果回传后必须用简洁中文给出最终正文，说明已采用的效果、视频时长和生成模式，不得再次调用工具。",
     `当前唯一工具：${request.toolName}`,
     "当前工具字段说明（其中标准 JSON 的 data 字段仅对应 effectParams）：",
     request.fieldSpec
   ].join("\n");
+}
+
+function userContent(prompt: string, image: SelectedToolVisionImage | undefined): string | readonly Record<string, unknown>[] {
+  if (image === undefined) return prompt;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(image.base64Data)) {
+    throw new ProviderError("invalid_input", "Selected-tool vision image encoding is invalid.");
+  }
+  return Object.freeze([
+    Object.freeze({ type: "text", text: prompt }),
+    Object.freeze({
+      type: "image_url",
+      image_url: Object.freeze({ url: `data:${image.mimeType};base64,${image.base64Data}` })
+    })
+  ]);
 }
 
 function finalSystemContent(request: SelectedToolParameterRequest): string {
@@ -312,7 +336,7 @@ export class VolcengineArkSelectedToolProvider implements SelectedToolConversati
             fieldSpec
           ].join("\n")
         },
-        { role: "user", content: prompt }
+        { role: "user", content: userContent(prompt, request.visionImage) }
       ],
       tools: [{
         type: "function",

@@ -19,7 +19,7 @@ import type {
   EffectToolDefinition,
   ServerEffectRenderContext
 } from "./types.js";
-import { visualAnchorsFromPixels } from "./batches/batch-01/common.js";
+import { visualAnchorsFromPixels, type VisualAnchorName } from "./batches/batch-01/common.js";
 
 interface ExistingIdentity {
   readonly toolName: string;
@@ -115,7 +115,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   D01: "1.1.0",
   D03: "1.1.0",
   D04: "1.1.0",
-  L04: "1.2.0"
+  L04: "1.3.0"
 });
 
 function slot(
@@ -291,9 +291,8 @@ function internalParams(
   if (effect.sourceId === "L04" && params.centerMode !== "coordinates") {
     const source = rasterBinding(context, "source_frame").surface;
     const anchors = visualAnchorsFromPixels(source.width, source.height, source.data);
-    output.center = params.centerMode === "brightest"
-      ? [anchors.brightest.x, anchors.brightest.y]
-      : [anchors.subject_center.x, anchors.subject_center.y];
+    const anchor = anchors[params.centerMode as Exclude<VisualAnchorName, "coordinates">];
+    output.center = [anchor.x, anchor.y];
   }
   if (effect.sourceId === "H01") output.mask = "context://mask";
   if (effect.sourceId === "H02") output.matteLayer = "context://secondary";

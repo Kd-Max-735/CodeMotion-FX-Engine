@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtemp, writeFile } from "node:fs/promises";
@@ -743,6 +744,41 @@ describe("server single effect-tool service", () => {
       rogue_slot: "asset_abcdefgh"
     }, { time: 0, fps: 30, width: 2, height: 2, seed: 1, quality: "preview" }))
       .rejects.toThrow(/unknown slot/u);
+  });
+
+  it("builds an integrity-checked vision input only for allowlisted positioning tools", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "cmfx-positioning-image-"));
+    const storedPath = join(directory, "source.png");
+    const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    await writeFile(storedPath, bytes);
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const media: VerifiedStoredMedia = {
+      asset: {
+        id: `asset_${hash.slice(0, 24)}`,
+        type: "image",
+        uri: `media://${hash}.png`,
+        hash: `sha256:${hash}`,
+        metadata: { mime: "image/png", width: 2, height: 2, codec: "png" }
+      },
+      descriptor: { id: `asset_${hash.slice(0, 24)}`, type: "media/image", cacheKey: hash, metadata: {} },
+      storedPath,
+      arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: true, reason: "test" },
+      trustedBytes: bytes.byteLength
+    };
+    const resolveMedia = vi.fn(async () => media);
+    const resolver = new TenantMediaEffectToolInputResolver({ resolve: resolveMedia } as never);
+    const energyPulse = EFFECT_TOOL_REGISTRY.getByToolName("energy_pulse")!;
+    const vision = await resolver.visionImage(principal, energyPulse, {
+      source_frame: media.asset.id
+    });
+    expect(vision).toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledOnce();
+
+    const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
+    await expect(resolver.visionImage(principal, filmGrain, {
+      source_frame: media.asset.id
+    })).resolves.toBeUndefined();
+    expect(resolveMedia).toHaveBeenCalledOnce();
   });
 
   it("creates server-owned inputs for every reported prompt-only tool without resolving media", async () => {

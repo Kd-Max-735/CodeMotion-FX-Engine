@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import type { RenderQuality } from "@codemotion/core";
@@ -27,6 +28,7 @@ import {
   type SelectedToolConversationProvider,
   type SelectedToolModelTurn,
   type SelectedToolParameterProvider,
+  type SelectedToolVisionImage,
   type VideoGenerationMode
 } from "@codemotion/ai-planner";
 import { DEFAULT_CJK_GLYPH_PATTERNS } from "@codemotion/effects-2d";
@@ -72,6 +74,11 @@ const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = O
   bounce: Object.freeze(["source_layer"]),
   brush_reveal: Object.freeze(["brush_texture"])
 });
+const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze({
+  energy_pulse: "source_frame",
+  dash_flow: "source_image"
+});
+const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
 export interface EffectToolPrincipal {
@@ -110,6 +117,12 @@ export interface EffectToolInputResolver {
     render: EffectToolRenderSettings,
     signal?: AbortSignal
   ): Promise<AuthorizedEffectInputs>;
+  visionImage?(
+    principal: EffectToolPrincipal,
+    definition: EffectToolDefinition,
+    inputIds: EffectToolInputIds,
+    signal?: AbortSignal
+  ): Promise<SelectedToolVisionImage | undefined>;
 }
 
 export interface EffectToolListItem {
@@ -1265,6 +1278,36 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     private readonly decodeFrame: typeof decodeMediaFrame = decodeMediaFrame
   ) {}
 
+  async visionImage(
+    principal: EffectToolPrincipal,
+    definition: EffectToolDefinition,
+    inputIds: EffectToolInputIds,
+    signal?: AbortSignal
+  ): Promise<SelectedToolVisionImage | undefined> {
+    const slotName = VISION_POSITIONING_SLOTS[definition.toolName];
+    if (slotName === undefined) return undefined;
+    const value = inputIds[slotName];
+    const resourceId = typeof value === "string" ? value : value?.[0];
+    if (resourceId === undefined) return undefined;
+    const media = await this.media.resolve(ownerOf(principal), resourceId, signal);
+    if (media.asset.type !== "image" && media.asset.type !== "svg") return undefined;
+    const proxy = media.asset.type === "svg";
+    const path = proxy ? media.rasterProxyPath : media.storedPath;
+    const mimeType = proxy ? "image/png" : media.asset.metadata.mime;
+    const expectedHash = proxy ? media.asset.metadata.rasterProxyHash : media.asset.hash;
+    if (path === undefined || (mimeType !== "image/jpeg" && mimeType !== "image/png" && mimeType !== "image/webp")
+      || typeof expectedHash !== "string" || !/^sha256:[a-f0-9]{64}$/iu.test(expectedHash)) {
+      return undefined;
+    }
+    const bytes = await readFile(path, signal === undefined ? undefined : { signal });
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_VISION_IMAGE_BYTES) return undefined;
+    const actualHash = createHash("sha256").update(bytes).digest("hex");
+    if (`sha256:${actualHash}`.toLowerCase() !== expectedHash.toLowerCase()) {
+      throw new ProviderError("security", "Authorized vision image changed before model positioning.");
+    }
+    return Object.freeze({ mimeType, base64Data: bytes.toString("base64") });
+  }
+
   async resolve(
     principal: EffectToolPrincipal,
     definition: EffectToolDefinition,
@@ -1707,6 +1750,12 @@ export class EffectToolService {
     try {
       const fieldSpec = await loadEffectFieldSpec(definition.toolName);
       const provider = conversationProvider(this.provider);
+      const visionImage = await this.inputs.visionImage?.(
+        principal,
+        definition,
+        request.inputIds,
+        controller.signal
+      );
       const providerRequest = {
         requestId: randomUUID(),
         tenantId: principal.tenantId,
@@ -1715,6 +1764,7 @@ export class EffectToolService {
         prompt: request.prompt,
         fieldSpec,
         parameterSchema: definition.parameterSchema,
+        ...(visionImage === undefined ? {} : { visionImage }),
         signal: controller.signal
       } as const;
       const modelTurn = await provider.respond(providerRequest);
