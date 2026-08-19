@@ -2191,14 +2191,14 @@ function batch05CameraFrame(
   const roll = typeof rotation.z === "number" ? rotation.z : 0;
 
   if (toolName === "dolly") {
-    const strength = Math.min(0.58, Math.abs(positionZ) * 0.055);
+    const strength = Math.min(0.46, Math.abs(positionZ) * 0.045);
     const scale = positionZ <= 0 ? 1 + strength : 1 / (1 + strength);
     renderAffineSource(source, output, request, scale, 0, -positionY * request.height * 0.035);
     return true;
   }
 
   if (toolName === "dolly_zoom") {
-    const strength = Math.min(0.48, Math.abs(positionZ) * 0.055);
+    const strength = Math.min(0.72, Math.abs(positionZ) * 0.045);
     if (strength <= Number.EPSILON) {
       copyRgbaFrame(source, output);
       return true;
@@ -2207,19 +2207,14 @@ function batch05CameraFrame(
     const centerX = (request.width - 1) / 2;
     const centerY = (request.height - 1) / 2;
     const maximumRadius = Math.max(1, Math.hypot(centerX, centerY));
-    const subjectRadius = 0.38;
-    const radialBias = Math.exp((forward ? 1 : -1) * strength * 2.4);
+    const radialBias = (forward ? 1 : -1) * strength * 1.35;
     for (let y = 0; y < request.height; y += 1) {
       for (let x = 0; x < request.width; x += 1) {
         const dx = x - centerX;
         const dy = y - centerY;
         const radial = Math.min(1, Math.hypot(dx, dy) / maximumRadius);
-        const annulus = radial <= subjectRadius
-          ? 0 : (radial - subjectRadius) / (1 - subjectRadius);
-        const warpedAnnulus = annulus <= 0 ? 0
-          : annulus / (annulus + (1 - annulus) * radialBias);
-        const sourceRadius = radial <= subjectRadius
-          ? radial : subjectRadius + warpedAnnulus * (1 - subjectRadius);
+        const protection = smoothUnit(Math.max(0, Math.min(1, (radial - 0.12) / 0.88)));
+        const sourceRadius = radial * Math.exp(radialBias * protection);
         const radialScale = radial <= Number.EPSILON ? 1 : sourceRadius / radial;
         const sourceX = centerX + dx * radialScale;
         const sourceY = centerY + dy * radialScale;
