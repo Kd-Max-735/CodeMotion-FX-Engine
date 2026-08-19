@@ -26,7 +26,7 @@ export const ECHO_TRAIL_DEFINITION: EffectToolDefinition<EchoTrailParams> = {
   effectId: "fx.media.echoTrail",
   toolName: "echo_trail",
   displayName: "历史帧回声拖影",
-  version: "1.1.0",
+  version: "1.2.0",
   category: "media",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",

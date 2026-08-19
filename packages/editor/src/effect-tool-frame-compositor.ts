@@ -1708,6 +1708,9 @@ function polishedStructuredFrame(
   if (toolName === "echo_trail") {
     const histories = Array.isArray(value.histories) ? [...value.histories].reverse() : [];
     const blendMode = typeof value.blendMode === "string" ? value.blendMode : "normal";
+    const currentFrame = inputFrames?.source_video ?? source;
+    if (currentFrame === undefined || currentFrame.length !== output.length) return false;
+    const currentSnapshot = new Uint8Array(currentFrame);
     for (const entry of histories) {
       const history = record(entry);
       const frameKey = typeof history?.frameKey === "string" ? history.frameKey : "";
@@ -1715,6 +1718,7 @@ function polishedStructuredFrame(
       if (frame === undefined || frame.length !== output.length) continue;
       blendHistoricalFrame(
         frame,
+        currentSnapshot,
         output,
         request,
         typeof history?.offsetX === "number" ? history.offsetX : 0,
@@ -2012,6 +2016,7 @@ function shiftedSource(
 
 function blendHistoricalFrame(
   history: Uint8Array,
+  current: Uint8Array,
   output: Uint8ClampedArray,
   request: FrameRequest,
   shiftX: number,
@@ -2020,6 +2025,17 @@ function blendHistoricalFrame(
   mode: string
 ): void {
   const alpha = Math.max(0, Math.min(1, opacity));
+  const border = [0, 0, 0];
+  let borderCount = 0;
+  for (let y = 0; y < request.height; y += 1) {
+    for (let x = 0; x < request.width; x += 1) {
+      if (x !== 0 && y !== 0 && x !== request.width - 1 && y !== request.height - 1) continue;
+      const offset = (y * request.width + x) * 4;
+      for (let channel = 0; channel < 3; channel += 1) border[channel]! += current[offset + channel]!;
+      borderCount += 1;
+    }
+  }
+  for (let channel = 0; channel < 3; channel += 1) border[channel]! /= Math.max(1, borderCount);
   for (let y = 0; y < request.height; y += 1) {
     const sourceY = Math.round(y - shiftY);
     if (sourceY < 0 || sourceY >= request.height) continue;
@@ -2029,7 +2045,20 @@ function blendHistoricalFrame(
       const sourceOffset = (sourceY * request.width + sourceX) * 4;
       const targetOffset = (y * request.width + x) * 4;
       const sourceAlpha = history[sourceOffset + 3]! / 255;
-      const mix = alpha * sourceAlpha;
+      const motionDifference = Math.hypot(
+        history[sourceOffset]! - current[sourceOffset]!,
+        history[sourceOffset + 1]! - current[sourceOffset + 1]!,
+        history[sourceOffset + 2]! - current[sourceOffset + 2]!
+      ) / 441.7;
+      const foregroundDifference = Math.hypot(
+        history[sourceOffset]! - border[0]!,
+        history[sourceOffset + 1]! - border[1]!,
+        history[sourceOffset + 2]! - border[2]!
+      ) / 441.7;
+      const motionMask = smoothUnit(Math.max(0, Math.min(1, (motionDifference - 0.025) / 0.16)));
+      const foregroundMask = smoothUnit(Math.max(0, Math.min(1, (foregroundDifference - 0.035) / 0.2)));
+      const mix = alpha * sourceAlpha * motionMask * foregroundMask;
+      if (mix <= 0.001) continue;
       for (let channel = 0; channel < 3; channel += 1) {
         const base = output[targetOffset + channel]!;
         const historical = history[sourceOffset + channel]!;
