@@ -117,6 +117,30 @@ describe("effect tool frame compositor", () => {
     expect(high).not.toEqual(pulse);
   });
 
+  it("renders a positioned and colored number counter over the uploaded image", () => {
+    const source = gradientSource();
+    const value = {
+      formatted: "100",
+      progress: 1,
+      numberColor: "#12ABEF",
+      progressColor: "#FEDC21",
+      trackColor: "#243648",
+      positionX: 0.78,
+      positionY: 0.24,
+      size: 0.2,
+      barWidth: 0.3
+    };
+    const output = composeEffectToolFrame(metadata(value), detailedRequest, "number_counter", source, {
+      source_image: source
+    });
+    const topLeft = Array.from(output.slice(0, 4));
+    expect(topLeft).toEqual(Array.from(source.slice(0, 4)));
+    expect(changedPixelCount(source, output)).toBeGreaterThan(30);
+    const moved = composeEffectToolFrame(metadata({ ...value, positionX: 0.22 }),
+      detailedRequest, "number_counter", source, { source_image: source });
+    expect(moved).not.toEqual(output);
+  });
+
   it("interpolates the metaball field into a continuous organic edge", () => {
     const output = composeEffectToolFrame(metadata({
       width: 4,

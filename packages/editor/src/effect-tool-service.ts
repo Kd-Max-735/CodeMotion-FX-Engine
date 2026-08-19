@@ -93,7 +93,8 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   marker_stroke: "source_image",
   chalk_stroke: "source_image",
   neon_glow: "source_image",
-  neon_trace: "source_image"
+  neon_trace: "source_image",
+  number_counter: "source_image"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
@@ -388,7 +389,7 @@ function isServerDerivedInputSlot(
     || definition.toolName === "onset_trigger" && slot.name === "target_effect"
     || definition.toolName === "vocal_reactive_text"
       && (slot.name === "text_layer" || slot.name === "text_font")
-    || ["live_binding", "number_counter"].includes(definition.toolName)
+    || definition.toolName === "live_binding"
       && slot.kind === "data"
     || ["glass", "hologram", "metal"].includes(definition.toolName)
       && slot.name !== "source_image";
@@ -402,7 +403,7 @@ function isSyntheticDerivedInputSlot(
     || definition.toolName === "onset_trigger" && slot.name === "target_effect"
     || definition.toolName === "vocal_reactive_text"
       && (slot.name === "text_layer" || slot.name === "text_font")
-    || ["live_binding", "number_counter"].includes(definition.toolName)
+    || definition.toolName === "live_binding"
       && slot.kind === "data";
 }
 
@@ -1102,7 +1103,6 @@ function previewDataBinding(
   }
   switch (slot.name) {
     case "audio_analysis": return previewAudioBinding(definition, render);
-    case "number_range": return { version: "validated-number-v1", from: 0, to: 100 };
     case "validated_binding": {
       const cycleSeconds = 3.2;
       const phase = render.time / cycleSeconds * Math.PI * 2 - Math.PI / 2;

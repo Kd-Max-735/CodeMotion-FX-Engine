@@ -871,11 +871,17 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(8);
 
+    const numberCounter = EFFECT_TOOL_REGISTRY.getByToolName("number_counter")!;
+    await expect(resolver.visionImage(principal, numberCounter, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(9);
+
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(8);
+    expect(resolveMedia).toHaveBeenCalledTimes(9);
   });
 
   it.each(["marker_stroke", "chalk_stroke", "neon_glow"])(

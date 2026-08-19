@@ -121,7 +121,9 @@ function validInputs(definition: EffectToolDefinition): AuthorizedEffectInputs {
         text_font: authorized("text_font", "font", { version: "font-binding-v1", fontHandle: "font-server-2" })
       };
     case "number_counter":
-      return { number_range: authorized("number_range", "data", { version: "validated-number-v1", from: 10, to: 110 }) };
+      return { source_image: authorized("source_image", "image", {
+        version: "rgba8-frame-v1", width: 1920, height: 1080, data: new Uint8Array(1920 * 1080 * 4)
+      }) };
     case "chart_reveal":
       return {
         chart_data: authorized("chart_data", "data", {
@@ -298,13 +300,41 @@ describe("batch-08 definitions", () => {
     expect((vocal.output as { energy: number }).energy).toBeGreaterThan(0.5);
   });
 
-  it("renders number and chart values only from server-validated data", async () => {
+  it("renders model-selected number values over an authorized image and holds the exact end value", async () => {
     const counter = await run(NUMBER_COUNTER_DEFINITION, {
-      number_range: authorized("number_range", "data", { version: "validated-number-v1", from: 10, to: 110 })
+      source_image: authorized("source_image", "image", { version: "rgba8-frame-v1", width: 1920, height: 1080 })
     }, 0.6);
-    expect((counter.output as { value: number }).value).toBeGreaterThan(10);
-    expect((counter.output as { value: number }).value).toBeLessThan(110);
+    expect((counter.output as { value: number }).value).toBeGreaterThan(0);
+    expect((counter.output as { value: number }).value).toBeLessThan(100);
+    const completed = await executeSelectedEffectTool(
+      NUMBER_COUNTER_DEFINITION,
+      NUMBER_COUNTER_DEFINITION.toolName,
+      { type: NUMBER_COUNTER_DEFINITION.toolName, data: {
+        ...NUMBER_COUNTER_DEFINITION.defaults,
+        fromValue: 20,
+        toValue: 100,
+        duration: 6,
+        positionX: 0.76,
+        positionY: 0.24,
+        numberColor: "#12ABEF",
+        progressColor: "#FEDC21"
+      } },
+      context(NUMBER_COUNTER_DEFINITION, {
+        source_image: authorized("source_image", "image", { version: "rgba8-frame-v1", width: 1920, height: 1080 })
+      }, 6)
+    );
+    expect(completed.output).toMatchObject({
+      progress: 1,
+      value: 100,
+      formatted: "100",
+      positionX: 0.76,
+      positionY: 0.24,
+      numberColor: "#12abef",
+      progressColor: "#fedc21"
+    });
+  });
 
+  it("renders chart values only from server-validated data", async () => {
     const chart = await run(CHART_REVEAL_DEFINITION, {
       chart_data: authorized("chart_data", "data", {
         version: "validated-chart-v1",
@@ -458,21 +488,6 @@ describe("batch-08 definitions", () => {
       context(LIVE_BINDING_DEFINITION, extremeBinding)
     )).rejects.toThrow("Rendered numeric output must be finite");
 
-    await expect(executeSelectedEffectTool(
-      NUMBER_COUNTER_DEFINITION,
-      NUMBER_COUNTER_DEFINITION.toolName,
-      {
-        type: NUMBER_COUNTER_DEFINITION.toolName,
-        data: { ...NUMBER_COUNTER_DEFINITION.defaults, format: "percent" }
-      },
-      context(NUMBER_COUNTER_DEFINITION, {
-        number_range: authorized("number_range", "data", {
-          version: "validated-number-v1",
-          from: Number.MAX_VALUE,
-          to: Number.MAX_VALUE
-        })
-      }, 0.6)
-    )).rejects.toThrow("Rendered percentage must be finite");
   });
 
   it("normalizes a full finite numeric range without intermediate overflow", async () => {

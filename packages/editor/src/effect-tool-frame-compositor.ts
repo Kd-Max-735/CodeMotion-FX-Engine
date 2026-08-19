@@ -577,7 +577,7 @@ const SEVEN_SEGMENTS: Readonly<Record<string, readonly number[]>> = Object.freez
   "0": [0, 1, 2, 3, 4, 5], "1": [1, 2], "2": [0, 1, 6, 4, 3],
   "3": [0, 1, 2, 3, 6], "4": [5, 6, 1, 2], "5": [0, 5, 6, 2, 3],
   "6": [0, 5, 4, 3, 2, 6], "7": [0, 1, 2], "8": [0, 1, 2, 3, 4, 5, 6],
-  "9": [0, 1, 2, 3, 5, 6]
+  "9": [0, 1, 2, 3, 5, 6], "-": [6]
 });
 
 function drawSevenSegmentText(
@@ -585,14 +585,22 @@ function drawSevenSegmentText(
   request: FrameRequest,
   text: string,
   color: readonly number[],
-  scale = 1
+  opacity = 1,
+  centerX = 0.5,
+  centerY = 0.5,
+  size = 0.18
 ): void {
-  const height = Math.max(28, Math.min(request.height * 0.34, 96 * scale));
+  const glyphUnits = Math.max(0.56, text.length * 0.56 + Math.max(0, text.length - 1) * 0.112);
+  const height = Math.max(8, Math.min(
+    request.height * Math.max(0.05, Math.min(0.8, size)),
+    (request.width - 4) / glyphUnits,
+    request.height - 4
+  ));
   const width = height * 0.56;
   const gap = width * 0.2;
   const total = text.length * width + Math.max(0, text.length - 1) * gap;
-  let left = (request.width - total) / 2;
-  const top = request.height * 0.33;
+  let left = Math.max(2, Math.min(request.width - total - 2, centerX * request.width - total / 2));
+  const top = Math.max(2, Math.min(request.height - height - 2, centerY * request.height - height / 2));
   const thickness = Math.max(1.6, height * 0.045);
   const segments = [
     [0.12, 0.04, 0.88, 0.04], [0.92, 0.08, 0.92, 0.48],
@@ -603,24 +611,24 @@ function drawSevenSegmentText(
   for (const character of text) {
     if (character === ".") {
       drawDisc(output, request.width, request.height, left + width * 0.5, top + height * 0.96,
-        thickness * 1.35, color, 0.96);
+        thickness * 1.35, color, opacity);
       left += width * 0.42;
       continue;
     }
     if (character === "%") {
       drawRing(output, request, left + width * 0.28, top + height * 0.28,
-        width * 0.12, color, 0.9, thickness);
+        width * 0.12, color, opacity * 0.94, thickness);
       drawRing(output, request, left + width * 0.72, top + height * 0.72,
-        width * 0.12, color, 0.9, thickness);
+        width * 0.12, color, opacity * 0.94, thickness);
       drawLine(output, request.width, request.height, left + width * 0.2, top + height * 0.82,
-        left + width * 0.8, top + height * 0.18, color, 0.9, thickness);
+        left + width * 0.8, top + height * 0.18, color, opacity * 0.94, thickness);
       left += width + gap;
       continue;
     }
     for (const index of SEVEN_SEGMENTS[character] ?? []) {
       const segment = segments[index]!;
       drawLine(output, request.width, request.height, left + segment[0] * width, top + segment[1] * height,
-        left + segment[2] * width, top + segment[3] * height, color, 0.92, thickness);
+        left + segment[2] * width, top + segment[3] * height, color, opacity * 0.96, thickness);
     }
     left += width + gap;
   }
@@ -1681,16 +1689,30 @@ function batch0708Frame(
   }
 
   if (toolName === "number_counter") {
-    clearFrame(output, [7, 12, 20, 255]);
+    const frame = inputFrames?.source_image ?? source;
+    if (frame === undefined || frame.length !== output.length) return false;
+    output.set(frame);
     const formatted = typeof value.formatted === "string" ? value.formatted : String(value.value ?? 0);
     const progress = Math.max(0, Math.min(1, Number(value.progress ?? 0)));
-    drawSevenSegmentText(output, request, formatted.slice(0, 10), [104, 238, 255, 255], 1);
-    drawSevenSegmentText(output, request, formatted.slice(0, 10), [238, 255, 255, 255], 0.96);
-    const width = request.width * 0.58; const left = (request.width - width) / 2;
-    drawLine(output, request.width, request.height, left, request.height * 0.72,
-      left + width, request.height * 0.72, [54, 70, 88, 255], 0.7, 2.2);
-    drawLine(output, request.width, request.height, left, request.height * 0.72,
-      left + width * progress, request.height * 0.72, [255, 88, 174, 255], 0.9, 3.2);
+    const positionX = Math.max(0, Math.min(1, Number(value.positionX ?? 0.5)));
+    const positionY = Math.max(0, Math.min(1, Number(value.positionY ?? 0.5)));
+    const size = Math.max(0.05, Math.min(0.8, Number(value.size ?? 0.18)));
+    const barWidth = Math.max(0.05, Math.min(0.95, Number(value.barWidth ?? 0.58)));
+    const numberColor = hexColor(value.numberColor, [104, 238, 255, 255]);
+    const progressColor = hexColor(value.progressColor, [255, 88, 174, 255]);
+    const trackColor = hexColor(value.trackColor, [54, 70, 88, 255]);
+    drawSevenSegmentText(output, request, formatted.slice(0, 12), numberColor, 0.26,
+      positionX, positionY, size * 1.08);
+    drawSevenSegmentText(output, request, formatted.slice(0, 12), numberColor, 0.96,
+      positionX, positionY, size);
+    const width = request.width * barWidth;
+    const left = Math.max(2, Math.min(request.width - width - 2, positionX * request.width - width / 2));
+    const preferredY = positionY * request.height + size * request.height * 0.72;
+    const barY = Math.max(2, Math.min(request.height - 3, preferredY));
+    drawLine(output, request.width, request.height, left, barY,
+      left + width, barY, trackColor, 0.78, Math.max(1.4, size * request.height * 0.025));
+    drawLine(output, request.width, request.height, left, barY,
+      left + width * progress, barY, progressColor, 0.94, Math.max(2, size * request.height * 0.04));
     return true;
   }
 
