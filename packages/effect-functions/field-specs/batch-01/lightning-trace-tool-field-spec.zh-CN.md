@@ -9,12 +9,12 @@
 | `data` 字段 | 必填 | 取值 | 选择策略 |
 | --- | --- | --- | --- |
 | `progress` | 否 | `0..1`，默认 `1` | 闪电沿引导线传播的目标比例；视频前 1.25 秒自动生长到该比例 |
-| `branchCount` | 否 | 整数 `0..32`，默认 `5` | 次级分叉数量 |
-| `jitter` | 否 | `0..200` px，默认 `18` | 主干横向折动幅度 |
+| `branchCount` | 否 | 整数 `0..32`，默认 `3` | 次级分叉数量 |
+| `jitter` | 否 | `0..200` px，默认 `12` | 主干横向折动幅度 |
 | `flicker` | 否 | `0..1`，默认 `0.35` | 时间形态刷新活跃度 |
-| `branchLength` | 否 | `0.02..0.8`，默认 `0.22` | 分支相对画面对角线长度 |
-| `segmentLength` | 否 | `2..100` px，默认 `18` | 主干折点间距；越小越细密 |
-| `glow` | 否 | `0..100` px，默认 `10` | 外围发光半径 |
+| `branchLength` | 否 | `0.02..0.8`，默认 `0.18` | 分支相对画面对角线长度 |
+| `segmentLength` | 否 | `2..100` px，默认 `14` | 主干折点间距；越小越细密 |
+| `glow` | 否 | `0..100` px，默认 `6` | 外围发光半径 |
 | `startMode` / `endMode` | 否 | `coordinates` / `subject_left` / `subject_right` / `subject_top` / `subject_bottom` / `subject_center` / `brightest` | 起止点定位方式 |
 | `startX`,`startY`,`endX`,`endY` | 否 | `0..1` | 仅对应 mode 为 `coordinates` 时使用 |
 
