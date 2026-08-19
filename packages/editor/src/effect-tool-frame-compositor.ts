@@ -1251,7 +1251,8 @@ function batch0708Frame(
       for (let x = 0; x < request.width; x += 1) {
         const gx = Math.min(grid.width - 1, Math.floor(x / request.width * grid.width));
         const index = gy * grid.width + gx;
-        const raw = toolName === "fractal" ? bilinearGridValue(grid, x, y, request) : grid.values[index]!;
+        const raw = toolName === "fractal" || toolName === "metaballs"
+          ? bilinearGridValue(grid, x, y, request) : grid.values[index]!;
         const normalized = (raw - minimum) / range;
         const offset = (y * request.width + x) * 4;
         if (toolName === "noise_field") {
@@ -1264,14 +1265,23 @@ function batch0708Frame(
               + (secondary[channel]! + (primary[channel]! - secondary[channel]!) * normalized) * mist);
           }
         } else if (toolName === "metaballs") {
-          const inside = Math.max(0, Math.min(1, (raw - 0.72) * 2.6));
-          const edge = Math.exp(-Math.abs(raw - 1) * 12);
+          const inside = smoothUnit((raw - 0.78) / 0.34);
+          const edge = Math.exp(-Math.abs(raw - 1) * 10) * inside;
+          const left = bilinearGridValue(grid, x - 2, y, request);
+          const right = bilinearGridValue(grid, x + 2, y, request);
+          const top = bilinearGridValue(grid, x, y - 2, request);
+          const bottom = bilinearGridValue(grid, x, y + 2, request);
+          const gradientLength = Math.max(1e-5, Math.hypot(right - left, bottom - top));
+          const normalX = (right - left) / gradientLength;
+          const normalY = (bottom - top) / gradientLength;
+          const refraction = inside * (3.5 + edge * 5.5);
           const sample = snapshot === undefined ? secondary
-            : wrappedFramePixel(snapshot, request, x + Math.sin(y * 0.035 + request.time * 2) * inside * 9,
-              y + Math.cos(x * 0.028 - request.time * 1.7) * inside * 7);
+            : bilinearFramePixel(snapshot, request, x + normalX * refraction, y + normalY * refraction);
+          const depth = smoothUnit((raw - 0.92) / 0.8);
+          const highlight = edge * (0.45 + Math.max(0, -normalX * 0.55 - normalY * 0.83) * 0.55);
           for (let channel = 0; channel < 3; channel += 1) {
-            output[offset + channel] = clampByte(sample[channel]! * (1 - inside * 0.36)
-              + primary[channel]! * inside * 0.28 + 245 * edge * 0.34);
+            output[offset + channel] = clampByte(sample[channel]! * (1 - inside * 0.3)
+              + primary[channel]! * inside * (0.18 + depth * 0.16) + 255 * highlight * 0.32);
           }
         } else if (toolName === "voronoi") {
           const edge = Math.max(0, Math.min(1, Number(edges?.[index] ?? 0)));

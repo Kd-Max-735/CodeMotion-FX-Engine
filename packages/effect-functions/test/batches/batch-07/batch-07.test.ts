@@ -94,6 +94,31 @@ function expectFiniteTree(value: unknown): void {
   }
 }
 
+function thresholdComponentCount(field: readonly number[], width: number, threshold: number): number {
+  const visited = new Uint8Array(field.length);
+  let components = 0;
+  for (let start = 0; start < field.length; start += 1) {
+    if (visited[start] === 1 || field[start]! < threshold) continue;
+    components += 1;
+    const pending = [start];
+    visited[start] = 1;
+    while (pending.length > 0) {
+      const index = pending.pop()!;
+      const x = index % width;
+      const neighbors = [index - width, index + width];
+      if (x > 0) neighbors.push(index - 1);
+      if (x + 1 < width) neighbors.push(index + 1);
+      for (const neighbor of neighbors) {
+        if (neighbor < 0 || neighbor >= field.length || visited[neighbor] === 1
+          || field[neighbor]! < threshold) continue;
+        visited[neighbor] = 1;
+        pending.push(neighbor);
+      }
+    }
+  }
+  return components;
+}
+
 async function render(
   definition: EffectToolDefinition,
   data: Record<string, unknown> = {},
@@ -329,6 +354,25 @@ describe("batch-07 definitions", () => {
       const later = await render(definition, data, context(definition, {}, 1.25));
       expect(later, definition.toolName).not.toEqual(earlier);
     }
+  });
+
+  it("makes a metaball pair merge into one body and separate back into two bodies", async () => {
+    const definition = definitionFor("metaballs");
+    const componentCounts = new Set<number>();
+    for (let sample = 0; sample <= 32; sample += 1) {
+      const result = await render(definition, {
+        ballCount: 2,
+        gridSize: 64,
+        radius: 0.1,
+        threshold: 1.1,
+        speed: 1
+      }, context(definition, {}, sample / 8, 401));
+      const output = outputRecord(result.output);
+      componentCounts.add(thresholdComponentCount(output.field as number[], output.width as number, 1));
+    }
+
+    expect(componentCounts.has(1)).toBe(true);
+    expect(componentCounts.has(2)).toBe(true);
   });
 
   it("keeps every procedural output within its maximum legal budget", async () => {

@@ -117,6 +117,23 @@ describe("effect tool frame compositor", () => {
     expect(high).not.toEqual(pulse);
   });
 
+  it("interpolates the metaball field into a continuous organic edge", () => {
+    const output = composeEffectToolFrame(metadata({
+      width: 4,
+      height: 2,
+      field: [0.35, 0.72, 1.08, 1.7, 0.35, 0.72, 1.08, 1.7],
+      threshold: 1,
+      colors: ["#FF006E", "#03071E"]
+    }), detailedRequest, "metaballs");
+    const redLevels = new Set<number>();
+    for (let x = 0; x < detailedRequest.width; x += 1) {
+      redLevels.add(output[x * 4]!);
+    }
+
+    expect(redLevels.size).toBeGreaterThan(16);
+    expect(output).not.toEqual(solidSource());
+  });
+
   it.each([
     "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke",
     "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on",
