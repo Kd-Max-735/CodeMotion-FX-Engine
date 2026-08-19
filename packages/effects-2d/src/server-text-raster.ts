@@ -153,8 +153,8 @@ export function createServerTextRasterSourceV1(request: ServerTextRasterRequestV
       lines.at(-1)!.push(item);
       lineWidth += item.advance;
     }
-    const lineAdvance = Math.max(1, Math.ceil(pixelSize * 1.22));
     const glyphHeight = rendered.reduce((maximum, item) => Math.max(maximum, item?.coverage.height ?? 0), 1);
+    const lineAdvance = glyphHeight + Math.max(1, Math.ceil(pixelSize * 0.08));
     const textHeight = (lines.length - 1) * lineAdvance + glyphHeight;
     return { lines, lineAdvance, textHeight };
   };
