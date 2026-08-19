@@ -1,5 +1,6 @@
 import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
+import { visualAnchors, type VisualAnchorName } from "../batch-01/common.js";
 import {
   REJECT_FALLBACK,
   RGBA8_FRAME_VERSION,
@@ -24,6 +25,8 @@ export interface KenBurnsParams extends JsonObject {
   endCenterY: number;
   easing: Easing;
   motionMode: "single" | "push_then_pull";
+  startCenterMode: VisualAnchorName;
+  endCenterMode: VisualAnchorName;
 }
 
 const defaults: KenBurnsParams = {
@@ -37,6 +40,8 @@ const defaults: KenBurnsParams = {
   endCenterY: 0.45,
   easing: "ease_in_out",
   motionMode: "single"
+  , startCenterMode: "coordinates"
+  , endCenterMode: "coordinates"
 };
 
 function sourcePixel(frame: Rgba8FrameBinding, x: number, y: number): readonly number[] {
@@ -64,7 +69,7 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
   effectId: "fx.media.kenBurns",
   toolName: "ken_burns",
   displayName: "肯·伯恩斯平移缩放",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "media",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -81,6 +86,8 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
       endCenterY: { type: "number", minimum: 0, maximum: 1, default: 0.45 },
       easing: { type: "string", enum: ["linear", "ease_in", "ease_out", "ease_in_out"], default: "ease_in_out" },
       motionMode: { type: "string", enum: ["single", "push_then_pull"], default: "single" }
+      , startCenterMode: { type: "string", enum: ["coordinates", "subject_left", "subject_right", "subject_top", "subject_bottom", "subject_center", "brightest"], default: "coordinates" }
+      , endCenterMode: { type: "string", enum: ["coordinates", "subject_left", "subject_right", "subject_top", "subject_bottom", "subject_center", "brightest"], default: "coordinates" }
     }
   },
   defaults,
@@ -97,6 +104,12 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
   validateParams: () => valid(),
   render: (context, params) => {
     const source = readRgba8Frame(context, "source_image");
+    const needsAnchors = params.startCenterMode !== "coordinates" || params.endCenterMode !== "coordinates";
+    const anchors = needsAnchors ? visualAnchors(context, "source_image") : undefined;
+    const center = (mode: VisualAnchorName, x: number, y: number) => mode === "coordinates"
+      ? { x, y } : anchors![mode];
+    const startCenter = center(params.startCenterMode, params.startCenterX, params.startCenterY);
+    const endCenter = center(params.endCenterMode, params.endCenterX, params.endCenterY);
     const progress = timedProgress(context.time, params.startTime, params.duration, params.easing);
     const mix = (start: number, end: number) => round(start + (end - start) * progress);
     const peakScale = Math.max(params.startScale, params.endScale, 1.5);
@@ -105,8 +118,8 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
         ? params.startScale + (peakScale - params.startScale) * progress * 2
         : peakScale + (params.endScale - peakScale) * (progress - 0.5) * 2
       : mix(params.startScale, params.endScale);
-    const centerX = mix(params.startCenterX, params.endCenterX);
-    const centerY = mix(params.startCenterY, params.endCenterY);
+    const centerX = mix(startCenter.x, endCenter.x);
+    const centerY = mix(startCenter.y, endCenter.y);
     const coverScale = Math.max(context.width / source.width, context.height / source.height);
     const pixels = new Uint8ClampedArray(context.width * context.height * 4);
     for (let y = 0; y < context.height; y += 1) {
