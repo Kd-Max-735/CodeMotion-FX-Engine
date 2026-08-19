@@ -1589,6 +1589,39 @@ describe("reported light and transition semantics", () => {
     expect(coverage[1]!.textured).toBeGreaterThan(96);
   });
 
+  it("uses a continuous liquid frontier and holds the target after completion", () => {
+    const effect = effectBySourceId("C03");
+    const source = solidSurface(128, 72, [0, 0, 0, 255]);
+    const target = solidSurface(128, 72, [255, 255, 255, 255]);
+    const renderAt = (progress: number) => {
+      const fixture = realFixture(effect, "reported.liquid-wipe", progress, 128, 72);
+      return effect.renderPixels(source, {
+        ...effect.defaultPreset,
+        noise: 0.42,
+        viscosity: 0.55,
+        edgeGlow: 0,
+        progress: 1
+      }, {
+        ...fixture.options,
+        secondary: target,
+        secondaryRasterInput: recolorRasterInput(fixture.secondary.input, target)
+      });
+    };
+    const middle = renderAt(0.5);
+    const frontiers = Array.from({ length: middle.height }, (_, y) => {
+      for (let x = 0; x < middle.width; x += 1) {
+        if (middle.data[(y * middle.width + x) * 4]! < 128) return x;
+      }
+      return middle.width;
+    });
+    const largestRowJump = Math.max(...frontiers.slice(1).map(
+      (value, index) => Math.abs(value - frontiers[index]!)
+    ));
+    expect(new Set(frontiers).size).toBeGreaterThan(16);
+    expect(largestRowJump).toBeLessThan(12);
+    expect(renderAt(1).data).toEqual(target.data);
+  });
+
   const effectBySourceId = (sourceId: string) => GROUP_2_P0_EFFECTS.find(
     (effect) => effect.sourceId === sourceId
   )!;

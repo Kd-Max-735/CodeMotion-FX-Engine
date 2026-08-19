@@ -66,6 +66,37 @@ function effectRandom(
   ).next();
 }
 
+function smoothValueNoise(
+  options: EffectRuntimeOptions,
+  stream: string,
+  x: number,
+  y: number,
+  seedOffset = 0
+): number {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const tx = x - x0;
+  const ty = y - y0;
+  const sx = tx * tx * (3 - 2 * tx);
+  const sy = ty * ty * (3 - 2 * ty);
+  const sample = (sampleX: number, sampleY: number) => effectRandom(
+    options,
+    stream,
+    sampleX,
+    sampleY,
+    1,
+    seedOffset,
+    false
+  );
+  const topLeft = sample(x0, y0);
+  const topRight = sample(x0 + 1, y0);
+  const bottomLeft = sample(x0, y0 + 1);
+  const bottomRight = sample(x0 + 1, y0 + 1);
+  const top = topLeft + (topRight - topLeft) * sx;
+  const bottom = bottomLeft + (bottomRight - bottomLeft) * sx;
+  return top + (bottom - top) * sy;
+}
+
 function applyEasing(progress: number, easing: string): number {
   const value = clamp(progress);
   if (easing === "linear") return value;
@@ -292,7 +323,8 @@ function effectProgress(
   const progressSpec = blueprint.parameters.find((spec) => spec.name === "progress");
   if (progressSpec?.kind !== "number") return options.time.progress;
   const parameter = numberParam(params, "progress", progressSpec.default);
-  if (blueprint.sourceId === "C02" || blueprint.sourceId === "C04" || blueprint.sourceId === "D02") {
+  if (blueprint.sourceId === "C02" || blueprint.sourceId === "C03"
+    || blueprint.sourceId === "C04" || blueprint.sourceId === "D02") {
     return clamp(options.time.progress * parameter);
   }
   return clamp(options.time.progress + parameter - progressSpec.default);
@@ -1288,17 +1320,18 @@ function transitionCoverage(
   if (sourceId === "C03") {
     const noise = numberParam(params, "noise", 0.16);
     const viscosity = numberParam(params, "viscosity", 0.6);
-    const frequency = 8 + (1 - viscosity) * 48;
-    const edge = u + (effectRandom(
-      options,
-      "C03.liquid",
-      Math.floor(v * frequency),
-      Math.floor(u * frequency * 0.5),
-      1,
-      0,
-      false
-    ) - 0.5) * noise;
-    const softness = 0.015 + (1 - viscosity) * 0.1;
+    const activity = 1 - viscosity;
+    const flow = progress * (0.7 + activity * 1.8);
+    const broad = smoothValueNoise(options, "C03.liquid-broad", v * (2.2 + activity * 2.4), flow);
+    const medium = smoothValueNoise(options, "C03.liquid-medium", v * (5 + activity * 6), flow * 1.7, 17);
+    const fine = smoothValueNoise(options, "C03.liquid-fine", v * (11 + activity * 18), flow * 3.1, 43);
+    const coherent = (broad - 0.5) * 1.05
+      + (medium - 0.5) * (0.5 + activity * 0.18)
+      + (fine - 0.5) * activity * 0.28;
+    const viscousFold = Math.sin(v * Math.PI * (3 + activity * 4) + flow * Math.PI * 1.4)
+      * (0.08 + viscosity * 0.08);
+    const edge = u + (coherent + viscousFold) * noise;
+    const softness = 0.018 + viscosity * 0.035 + activity * noise * 0.025;
     return smoothstep(progress - softness, progress + softness, 1 - edge);
   }
   const grid = Math.max(2, Math.round(numberParam(params, "grid", 20)));

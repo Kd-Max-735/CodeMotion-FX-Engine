@@ -275,7 +275,7 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "medium", 8),
   b("C03", "fx.transition.liquidWipe", "Liquid Wipe", "transition", "Seeded liquid-edge A/B wipe.", [
     number("noise", 0.16, 0, 1, 0.01), number("viscosity", 0.6, 0, 1, 0.01),
-    number("edgeGlow", 0.25, 0, 2, 0.01), number("progress", 0.5, 0, 1, 0.01)
+    number("edgeGlow", 0.25, 0, 2, 0.01), number("progress", 1, 0, 1, 0.01)
   ], "heavy", 12),
   b("C04", "fx.transition.pixelDissolve", "Pixel Dissolve", "transition", "Seeded pixel-block A/B dissolve.", [
     number("grid", 20, 2, 128, 1, "cells", "medium"), choice("order", "random", ["random", "linear", "radial"]),

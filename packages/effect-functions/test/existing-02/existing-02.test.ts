@@ -136,7 +136,7 @@ const EXPECTED = Object.freeze({
     effectId: "fx.transition.liquidWipe",
     properties: {
       noise: number(0.16, 0, 1, 0.01), viscosity: number(0.6, 0, 1, 0.01),
-      edgeGlow: number(0.25, 0, 2, 0.01), progress: number(0.5, 0, 1, 0.01)
+      edgeGlow: number(0.25, 0, 2, 0.01), progress: number(1, 0, 1, 0.01)
     },
     slots: [["source_frame", "image"], ["target_frame", "image"]]
   },
@@ -363,6 +363,17 @@ describe("existing-02 field specifications and adapter contracts", () => {
     };
     expect(schema.properties.progress?.default).toBe(1);
     expect(definition.defaults.progress).toBe(1);
+  });
+
+  it("defaults liquid_wipe to a complete target hold", () => {
+    const definition = definitions().get("liquid_wipe")!;
+    const properties = definition.parameterSchema.properties as Record<string, { default?: unknown }>;
+    expect(properties.progress?.default).toBe(1);
+    expect(definition.defaults.progress).toBe(1);
+    expect(definition.inputSlots.map((slot) => [slot.name, slot.kind])).toEqual([
+      ["source_frame", "image"],
+      ["target_frame", "image"]
+    ]);
   });
 
   it("maps exactly the assigned 20 snake_case tools to one independent Markdown file", async () => {
