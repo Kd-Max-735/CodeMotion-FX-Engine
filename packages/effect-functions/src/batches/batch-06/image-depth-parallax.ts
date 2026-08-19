@@ -75,11 +75,15 @@ export const IMAGE_DEPTH_PARALLAX_DEFINITION: EffectToolDefinition<ImageDepthPar
         const py = y / Math.max(1, context.height - 1);
         const di = Math.min(depth.length - 1, Math.floor(py * (source.height - 1)) * source.width
           + Math.floor(px * (source.width - 1)));
-        const z = (depth[di] ?? 0.5) - 0.5;
+        // Treat the depth map as a relative camera-distance field. Near pixels
+        // travel more than far pixels, while a small far-layer motion remains
+        // visible even when the map is mostly flat.
+        const z = Math.max(0, Math.min(1, depth[di] ?? 0.5));
+        const layerFactor = 0.22 + z ** 1.35 * 0.78;
         const sx = Math.max(0, Math.min(source.width - 1, Math.round(px * (source.width - 1)
-          - params.motionX * progress * z * displacement * source.width)));
+          - params.motionX * progress * layerFactor * displacement * source.width)));
         const sy = Math.max(0, Math.min(source.height - 1, Math.round(py * (source.height - 1)
-          - params.motionY * progress * z * displacement * source.height)));
+          - params.motionY * progress * layerFactor * displacement * source.height)));
         const si = (sy * source.width + sx) * 4;
         const oi = (y * context.width + x) * 4;
         output[oi] = source.data[si]!;

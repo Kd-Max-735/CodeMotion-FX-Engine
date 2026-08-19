@@ -99,7 +99,7 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
     const source = readRgba8Frame(context, "source_image");
     const progress = timedProgress(context.time, params.startTime, params.duration, params.easing);
     const mix = (start: number, end: number) => round(start + (end - start) * progress);
-    const peakScale = Math.max(params.startScale, params.endScale, 1.25);
+    const peakScale = Math.max(params.startScale, params.endScale, 1.5);
     const scale = params.motionMode === "push_then_pull"
       ? progress < 0.5
         ? params.startScale + (peakScale - params.startScale) * progress * 2

@@ -2855,10 +2855,15 @@ function adapterPreview(
     }
   } else if (source !== undefined && toolName === "image_depth_parallax") {
     for (let y = 0; y < request.height; y += 1) {
-      const shift = Math.round(Math.sin(phase + y / request.height * Math.PI) * 10);
       for (let x = 0; x < request.width; x += 1) {
-        const sx = Math.max(0, Math.min(request.width - 1, x - shift));
-        const from = (y * request.width + sx) * 4;
+        const offset = (y * request.width + x) * 4;
+        const luminance = (source[offset]! * 0.21 + source[offset + 1]! * 0.72 + source[offset + 2]! * 0.07) / 255;
+        const layerFactor = 0.22 + Math.pow(luminance, 1.35) * 0.78;
+        const shiftX = Math.round(Math.sin(phase) * 16 * layerFactor);
+        const shiftY = Math.round(Math.cos(phase * 0.83) * 8 * layerFactor);
+        const sx = Math.max(0, Math.min(request.width - 1, x - shiftX));
+        const sy = Math.max(0, Math.min(request.height - 1, y - shiftY));
+        const from = (sy * request.width + sx) * 4;
         const to = (y * request.width + x) * 4;
         output[to] = source[from]!;
         output[to + 1] = source[from + 1]!;
