@@ -853,12 +853,79 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(5);
 
+    const chalkStroke = EFFECT_TOOL_REGISTRY.getByToolName("chalk_stroke")!;
+    await expect(resolver.visionImage(principal, chalkStroke, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(6);
+
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(5);
+    expect(resolveMedia).toHaveBeenCalledTimes(6);
   });
+
+  it.each(["marker_stroke", "chalk_stroke"])(
+    "derives the locked %s subject mask from the owner-authorized source image and normalized target",
+    async (toolName) => {
+      const width = 4; const height = 2;
+      const media: VerifiedStoredMedia = {
+        asset: {
+          id: "asset_segmentabcdefgh",
+          type: "image",
+          uri: "media://segment-source.png",
+          hash: "sha256:segment-source",
+          metadata: { mime: "image/png", width, height, codec: "png" }
+        },
+        descriptor: {
+          id: "asset_segmentabcdefgh", type: "media/image", cacheKey: "segment-source", metadata: {}
+        },
+        storedPath: "D:\\authorized-media\\segment-source.png",
+        arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: true, reason: "test" },
+        trustedBytes: 32
+      };
+      const resolveMedia = vi.fn(async () => media);
+      const decode = vi.fn(async () => new Uint8Array(width * height * 4).fill(120));
+      const mask = Object.freeze({
+        version: "sam31-mask-v1" as const,
+        width,
+        height,
+        data: Uint8Array.from([0, 0, 255, 255, 0, 0, 255, 255]),
+        score: 0.91,
+        bbox: [2, 0, 4, 2] as const
+      });
+      const segment = vi.fn(async () => mask);
+      const resolver = new TenantMediaEffectToolInputResolver(
+        { resolve: resolveMedia } as never,
+        undefined,
+        decode as never,
+        { segment } as never
+      );
+      const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
+      const render = { time: 0.4, fps: 30, width, height, seed: 7, quality: "preview" } as const;
+      const inputIds = { source_image: media.asset.id };
+
+      const preliminary = await resolver.resolve(principal, definition, inputIds, render);
+      expect(preliminary).toHaveProperty("source_image");
+      expect(preliminary).not.toHaveProperty("subject_mask");
+      const resolved = await resolver.resolve(principal, definition, inputIds, render, undefined, {
+        ...definition.defaults,
+        target: "car license plate"
+      });
+
+      expect(segment).toHaveBeenCalledWith(media, "car license plate", width, height, undefined);
+      expect(resolved.subject_mask).toMatchObject({
+        slot: "subject_mask",
+        kind: "mask",
+        tenantId: principal.tenantId,
+        userId: principal.userId,
+        locked: true,
+        binding: mask
+      });
+      expect(inputIds).toEqual({ source_image: media.asset.id });
+    }
+  );
 
   it("derives even output dimensions from the first authorized visual while preserving aspect ratio", async () => {
     const dimensionsById = new Map([
@@ -905,7 +972,7 @@ describe("server single effect-tool service", () => {
     const resolver = new TenantMediaEffectToolInputResolver({ resolve: resolveMedia } as never);
     const render = { time: 0.45, fps: 30, width: 96, height: 64, seed: 20260818, quality: "preview" } as const;
     const toolNames = [
-      "blob_morph", "bounce", "brush_reveal", "chalk_stroke",
+      "blob_morph", "bounce", "brush_reveal",
       "character_cascade", "chart_reveal", "dash_flow"
     ] as const;
 
@@ -1021,7 +1088,6 @@ describe("server single effect-tool service", () => {
       ["radial_burst", "vector_source", "shape", true],
       ["shape_repeater", "vector_source", "shape", false],
       ["brush_reveal", "vector_source", "shape", true],
-      ["chalk_stroke", "vector_source", "shape", true],
       ["handwriting", "vector_source", "shape", true],
       ["ink_spread", "vector_source", "shape", true],
       ["blend", "source_layer", "image", false]
@@ -1354,6 +1420,17 @@ describe("server single effect-tool service", () => {
           { name: "stroke_plan", kind: "data", required: true, acceptsUploadedImage: false }
         ]
       });
+      for (const toolName of ["marker_stroke", "chalk_stroke"]) {
+        expect(catalog.tools.find((item) => item.toolName === toolName)).toMatchObject({
+          inputRequirements: [
+            { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },
+            {
+              name: "subject_mask", kind: "mask", required: true,
+              acceptsUploadedImage: false, acceptsUploadedVideo: false, acceptsUploadedAudio: false
+            }
+          ]
+        });
+      }
       expect(catalog.tools.find((item) => item.toolName === "blend")).toMatchObject({
         inputRequirements: [
           { name: "source_layer", required: true, acceptsUploadedImage: true },

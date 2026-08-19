@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
-import type { RenderQuality } from "@codemotion/core";
+import type { JsonObject, RenderQuality } from "@codemotion/core";
 import {
   EFFECT_TOOL_REGISTRY,
   EffectToolContractError,
@@ -52,6 +52,10 @@ import {
   type EffectToolVideoExecutionView,
   type EffectToolVideoFile
 } from "./effect-tool-video-service.js";
+import {
+  Sam31SegmentationService,
+  createSam31SegmentationService
+} from "./sam31-segmentation-service.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MIN_MANY_INPUTS = 2;
@@ -66,9 +70,10 @@ const IMAGE_DERIVED_TEXT_TOOLS = new Set([
   "text_extrude_3d", "text_path_reveal", "typewriter", "word_explode"
 ]);
 const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
-  "path_trim", "path_morph", "radial_burst", "shape_repeater", "chalk_stroke",
+  "path_trim", "path_morph", "radial_burst", "shape_repeater",
   "handwriting", "ink_spread"
 ]);
+const SAM_DERIVED_MASK_TOOLS = new Set(["marker_stroke", "chalk_stroke"]);
 const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   blob_morph: Object.freeze(["source_shape"]),
   bounce: Object.freeze(["source_layer"]),
@@ -80,7 +85,8 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   ken_burns: "source_image",
   kinetic_typography: "source_image",
   lens_flare: "source_frame",
-  marker_stroke: "source_image"
+  marker_stroke: "source_image",
+  chalk_stroke: "source_image"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
@@ -120,7 +126,8 @@ export interface EffectToolInputResolver {
     definition: EffectToolDefinition,
     inputIds: EffectToolInputIds,
     render: EffectToolRenderSettings,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    effectParams?: Readonly<JsonObject>
   ): Promise<AuthorizedEffectInputs>;
   visionImage?(
     principal: EffectToolPrincipal,
@@ -360,6 +367,7 @@ function isServerDerivedInputSlot(
   slot: EffectInputSlotDefinition
 ): boolean {
   return isSyntheticDerivedInputSlot(definition, slot)
+    || SAM_DERIVED_MASK_TOOLS.has(definition.toolName) && slot.name === "subject_mask"
     || definition.toolName === "depth_of_field" && slot.name === "depth_field"
     || definition.toolName === "paint_on" && slot.name === "stroke_plan"
     || ["dolly", "dolly_zoom", "orbit", "pan_tilt", "parallax_layers"].includes(definition.toolName)
@@ -430,6 +438,7 @@ function derivedInputResourceId(
     ? slot.name === "to_match_mask" ? "to_video" : "from_video"
       : definition.toolName === "depth_of_field" ? "source_frame"
       : definition.toolName === "paint_on" ? "source_image"
+      : SAM_DERIVED_MASK_TOOLS.has(definition.toolName) && slot.name === "subject_mask" ? "source_image"
       : definition.toolName === "onset_trigger" || definition.toolName === "vocal_reactive_text"
         ? "audio_analysis"
       : ["glass", "hologram", "metal"].includes(definition.toolName)
@@ -1306,7 +1315,8 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
   constructor(
     private readonly media: TenantMediaStore,
     private readonly serverResources?: EffectToolServerResourceResolver,
-    private readonly decodeFrame: typeof decodeMediaFrame = decodeMediaFrame
+    private readonly decodeFrame: typeof decodeMediaFrame = decodeMediaFrame,
+    private readonly segmentation?: Sam31SegmentationService
   ) {}
 
   async visionImage(
@@ -1363,7 +1373,8 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     definition: EffectToolDefinition,
     inputIds: EffectToolInputIds,
     render: EffectToolRenderSettings,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    effectParams?: Readonly<JsonObject>
   ): Promise<AuthorizedEffectInputs> {
     const owner = ownerOf(principal);
     const raw = exactObject(inputIds, "inputIds");
@@ -1388,6 +1399,8 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
         });
         continue;
       }
+      if (SAM_DERIVED_MASK_TOOLS.has(definition.toolName) && slot.name === "subject_mask"
+        && effectParams === undefined) continue;
       const derivedResourceId = derivedInputResourceId(definition, slot, raw);
       const value = raw[slot.name] ?? derivedResourceId ?? (slot.required && previewResourceId !== undefined
         ? slot.cardinality === "many" ? [previewResourceId] : previewResourceId
@@ -1411,7 +1424,7 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
         tenantId: principal.tenantId,
         userId: principal.userId,
         locked: true as const,
-        binding: await this.binding(owner, definition, slot, id, render, signal, cache)
+        binding: await this.binding(owner, definition, slot, id, render, signal, cache, effectParams)
       })));
       output[slot.name] = slot.cardinality === "many" ? Object.freeze(bindings) : bindings[0]!;
     }
@@ -1425,7 +1438,8 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     resourceId: string,
     render: EffectToolRenderSettings,
     signal?: AbortSignal,
-    cache?: EffectToolResolveCache
+    cache?: EffectToolResolveCache,
+    effectParams?: Readonly<JsonObject>
   ): Promise<unknown> {
     const existing = definition.primaryBackend.backendId === EXISTING_BACKEND;
     const derivedFromImage = ["glass", "hologram", "metal"].includes(definition.toolName)
@@ -1444,6 +1458,13 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
       cache?.media.set(resourceId, mediaPromise);
     }
     const media = await mediaPromise;
+    if (SAM_DERIVED_MASK_TOOLS.has(definition.toolName) && slot.name === "subject_mask") {
+      const target = effectParams?.target;
+      if (this.segmentation === undefined || typeof target !== "string") {
+        throw new Error("SAM3.1 segmentation is unavailable for this effect.");
+      }
+      return this.segmentation.segment(media, target, render.width, render.height, signal);
+    }
     if (slot.kind === "audio" && media.asset.type === "audio") {
       const analysisDuration = Math.min(10,
         Math.max(0.1, Number(media.asset.metadata.duration ?? 0.1)));
@@ -1620,8 +1641,11 @@ export class EffectToolService {
     this.controllers.add(controller);
     const signal = controller.signal;
     try {
-      const inputs = await this.inputs.resolve(principal, definition, request.inputIds, render, signal);
+      const preliminaryInputs = await this.inputs.resolve(principal, definition, request.inputIds, render, signal);
       const envelope = await this.generateForDefinition(principal, definition, request.prompt, signal);
+      const inputs = SAM_DERIVED_MASK_TOOLS.has(definition.toolName)
+        ? await this.inputs.resolve(principal, definition, request.inputIds, render, signal, envelope.data)
+        : preliminaryInputs;
       const id = randomUUID();
       const context: ServerEffectRenderContext = {
         environment: "server",
@@ -1847,7 +1871,8 @@ export class EffectToolService {
         definition,
         rawInputIds,
         render,
-        controller.signal
+        controller.signal,
+        envelope.data
       );
       if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
       const assetIds = Object.values(rawInputIds).flatMap((value) => typeof value === "string" ? [value] : [...value]);
@@ -2018,7 +2043,7 @@ export class EffectToolService {
     envelope: ReturnType<typeof validateAndNormalizeEffectEnvelope>,
     signal: AbortSignal
   ): Promise<EffectToolExecutionView> {
-    const inputs = await this.inputs.resolve(principal, definition, inputIds, render, signal);
+    const inputs = await this.inputs.resolve(principal, definition, inputIds, render, signal, envelope.data);
     const id = randomUUID();
     const context: ServerEffectRenderContext = {
       environment: "server",
@@ -2067,7 +2092,12 @@ export function createProductionEffectToolService(
     : undefined;
   return new EffectToolService(
     provider,
-    new TenantMediaEffectToolInputResolver(media, serverResources),
+    new TenantMediaEffectToolInputResolver(
+      media,
+      serverResources,
+      decodeMediaFrame,
+      createSam31SegmentationService(env, fetchImpl)
+    ),
     EFFECT_TOOL_REGISTRY,
     new EffectToolVideoService({
       media,

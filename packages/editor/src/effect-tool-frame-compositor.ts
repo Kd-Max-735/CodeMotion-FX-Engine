@@ -451,7 +451,8 @@ function drawMarkerDab(
   dab: Record<string, unknown>,
   bleed: number,
   roughness: number,
-  color: readonly number[]
+  color: readonly number[],
+  subjectMask?: Uint8Array
 ): void {
   const center = finitePoint(dab.center);
   const width = typeof dab.width === "number" ? Math.max(1, Math.min(400, dab.width)) : 1;
@@ -471,6 +472,8 @@ function drawMarkerDab(
     for (let dx = -radius; dx <= radius; dx += 1) {
       const x = Math.round(pixel[0] + dx);
       if (x < 0 || x >= request.width) continue;
+      const maskAlpha = subjectMask?.[y * request.width + x] ?? 255;
+      if (maskAlpha <= 4) continue;
       const along = dx * cosine + dy * sine;
       const across = -dx * sine + dy * cosine;
       const roughEdge = halfAcross * (1 + roughness * Math.sin(along * 0.41 + y * 0.17));
@@ -480,7 +483,7 @@ function drawMarkerDab(
       const body = edge <= 1 ? 1 - Math.max(0, edge - 0.78) / 0.22 : 0;
       const feather = edge > 1 ? (bleedEdge - edge) / Math.max(0.001, bleedEdge - 1) : 0;
       const paperGrain = 0.84 + 0.16 * (0.5 + 0.5 * Math.sin(x * 0.73 + y * 1.13));
-      const alpha = opacity * paperGrain * (body * 0.46 + feather * 0.12);
+      const alpha = opacity * paperGrain * (body * 0.46 + feather * 0.12) * maskAlpha / 255;
       blendPixel(output, request.width, request.height, x, y, color, alpha);
     }
   }
@@ -2061,14 +2064,16 @@ function polishedStructuredFrame(
     const roughness = typeof value.edgeRoughness === "number"
       ? Math.max(0, Math.min(0.5, value.edgeRoughness)) : 0.08;
     const color = hexColor(value.color, [255, 78, 118, 255]);
+    const subjectMask = inputFrames?.subject_mask;
+    const boundedMask = subjectMask?.length === request.width * request.height ? subjectMask : undefined;
     for (let index = 0; index < visibleCount; index += 1) {
       const dab = record(dabs[index]);
-      if (dab !== undefined) drawMarkerDab(output, request, dab, bleed, roughness, color);
+      if (dab !== undefined) drawMarkerDab(output, request, dab, bleed, roughness, color, boundedMask);
     }
     const tip = record(dabs[Math.max(0, visibleCount - 1)]);
     const tipCenter = finitePoint(tip?.center);
     const tipOpacity = typeof tip?.opacity === "number" ? tip.opacity : 0;
-    if (visibleCount > 0 && tipCenter !== undefined && tipOpacity > 0) {
+    if (boundedMask === undefined && visibleCount > 0 && tipCenter !== undefined && tipOpacity > 0) {
       const pixel = [tipCenter.x, tipCenter.y] as const;
       drawDisc(output, request.width, request.height, pixel[0], pixel[1], 4,
         color, 0.34);

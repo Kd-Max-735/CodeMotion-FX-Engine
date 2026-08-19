@@ -6,6 +6,7 @@ import {
 } from "./common.js";
 
 export interface MarkerStrokeParams extends JsonObject {
+  target: string;
   width: number;
   opacity: number;
   overlap: number;
@@ -21,7 +22,7 @@ export interface MarkerStrokeParams extends JsonObject {
 }
 
 const defaults: MarkerStrokeParams = {
-  width: 28, opacity: 0.82, overlap: 0.35, bleed: 0.12, edgeRoughness: 0.08, spacing: 0.3,
+  target: "main subject", width: 28, opacity: 0.82, overlap: 0.35, bleed: 0.12, edgeRoughness: 0.08, spacing: 0.3,
   color: "#ff4e76", startX: 0.2, startY: 0.55, endX: 0.8, endY: 0.55, curve: 0
 };
 
@@ -29,9 +30,16 @@ export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> 
   effectId: "fx.draw.markerStroke",
   toolName: "marker_stroke",
   displayName: "马克笔涂抹",
-  version: "2.0.0",
+  version: "2.1.0",
   category: "draw",
   parameterSchema: parameterSchema({
+    target: {
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$",
+      default: defaults.target
+    },
     width: numberField(28, 1, 400),
     opacity: numberField(0.82, 0, 1),
     overlap: numberField(0.35, 0, 1),
@@ -51,18 +59,28 @@ export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> 
     { presetId: "marker_stroke.paper", displayName: "纸面马克笔", params: { ...defaults } },
     { presetId: "marker_stroke.wet", displayName: "湿润叠色", params: { ...defaults, width: 42, overlap: 0.65, bleed: 0.28, edgeRoughness: 0.16 } }
   ],
-  inputSlots: [{
-    name: "source_image",
-    kind: "image",
-    required: true,
-    cardinality: "one",
-    description: "Owner-authorized image receiving the semantically positioned marker stroke."
-  }],
+  inputSlots: [
+    {
+      name: "source_image",
+      kind: "image",
+      required: true,
+      cardinality: "one",
+      description: "Owner-authorized image receiving the semantically positioned marker stroke."
+    },
+    {
+      name: "subject_mask",
+      kind: "mask",
+      required: true,
+      cardinality: "one",
+      description: "Server-derived SAM3.1 mask for the requested visible target."
+    }
+  ],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: SERVER_CPU_FALLBACK,
   performanceGrade: "medium",
   normalizeParams: (params) => ({
     ...params,
+    target: params.target.trim().toLowerCase(),
     width: round(params.width, 2),
     opacity: round(params.opacity),
     color: params.color.toLowerCase(),

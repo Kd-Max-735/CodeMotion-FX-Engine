@@ -114,7 +114,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   D02: "1.3.0",
   D01: "1.1.0",
   D03: "1.1.0",
-  D04: "1.1.0",
+  D04: "2.0.0",
   L03: "1.1.0",
   L04: "1.3.0",
   H01: "2.0.0"
@@ -140,6 +140,12 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
         cardinality: "one" as const,
         description: "Optional owner-authorized custom reveal mask."
       })
+    ]);
+  }
+  if (effect.sourceId === "D04") {
+    return Object.freeze([
+      slot("source_image", "image", "Owner-authorized image receiving the chalk effect."),
+      slot("subject_mask", "mask", "Server-derived SAM3.1 mask for the requested visible target.")
     ]);
   }
   if (effect.sourceId === "T08") {
@@ -213,12 +219,23 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
   const schema = structuredClone(effect.parameterSchema) as JsonObject;
   const properties = schema.properties as JsonObject;
   for (const name of RESOURCE_FIELDS[effect.effectId] ?? []) delete properties[name];
+  if (effect.sourceId === "D04") {
+    properties.target = {
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$",
+      default: "main subject"
+    };
+    properties.placement = { type: "string", enum: ["outline", "inside"], default: "outline" };
+  }
   if (effect.sourceId === "T02" || effect.sourceId === "T03" || effect.sourceId === "D01") {
     (properties.text as JsonObject).minLength = 1;
     (properties.color as JsonObject).pattern = "^#[0-9A-Fa-f]{6}$";
   }
   if (Array.isArray(schema.required)) {
     schema.required = schema.required.filter((name) => typeof name === "string" && name in properties);
+    if (effect.sourceId === "D04") schema.required.push("target", "placement");
   }
   return schema as JsonSchema;
 }
@@ -244,6 +261,7 @@ function primarySlotName(effect: P0CatalogEffectDefinition): string {
   if (effect.sourceId === "D01") return "source_image";
   if (effect.sourceId === "T03") return "source_image";
   if (effect.sourceId === "D03") return "source_image";
+  if (effect.sourceId === "D04") return "source_image";
   if (effect.sourceId === "D02") return "source_frame";
   if (effect.category === "text") return "text_raster";
   if (effect.category === "vector" || effect.category === "draw") return "vector_source";
@@ -344,6 +362,108 @@ const MASK_REVEAL_DEFAULTS: Readonly<JsonObject> = Object.freeze({
   rotation: 0,
   size: 1
 });
+
+function directMaskValues(context: ServerEffectRenderContext, name: string): Uint8Array {
+  const binding = singleBinding<Record<string, unknown>>(context, name);
+  const data = binding.data;
+  if (binding.width === context.width && binding.height === context.height
+    && (data instanceof Uint8Array || data instanceof Uint8ClampedArray)) {
+    if (data.length === context.width * context.height) {
+      return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    }
+    if (data.length === context.width * context.height * 4) {
+      return Uint8Array.from({ length: context.width * context.height }, (_, index) => data[index * 4 + 3]!);
+    }
+  }
+  throw new TypeError(`${name} must contain one decoded mask.`);
+}
+
+function chalkNoise(seed: number, x: number, y: number, salt: number): number {
+  let value = Math.imul(x + 0x9e3779b9, 0x85ebca6b) ^ Math.imul(y + salt, 0xc2b2ae35) ^ seed;
+  value = Math.imul(value ^ value >>> 16, 0x7feb352d);
+  value = Math.imul(value ^ value >>> 15, 0x846ca68b);
+  return ((value ^ value >>> 16) >>> 0) / 0xffffffff;
+}
+
+function chalkColor(value: string): readonly [number, number, number] {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/iu.exec(value);
+  return match === null ? [244, 240, 223] : [
+    Number.parseInt(match[1]!, 16),
+    Number.parseInt(match[2]!, 16),
+    Number.parseInt(match[3]!, 16)
+  ];
+}
+
+function maskBoundaryDistances(mask: Uint8Array, width: number, height: number): Float32Array {
+  const distances = new Float32Array(mask.length).fill(width + height);
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const index = y * width + x;
+    const inside = mask[index]! >= 128;
+    if ((x === 0 ? inside : (mask[index - 1]! >= 128) !== inside)
+      || (x + 1 === width ? inside : (mask[index + 1]! >= 128) !== inside)
+      || (y === 0 ? inside : (mask[index - width]! >= 128) !== inside)
+      || (y + 1 === height ? inside : (mask[index + width]! >= 128) !== inside)) {
+      distances[index] = 0;
+    }
+  }
+  const diagonal = Math.SQRT2;
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const index = y * width + x;
+    if (x > 0) distances[index] = Math.min(distances[index]!, distances[index - 1]! + 1);
+    if (y > 0) distances[index] = Math.min(distances[index]!, distances[index - width]! + 1);
+    if (x > 0 && y > 0) distances[index] = Math.min(distances[index]!, distances[index - width - 1]! + diagonal);
+    if (x + 1 < width && y > 0) distances[index] = Math.min(distances[index]!, distances[index - width + 1]! + diagonal);
+  }
+  for (let y = height - 1; y >= 0; y -= 1) for (let x = width - 1; x >= 0; x -= 1) {
+    const index = y * width + x;
+    if (x + 1 < width) distances[index] = Math.min(distances[index]!, distances[index + 1]! + 1);
+    if (y + 1 < height) distances[index] = Math.min(distances[index]!, distances[index + width]! + 1);
+    if (x + 1 < width && y + 1 < height) {
+      distances[index] = Math.min(distances[index]!, distances[index + width + 1]! + diagonal);
+    }
+    if (x > 0 && y + 1 < height) {
+      distances[index] = Math.min(distances[index]!, distances[index + width - 1]! + diagonal);
+    }
+  }
+  return distances;
+}
+
+function chalkStrokeFrame(context: ServerEffectRenderContext, params: Readonly<JsonObject>): PixelSurface {
+  const source = rasterBinding(context, "source_image").surface;
+  const mask = directMaskValues(context, "subject_mask");
+  const distances = maskBoundaryDistances(mask, context.width, context.height);
+  const color = chalkColor(params.color as string);
+  const opacity = params.opacity as number;
+  const grain = params.grain as number;
+  const scatter = params.scatter as number;
+  const progress = Math.min(1, Math.max(0, context.time)) * (params.progress as number);
+  const placement = params.placement as string;
+  const radius = Math.max(1, (params.strokeWidth as number) * Math.min(context.width, context.height));
+  const output = new Uint8ClampedArray(source.data);
+  for (let y = 0; y < context.height; y += 1) for (let x = 0; x < context.width; x += 1) {
+    const index = y * context.width + x;
+    const reveal = x / Math.max(1, context.width - 1);
+    if (reveal > progress + (chalkNoise(context.seed, x, y, 7) - 0.5) * scatter * 0.12) continue;
+    const inside = mask[index]! / 255;
+    const distance = distances[index]!;
+    const body = placement === "inside" ? inside : Math.max(0, Math.min(1, radius + 1 - distance));
+    const dustRange = radius * (1.5 + scatter * 3.5);
+    const dust = placement === "outline" && distance > radius && distance <= dustRange
+      && chalkNoise(context.seed, x, y, 29) > 1 - scatter * 0.42 ? 0.28 : 0;
+    if (body <= 0 && dust <= 0) continue;
+    const fine = chalkNoise(context.seed, x, y, 53);
+    const coarse = chalkNoise(context.seed, Math.floor(x / 3), Math.floor(y / 3), 97);
+    const pigment = fine > grain * 0.62 ? 1 : fine > grain * 0.3 ? 0.52 : 0.14;
+    const alpha = Math.min(1, (body * pigment * (0.72 + coarse * 0.28) + dust) * opacity);
+    const offset = index * 4;
+    for (let channel = 0; channel < 3; channel += 1) {
+      output[offset + channel] = Math.round(
+        source.data[offset + channel]! * (1 - alpha) + color[channel]! * alpha
+      );
+    }
+  }
+  return { ...source, data: output };
+}
 
 function directPixelSurface(context: ServerEffectRenderContext, name: string): PixelSurface {
   const binding = singleBinding<Record<string, unknown>>(context, name);
@@ -473,6 +593,12 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
   if (identity === undefined) throw new TypeError(`Missing existing effect identity for ${effect.effectId}.`);
   const defaults = effect.sourceId === "H01"
     ? MASK_REVEAL_DEFAULTS
+    : effect.sourceId === "D04"
+      ? Object.freeze({
+          ...withoutResourceFields(effect.effectId, effect.defaultPreset),
+          target: "main subject",
+          placement: "outline"
+        })
     : Object.freeze(withoutResourceFields(effect.effectId, effect.defaultPreset));
   return Object.freeze({
     effectId: effect.effectId,
@@ -497,6 +623,12 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
     normalizeParams(params: Readonly<JsonObject>): JsonObject {
       const normalized = effect.sourceId === "H01"
         ? { ...params }
+        : effect.sourceId === "D04"
+          ? {
+              ...normalizeEffectParams(effect.effectId, params),
+              target: (params.target as string).trim().toLowerCase(),
+              placement: params.placement
+            }
         : effect.sourceId === "T08"
         ? normalizeTextExtrude3DParams(params)
         : normalizeEffectParams(effect.effectId, params);
@@ -509,6 +641,8 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
       let output: PixelSurface;
       if (effect.sourceId === "H01") {
         output = maskRevealFrame(context, params);
+      } else if (effect.sourceId === "D04") {
+        output = chalkStrokeFrame(context, params);
       } else if (effect.sourceId === "T08") {
         const input = singleBinding<TextExtrude3DRasterInput>(context, "text_raster");
         output = effect.renderPixels(input, resolved, {

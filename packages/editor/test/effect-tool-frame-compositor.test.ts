@@ -245,6 +245,27 @@ describe("effect tool frame compositor", () => {
     expect([...green.slice(0, 4)]).toEqual([...source.slice(0, 4)]);
   });
 
+  it("clips every marker pixel to the server-derived subject mask", () => {
+    const source = gradientSource();
+    const mask = new Uint8Array(detailedRequest.width * detailedRequest.height);
+    for (let y = 22; y <= 42; y += 1) for (let x = 38; x <= 58; x += 1) {
+      mask[y * detailedRequest.width + x] = 255;
+    }
+    const output = composeEffectToolFrame(metadata({
+      dabs: [{ center: { x: 48, y: 32 }, width: 46, height: 34, opacity: 1, angle: 0 }],
+      bleed: 0.3, edgeRoughness: 0.2, color: "#22cc66", revealProgress: 1
+    }), detailedRequest, "marker_stroke", undefined, { source_image: source, subject_mask: mask });
+    let changedInside = 0;
+    for (let index = 0; index < mask.length; index += 1) {
+      const offset = index * 4;
+      const changed = output[offset] !== source[offset] || output[offset + 1] !== source[offset + 1]
+        || output[offset + 2] !== source[offset + 2];
+      if (mask[index] === 0) expect(changed, `pixel ${index} outside mask`).toBe(false);
+      else if (changed) changedInside += 1;
+    }
+    expect(changedInside).toBeGreaterThan(100);
+  });
+
   it("composites particle masks, source overlays, glow discs, and velocity streaks", () => {
     const source = solidSource();
     const mask = new Uint8Array(detailedRequest.width * detailedRequest.height).fill(255);

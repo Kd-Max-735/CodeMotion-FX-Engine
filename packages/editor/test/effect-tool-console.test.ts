@@ -137,7 +137,6 @@ describe("120-tool selector helpers", () => {
     ["blob_morph", [["source_shape", "data"]]],
     ["bounce", [["source_layer", "data"]]],
     ["brush_reveal", [["vector_source", "data"], ["brush_texture", "texture"]]],
-    ["chalk_stroke", [["vector_source", "data"]]],
     ["character_cascade", [["text_raster", "data"]]],
     ["chart_reveal", [["chart_data", "data"]]],
     ["dash_flow", [["source_path", "data"]]]
@@ -150,6 +149,23 @@ describe("120-tool selector helpers", () => {
     expect(imageUploadRequirement(promptOnly)).toEqual({ min: 0, max: 0 });
     expect(turnInputIds(promptOnly, [])).toEqual({});
   });
+
+  it.each(["marker_stroke", "chalk_stroke"])(
+    "requires one image for %s without exposing its server-derived subject mask as an upload",
+    (toolName) => {
+      const segmented = tool({
+        toolName,
+        inputRequirements: [
+          input("source_image", "image"),
+          input("subject_mask", "mask", true, false)
+        ]
+      });
+
+      expect(imageUploadRequirement(segmented)).toEqual({ min: 1, max: 1 });
+      expect(turnInputIds(segmented, ["asset_imageabcdefgh"]))
+        .toEqual({ source_image: "asset_imageabcdefgh" });
+    }
+  );
 
   it("binds one uploaded video without counting server-derived analysis as a second asset", () => {
     const smartCrop = tool({

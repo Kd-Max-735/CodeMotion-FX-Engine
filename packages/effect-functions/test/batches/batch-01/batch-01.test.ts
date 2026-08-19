@@ -55,6 +55,19 @@ function slotBinding(name: string): unknown {
     };
   }
   if (name === "source_image") return { width: 160, height: 120, data: sourceImagePixels, decoded: true };
+  if (name === "subject_mask") {
+    return {
+      version: "sam31-mask-v1",
+      width: 160,
+      height: 120,
+      data: Uint8Array.from({ length: 160 * 120 }, (_, index) => {
+        const x = index % 160; const y = Math.floor(index / 160);
+        return x >= 32 && x <= 126 && y >= 28 && y <= 94 ? 255 : 0;
+      }),
+      score: 0.94,
+      bbox: [32, 28, 126, 94]
+    };
+  }
   if (name === "terminals") {
     return { points: [{ x: 15, y: 18 }, { x: 80, y: 96 }, { x: 148, y: 24 }], closed: false };
   }
@@ -223,7 +236,10 @@ describe("batch-01 effect definitions", () => {
 
   it("positions and colors marker strokes from closed model parameters over one source image", async () => {
     const marker = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === "marker_stroke")!;
-    expect(marker.inputSlots.map((slot) => [slot.name, slot.kind])).toEqual([["source_image", "image"]]);
+    expect(marker.inputSlots.map((slot) => [slot.name, slot.kind])).toEqual([
+      ["source_image", "image"],
+      ["subject_mask", "mask"]
+    ]);
     const result = await executeSelectedEffectTool(
       marker,
       marker.toolName,

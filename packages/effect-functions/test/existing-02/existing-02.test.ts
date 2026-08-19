@@ -65,9 +65,15 @@ const EXPECTED = Object.freeze({
     effectId: "fx.draw.chalkStroke",
     properties: {
       grain: number(0.55, 0, 1, 0.01), scatter: number(0.18, 0, 1, 0.01),
-      opacity: number(0.85, 0, 1, 0.01), progress: number(0.5, 0, 1, 0.01)
+      opacity: number(0.85, 0, 1, 0.01), progress: number(0.5, 0, 1, 0.01),
+      color: text("#f4f0df", 16), strokeWidth: number(0.025, 0.002, 0.2, 0.001),
+      target: {
+        type: "string", minLength: 1, maxLength: 80,
+        pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$", default: "main subject"
+      },
+      placement: choice("outline", ["outline", "inside"])
     },
-    slots: [["vector_source", "data"]]
+    slots: [["source_image", "image"], ["subject_mask", "mask"]]
   },
   directional_blur: {
     effectId: "fx.post.directionalBlur",
@@ -224,7 +230,7 @@ const SPEC_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), "../../f
 const DOC_INPUT_TERMS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   blend: ["底层和上层画面由服务端绑定"],
   brush_reveal: ["服务端绑定的真实笔刷覆盖", "起始图片", "目标图片"],
-  chalk_stroke: ["路径和源图形由服务端绑定"],
+  chalk_stroke: ["SAM3.1", "source_image", "subject_mask"],
   directional_blur: ["服务端绑定的画面"],
   displacement_map: ["置换图和源画面由服务端绑定"],
   energy_pulse: ["源画面和动画时间由服务端绑定"],
@@ -380,6 +386,34 @@ describe("existing-02 field specifications and adapter contracts", () => {
     ]);
   });
 
+  it("keeps chalk_stroke Schema, Markdown, source image, and server-derived mask aligned", async () => {
+    const definition = definitions().get("chalk_stroke")!;
+    const markdown = await loadEffectFieldSpec("chalk_stroke");
+    const jsonBlock = markdown.match(/```json\s*([\s\S]*?)```/u)?.[1];
+    const properties = definition.parameterSchema.properties as Record<string, Record<string, unknown>>;
+
+    expect(definition.version).toBe("2.0.0");
+    expect(definition.inputSlots.map(({ name, kind, required }) => ({ name, kind, required }))).toEqual([
+      { name: "source_image", kind: "image", required: true },
+      { name: "subject_mask", kind: "mask", required: true }
+    ]);
+    expect(properties.target).toMatchObject({
+      type: "string", minLength: 1, maxLength: 80, default: "main subject"
+    });
+    expect(properties.placement).toEqual({
+      type: "string", enum: ["outline", "inside"], default: "outline"
+    });
+    expect(jsonBlock).toBeDefined();
+    expect(validateAndNormalizeEffectEnvelope(
+      definition,
+      "chalk_stroke",
+      JSON.parse(jsonBlock!) as unknown
+    ).data).toEqual(definition.defaults);
+    expect(markdown).toContain("前端要求用户上传一张图片");
+    expect(markdown).toContain("前端不要求第二次上传");
+    expect(markdown).toContain("模型不生成 mask、路径、纹理、资源 ID 或 URL");
+  });
+
   it("keeps the mask_reveal Schema, Markdown and input contract aligned", async () => {
     const definition = definitions().get("mask_reveal")!;
     const markdown = await loadEffectFieldSpec("mask_reveal");
@@ -484,6 +518,68 @@ describe("existing-02 field specifications and adapter contracts", () => {
 
     expect(Array.from(output.data.slice(0, 8))).toEqual(Array.from(targetData.slice(0, 8)));
     expect(Array.from(output.data.slice(8))).toEqual(Array.from(sourceData.slice(8)));
+  });
+
+  it("renders chalk deterministically on the selected contour or only inside the selected object", async () => {
+    const definition = definitions().get("chalk_stroke")!;
+    const width = 16; const height = 12;
+    const sourceData = new Uint8ClampedArray(width * height * 4);
+    for (let index = 0; index < width * height; index += 1) {
+      const offset = index * 4;
+      sourceData[offset] = 28;
+      sourceData[offset + 1] = 42;
+      sourceData[offset + 2] = 56;
+      sourceData[offset + 3] = 255;
+    }
+    const source = {
+      width, height, data: sourceData, colorSpace: "srgb" as const, alphaMode: "straight" as const
+    };
+    const mask = new Uint8Array(width * height);
+    for (let y = 2; y <= 9; y += 1) for (let x = 3; x <= 12; x += 1) mask[y * width + x] = 255;
+    const input = (slotName: string, kind: EffectInputKind, binding: unknown) => ({
+      slot: slotName,
+      kind,
+      tenantId: "tenant-existing-02",
+      userId: "user-existing-02",
+      locked: true as const,
+      binding
+    });
+    const render = (placement: "outline" | "inside", time = 1, progress = 1) => definition.render({
+      ...contextFor(definition, {
+        source_image: input("source_image", "image", { surface: source, rasterInput: {} }),
+        subject_mask: input("subject_mask", "mask", { width, height, data: mask })
+      }),
+      time,
+      width,
+      height
+    }, {
+      ...definition.defaults,
+      placement,
+      progress,
+      opacity: 1,
+      grain: 0,
+      scatter: 0,
+      strokeWidth: 0.08
+    });
+    const outlineA = (await render("outline")).output as typeof source;
+    const outlineB = (await render("outline")).output as typeof source;
+    const inside = (await render("inside")).output as typeof source;
+    const heldHalf = (await render("outline", 2, 0.5)).output as typeof source;
+    const changed = (frame: typeof source, x: number, y: number) => {
+      const offset = (y * width + x) * 4;
+      return frame.data[offset] !== sourceData[offset]
+        || frame.data[offset + 1] !== sourceData[offset + 1]
+        || frame.data[offset + 2] !== sourceData[offset + 2];
+    };
+
+    expect(outlineB.data).toEqual(outlineA.data);
+    expect(changed(outlineA, 3, 5)).toBe(true);
+    expect(changed(outlineA, 8, 6)).toBe(false);
+    expect(changed(outlineA, 0, 0)).toBe(false);
+    expect(changed(inside, 8, 6)).toBe(true);
+    expect(changed(inside, 1, 6)).toBe(false);
+    expect(changed(heldHalf, 3, 5)).toBe(true);
+    expect(changed(heldHalf, 12, 5)).toBe(false);
   });
 
   it("maps exactly the assigned 20 snake_case tools to one independent Markdown file", async () => {
