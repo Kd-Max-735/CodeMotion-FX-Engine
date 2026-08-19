@@ -113,6 +113,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   T03: "1.1.0",
   D02: "1.2.0",
   D01: "1.1.0",
+  D03: "1.1.0",
   D04: "1.1.0",
   L04: "1.2.0"
 });
@@ -137,6 +138,9 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   }
   if (effect.sourceId === "T03") {
     return Object.freeze([slot("source_image", "image", "Owner-authorized background image for kinetic text.")]);
+  }
+  if (effect.sourceId === "D03") {
+    return Object.freeze([slot("source_image", "image", "Owner-authorized image receiving organic ink diffusion.")]);
   }
   if (effect.sourceId === "D02") {
     return Object.freeze([
@@ -206,6 +210,7 @@ function primarySlotName(effect: P0CatalogEffectDefinition): string {
   if (effect.sourceId === "T02") return "source_image";
   if (effect.sourceId === "D01") return "source_image";
   if (effect.sourceId === "T03") return "source_image";
+  if (effect.sourceId === "D03") return "source_image";
   if (effect.sourceId === "D02") return "source_frame";
   if (effect.category === "text") return "text_raster";
   if (effect.category === "vector" || effect.category === "draw") return "vector_source";

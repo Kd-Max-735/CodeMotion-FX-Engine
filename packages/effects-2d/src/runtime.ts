@@ -965,6 +965,37 @@ function renderVectorOrDraw(
     }
     return output;
   }
+  if (blueprint.sourceId === "D03") {
+    const progress = effectProgress(blueprint, params, options);
+    const diffusion = numberParam(params, "diffusion", 0.55);
+    const absorption = numberParam(params, "absorption", 0.65);
+    const edgeNoise = numberParam(params, "edgeNoise", 0.2);
+    const seeds = [[0.5, 0.5], [0.31, 0.43], [0.68, 0.58], [0.44, 0.7], [0.61, 0.32]] as const;
+    for (let y = 0; y < source.height; y += 1) {
+      for (let x = 0; x < source.width; x += 1) {
+        const u = source.width === 1 ? 0.5 : x / (source.width - 1);
+        const v = source.height === 1 ? 0.5 : y / (source.height - 1);
+        const fiber = effectRandom(options, "D03.paper-fiber", Math.floor(u * 96), Math.floor(v * 96), 1, 0, false);
+        const coarse = effectRandom(options, "D03.organic-edge", Math.floor(u * 28), Math.floor(v * 28), 1, 13, false);
+        let field = 0;
+        seeds.forEach(([seedX, seedY], index) => {
+          const delay = index * 0.055;
+          const localProgress = clamp((progress - delay) / Math.max(0.2, 1 - delay));
+          const radius = localProgress * (0.12 + diffusion * 0.34) * (index === 0 ? 1.45 : 0.76);
+          const wobble = (coarse - 0.5) * edgeNoise * (0.08 + radius * 0.22)
+            + Math.sin(u * 31 + v * 23 + index * 2.7) * edgeNoise * 0.012;
+          const distance = Math.hypot((u - seedX) * 0.92, (v - seedY) * 1.08);
+          const softness = 0.018 + absorption * 0.075;
+          field = Math.max(field, smoothstep(radius + wobble + softness, radius + wobble - softness, distance));
+        });
+        const sourceColor = read(source, x, y);
+        const pigment = field * (0.48 + absorption * 0.38) * (0.86 + fiber * 0.14);
+        const feather = Math.max(0, field - 0.72) * edgeNoise * (fiber > 0.55 ? 0.16 : 0);
+        write(output, x, y, mixColor(sourceColor, [0.025, 0.045, 0.055, 1], clamp(pigment + feather)));
+      }
+    }
+    return output;
+  }
   if (raster.kind !== "shape" && raster.kind !== "svg") {
     throw new TypeError(`${blueprint.effectId} requires vector path provenance.`);
   }
