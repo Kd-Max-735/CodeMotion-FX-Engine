@@ -84,9 +84,12 @@ export const ELECTRIC_ARC_DEFINITION: EffectToolDefinition<ElectricArcParams> = 
     : { valid: false, issues: [{ path: "$.data", message: "Electric arc endpoints must be distinct." }] },
   render: (context, params) => {
     const seed = animatedSeed(context, params.flickerRate, 313);
-    const anchors = visualAnchors(context, "source_image");
-    const normalizedStart = params.startAnchor === "coordinates" ? { x: params.startX, y: params.startY } : anchors[params.startAnchor];
-    const normalizedEnd = params.endAnchor === "coordinates" ? { x: params.endX, y: params.endY } : anchors[params.endAnchor];
+    const anchors = params.startAnchor === "coordinates" && params.endAnchor === "coordinates"
+      ? undefined : visualAnchors(context, "source_image");
+    const normalizedStart = params.startAnchor === "coordinates"
+      ? { x: params.startX, y: params.startY } : anchors![params.startAnchor];
+    const normalizedEnd = params.endAnchor === "coordinates"
+      ? { x: params.endX, y: params.endY } : anchors![params.endAnchor];
     const baseStart = { x: normalizedStart.x * (context.width - 1), y: normalizedStart.y * (context.height - 1) };
     const baseEnd = { x: normalizedEnd.x * (context.width - 1), y: normalizedEnd.y * (context.height - 1) };
     const baseDx = baseEnd.x - baseStart.x;
