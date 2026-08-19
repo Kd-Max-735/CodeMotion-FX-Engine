@@ -110,6 +110,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   M05: "1.1.0",
   M07: "1.2.0",
   T02: "1.2.0",
+  T03: "1.1.0",
   D02: "1.2.0",
   D01: "1.1.0",
   D04: "1.1.0",
@@ -133,6 +134,9 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   }
   if (effect.sourceId === "D01") {
     return Object.freeze([slot("source_image", "image", "Owner-authorized image receiving the handwriting overlay.")]);
+  }
+  if (effect.sourceId === "T03") {
+    return Object.freeze([slot("source_image", "image", "Owner-authorized background image for kinetic text.")]);
   }
   if (effect.sourceId === "D02") {
     return Object.freeze([
@@ -172,7 +176,7 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
   const schema = structuredClone(effect.parameterSchema) as JsonObject;
   const properties = schema.properties as JsonObject;
   for (const name of RESOURCE_FIELDS[effect.effectId] ?? []) delete properties[name];
-  if (effect.sourceId === "T02" || effect.sourceId === "D01") {
+  if (effect.sourceId === "T02" || effect.sourceId === "T03" || effect.sourceId === "D01") {
     (properties.text as JsonObject).minLength = 1;
     (properties.color as JsonObject).pattern = "^#[0-9A-Fa-f]{6}$";
   }
@@ -201,6 +205,7 @@ function rasterBinding(context: ServerEffectRenderContext, name: string): Existi
 function primarySlotName(effect: P0CatalogEffectDefinition): string {
   if (effect.sourceId === "T02") return "source_image";
   if (effect.sourceId === "D01") return "source_image";
+  if (effect.sourceId === "T03") return "source_image";
   if (effect.sourceId === "D02") return "source_frame";
   if (effect.category === "text") return "text_raster";
   if (effect.category === "vector" || effect.category === "draw") return "vector_source";
@@ -239,7 +244,7 @@ function characterCascadeBinding(
 function serverTextBinding(
   context: ServerEffectRenderContext,
   params: Readonly<JsonObject>,
-  sourceId: "character-cascade" | "handwriting"
+  sourceId: "character-cascade" | "handwriting" | "kinetic-typography"
 ): ExistingRasterBinding {
   const background = rasterBinding(context, "source_image");
   const source = createServerTextRasterSourceV1({
@@ -367,6 +372,8 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
       } else {
         const primary = effect.sourceId === "T02"
           ? serverTextBinding(context, params, "character-cascade")
+          : effect.sourceId === "T03"
+            ? serverTextBinding(context, params, "kinetic-typography")
           : effect.sourceId === "D01"
             ? serverTextBinding(context, params, "handwriting")
           : rasterBinding(context, primarySlotName(effect));

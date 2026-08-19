@@ -168,7 +168,10 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "light", 5),
   b("T03", "fx.text.kineticTypography", "Kinetic Typography", "text", "Beat-driven cell scaling and layout.", [
     choice("layoutMode", "grid", ["grid", "radial", "stack"]), text("beatMap", "0,0.5,1"),
-    text("scaleMap", "0.8,1.2,1"), number("strength", 0.35, 0, 2, 0.01)
+    text("scaleMap", "0.8,1.2,1"), number("strength", 0.35, 0, 2, 0.01),
+    text("text", "动感排版", 80), choice("fontFamily", "sans", ["song", "kai", "sans"]),
+    number("fontSize", 88, 12, 240, 1, "pixels"), number("positionX", 0.5, 0, 1, 0.01, "canvas"),
+    number("positionY", 0.5, 0, 1, 0.01, "canvas"), text("color", "#ffffff", 16)
   ], "medium", 7),
   b("T04", "fx.text.textPathReveal", "Text Path Reveal", "text", "Text reveal following a normalized path.", [
     text("path", "M0,0.5 C0.3,0.1 0.7,0.9 1,0.5"), number("progress", 0.5, 0, 1, 0.01),
