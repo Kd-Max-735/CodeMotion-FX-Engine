@@ -136,25 +136,56 @@ export function createServerTextRasterSourceV1(request: ServerTextRasterRequestV
     throw new TypeError("Server text raster request is invalid.");
   }
   const runtime = loadRuntime(request.fontFamily);
-  const rendered = characters.map((character) => runtime.rasterize(character, request.fontSize));
-  const textWidth = rendered.reduce((sum, item) => sum + item.advance, 0);
-  const textHeight = rendered.reduce((maximum, item) => Math.max(maximum, item.coverage.height), 0);
-  let cursor = Math.round(request.positionX * request.width - textWidth / 2);
-  cursor = Math.max(0, Math.min(Math.max(0, request.width - textWidth), cursor));
+  const maxTextWidth = Math.max(1, Math.floor(request.width * 0.9));
+  const maxTextHeight = Math.max(1, Math.floor(request.height * 0.9));
+  const layoutAtSize = (pixelSize: number) => {
+    const rendered = characters.map((character, cluster) => character === "\n"
+      ? undefined : Object.freeze({ character, cluster, ...runtime.rasterize(character, pixelSize) }));
+    const lines: Array<Array<NonNullable<(typeof rendered)[number]>>> = [[]];
+    let lineWidth = 0;
+    for (const item of rendered) {
+      if (item === undefined) {
+        lines.push([]); lineWidth = 0; continue;
+      }
+      if (lineWidth + item.advance > maxTextWidth && lines.at(-1)!.length > 0) {
+        lines.push([]); lineWidth = 0;
+      }
+      lines.at(-1)!.push(item);
+      lineWidth += item.advance;
+    }
+    const lineAdvance = Math.max(1, Math.ceil(pixelSize * 1.22));
+    const glyphHeight = rendered.reduce((maximum, item) => Math.max(maximum, item?.coverage.height ?? 0), 1);
+    const textHeight = (lines.length - 1) * lineAdvance + glyphHeight;
+    return { lines, lineAdvance, textHeight };
+  };
+  let pixelSize = request.fontSize;
+  let layout = layoutAtSize(pixelSize);
+  for (let attempt = 0; attempt < 8 && layout.textHeight > maxTextHeight && pixelSize > 12; attempt += 1) {
+    pixelSize = Math.max(12, Math.floor(pixelSize * Math.sqrt(maxTextHeight / layout.textHeight) * 0.96));
+    layout = layoutAtSize(pixelSize);
+  }
+  const textHeight = Math.min(request.height, layout.textHeight);
   const originY = Math.max(0, Math.min(Math.max(0, request.height - textHeight),
     Math.round(request.positionY * request.height - textHeight / 2)));
-  const glyphs: RasterGlyph[] = rendered.map((item, index) => {
-    const x = cursor;
-    cursor += item.advance;
-    return Object.freeze({
-      glyphId: characters[index]!.codePointAt(0)!,
-      cluster: index,
-      advance: item.advance,
-      offsetX: 0,
-      offsetY: 0,
-      bounds: Object.freeze({ x, y: originY, width: item.coverage.width, height: item.coverage.height }),
-      coverage: item.coverage
-    });
+  const glyphs: RasterGlyph[] = [];
+  layout.lines.forEach((line, lineIndex) => {
+    const lineWidth = line.reduce((sum, item) => sum + item.advance, 0);
+    let cursor = Math.round(request.positionX * request.width - lineWidth / 2);
+    cursor = Math.max(0, Math.min(Math.max(0, request.width - lineWidth), cursor));
+    for (const item of line) {
+      const x = cursor;
+      cursor += item.advance;
+      glyphs.push(Object.freeze({
+        glyphId: item.character.codePointAt(0)!,
+        cluster: item.cluster,
+        advance: item.advance,
+        offsetX: 0,
+        offsetY: 0,
+        bounds: Object.freeze({ x, y: originY + lineIndex * layout.lineAdvance,
+          width: item.coverage.width, height: item.coverage.height }),
+        coverage: item.coverage
+      }));
+    }
   });
   return Object.freeze({
     kind: "text",

@@ -45,7 +45,7 @@ type Existing01ToolName = (typeof TOOL_NAMES)[number];
 
 const EXPECTED_INPUT_SLOTS: Readonly<Record<Existing01ToolName, readonly string[]>> = Object.freeze({
   bounce: ["source_layer"],
-  character_cascade: ["text_raster"],
+  character_cascade: ["source_image"],
   elastic: ["source_layer"],
   fade: ["source_layer"],
   float: ["source_layer"],
@@ -67,7 +67,6 @@ const EXPECTED_INPUT_SLOTS: Readonly<Record<Existing01ToolName, readonly string[
 });
 
 const STRUCTURED_RESOURCE_TOOLS = Object.freeze([
-  "character_cascade",
   "kinetic_typography",
   "path_morph",
   "path_trim",
@@ -343,7 +342,8 @@ describe("existing-01 execution safety", () => {
           return definition.render(...args);
         }
       } as EffectToolDefinition;
-      expect(definition.inputSlots.every((slot) => slot.kind === "data"), toolName).toBe(true);
+      expect(definition.inputSlots.every((slot) => slot.kind === (toolName === "character_cascade" ? "image" : "data")), toolName)
+        .toBe(true);
       await expect(executeSelectedEffectTool(
         observed,
         toolName,
