@@ -630,6 +630,28 @@ function sampledMap(values: readonly number[], progress: number): number {
   return values[first]! + (values[second]! - values[first]!) * fraction;
 }
 
+function kineticTextScaleLimit(options: EffectRuntimeOptions): number {
+  const raster = options.rasterInput.source;
+  if (raster.kind !== "text" || raster.glyphs.length === 0) return 1;
+  const left = Math.min(...raster.glyphs.map((glyph) => glyph.bounds.x + glyph.offsetX));
+  const top = Math.min(...raster.glyphs.map((glyph) => glyph.bounds.y + glyph.offsetY));
+  const right = Math.max(...raster.glyphs.map((glyph) =>
+    glyph.bounds.x + glyph.offsetX + glyph.bounds.width));
+  const bottom = Math.max(...raster.glyphs.map((glyph) =>
+    glyph.bounds.y + glyph.offsetY + glyph.bounds.height));
+  const centerX = (left + right) / 2;
+  const centerY = (top + bottom) / 2;
+  const width = options.rasterInput.target.width;
+  const height = options.rasterInput.target.height;
+  const limits = [
+    centerX / Math.max(1, centerX - left),
+    (width - centerX) / Math.max(1, right - centerX),
+    centerY / Math.max(1, centerY - top),
+    (height - centerY) / Math.max(1, bottom - centerY)
+  ];
+  return Math.max(1, Math.min(4, ...limits) * 0.96);
+}
+
 function renderText(
   blueprint: EffectBlueprint,
   source: PixelSurface,
@@ -648,6 +670,7 @@ function renderText(
   const kineticDuration = blueprint.sourceId === "T03"
     ? numberParam(params, "jumpDuration", 1)
     : 0;
+  const kineticScaleLimit = blueprint.sourceId === "T03" ? kineticTextScaleLimit(options) : 1;
   const kineticActive = kineticDuration > 0 && seconds < kineticDuration;
   const kineticProgress = kineticActive ? clamp(seconds / kineticDuration) : 1;
   const textPath = blueprint.sourceId === "T04"
@@ -692,21 +715,22 @@ function renderText(
         const scaleValue = kineticActive ? sampledMap(scaleMap!, kineticProgress) : 1;
         const layoutPhase = layout === "radial"
           ? Math.atan2(v - 0.5, u - 0.5) : layout === "stack" ? v * 8 : cell.index % 7;
-        const pulse = kineticActive
+        const rawPulse = kineticActive
           ? Math.max(0.05, scaleValue + Math.sin(
             layoutPhase + kineticProgress * TAU * (1 + Math.abs(beat) * 3)
           ) * strength * (0.15 + Math.abs(scaleValue) * 0.25))
           : 1;
+        const pulse = Math.min(rawPulse, kineticScaleLimit);
         sample = transformedSample(source, u, v, (su, sv) => {
           const centerU = u - (cell.localX - 0.5) * 0.08;
           const centerV = v - (cell.localY - 0.5) * 0.16;
           const radialOffset = kineticActive && layout === "radial" ? (pulse - 1) * 0.04 : 0;
           const scaleMapOffset = kineticActive ? (scaleValue - 1) * strength * 0.18 : 0;
+          const maximumWarp = Math.max(0, kineticScaleLimit - 1) * 0.16;
+          const globalWarp = clamp(radialOffset + scaleMapOffset, -maximumWarp, maximumWarp);
           return [
-            centerU + (su - centerU) / pulse
-              + (su - 0.5) * (radialOffset + scaleMapOffset),
-            centerV + (sv - centerV) / pulse
-              + (sv - 0.5) * (radialOffset + scaleMapOffset)
+            centerU + (su - centerU) / pulse + (su - 0.5) * globalWarp,
+            centerV + (sv - centerV) / pulse + (sv - 0.5) * globalWarp
           ];
         });
       } else if (blueprint.sourceId === "T04") {

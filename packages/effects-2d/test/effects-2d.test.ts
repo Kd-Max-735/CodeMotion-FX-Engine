@@ -741,6 +741,51 @@ describe("Group 2 P0 catalog", () => {
     expect(hashPixelSurface(settled)).toBe(hashPixelSurface(held));
   });
 
+  it("keeps kinetic typography inside the frame while it jumps near an edge", () => {
+    const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "T03")!;
+    const fixture = realFixture(effect, "test.kinetic-bounds", 0.25, 80, 40, "srgb", 20260819, "final", 0, 30, 4);
+    if (fixture.source.input.source.kind !== "text") throw new TypeError("Expected text fixture.");
+    const coverage = Object.freeze({
+      width: 16,
+      height: 20,
+      data: new Uint8Array(16 * 20).fill(255),
+      rowOrder: "top-to-bottom" as const
+    });
+    const glyph = Object.freeze({
+      ...fixture.source.input.source.glyphs[0]!,
+      cluster: 0,
+      offsetX: 0,
+      offsetY: 0,
+      bounds: Object.freeze({ x: 60, y: 10, width: 16, height: 20 }),
+      coverage
+    });
+    const data = new Uint8ClampedArray(80 * 40 * 4);
+    for (let y = 10; y < 30; y += 1) for (let x = 60; x < 76; x += 1) {
+      const offset = (y * 80 + x) * 4;
+      data[offset] = 255;
+      data[offset + 1] = 255;
+      data[offset + 2] = 255;
+      data[offset + 3] = 255;
+    }
+    const output = effect.renderPixels({ ...fixture.source.surface, data }, {
+      ...effect.defaultPreset,
+      beatMap: "1",
+      scaleMap: "3",
+      strength: 2,
+      jumpDuration: 4
+    }, {
+      ...fixture.options,
+      rasterInput: {
+        ...fixture.source.input,
+        source: { ...fixture.source.input.source, glyphs: Object.freeze([glyph]) }
+      }
+    });
+
+    for (let y = 0; y < output.height; y += 1) {
+      expect(output.data[(y * output.width + output.width - 1) * 4 + 3], `right edge y=${y}`).toBe(0);
+    }
+  });
+
   it("uses elapsed seconds for every declared second/rate parameter in the first 40 effects", async () => {
     const cases = [
       ["M01", "duration", "seconds", { duration: 1, easing: "linear" }],
