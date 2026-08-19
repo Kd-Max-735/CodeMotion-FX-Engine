@@ -324,6 +324,38 @@ describe("batch-01 effect definitions", () => {
     expect((result.output as { segments: readonly unknown[] }).segments.length).toBeGreaterThan(0);
   });
 
+  it("moves forward dashes from the declared start toward the declared end", async () => {
+    const definition = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === "dash_flow")!;
+    const renderDirection = async (direction: "forward" | "reverse") => {
+      const result = await executeSelectedEffectTool(
+        definition,
+        definition.toolName,
+        {
+          type: definition.toolName,
+          data: {
+            ...definition.defaults,
+            dashLength: 20,
+            gapLength: 10,
+            speed: 10,
+            direction,
+            startX: 0,
+            startY: 0.5,
+            endX: 1,
+            endY: 0.5
+          }
+        },
+        contextFor(definition, 173, 0.5)
+      );
+      return result.output as { cycleOffset: number; segments: readonly { start: number; end: number }[] };
+    };
+    const forward = await renderDirection("forward");
+    const reverse = await renderDirection("reverse");
+    expect(forward.cycleOffset).toBe(25);
+    expect(forward.segments[0]!.start).toBe(5);
+    expect(reverse.cycleOffset).toBe(5);
+    expect(reverse.segments[0]).toMatchObject({ start: 0, end: 15 });
+  });
+
   it.each(BATCH_01_DEFINITIONS)("keeps the $toolName Markdown JSON example Schema-valid", (definition) => {
     const filename = fieldSpecNames[definition.toolName]!;
     const markdown = readFileSync(new URL(`../../../field-specs/batch-01/${filename}`, import.meta.url), "utf8");

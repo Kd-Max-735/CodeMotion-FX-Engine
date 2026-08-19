@@ -34,7 +34,7 @@ export const DASH_FLOW_DEFINITION: EffectToolDefinition<DashFlowParams> = {
   effectId: "fx.vector.dashFlow",
   toolName: "dash_flow",
   displayName: "虚线沿路径流动",
-  version: "1.2.0",
+  version: "1.3.0",
   category: "vector",
   parameterSchema: parameterSchema({
     dashLength: numberField(32, 1, 500),
@@ -114,7 +114,8 @@ export const DASH_FLOW_DEFINITION: EffectToolDefinition<DashFlowParams> = {
     const path = { points, closed: false };
     const total = pathLength(path.points, path.closed);
     const cycle = params.dashLength + params.gapLength;
-    const direction = params.direction === "forward" ? 1 : -1;
+    // Increasing dash offset moves the visible phase toward the path start.
+    const direction = params.direction === "forward" ? -1 : 1;
     const movingOffset = ((params.offset + context.time * params.speed * direction) % cycle + cycle) % cycle;
     const segments: { start: number; end: number; points: ReturnType<typeof slicePath> }[] = [];
     for (let distance = -movingOffset; distance < total; distance += cycle) {
