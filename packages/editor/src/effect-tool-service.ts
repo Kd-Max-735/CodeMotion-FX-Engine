@@ -76,7 +76,11 @@ const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
 const SAM_DERIVED_MASK_SOURCES: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
   marker_stroke: Object.freeze({ subject_mask: "source_image" }),
   chalk_stroke: Object.freeze({ subject_mask: "source_image" }),
-  neon_glow: Object.freeze({ subject_mask: "source_image" })
+  neon_glow: Object.freeze({ subject_mask: "source_image" }),
+  object_match_cut: Object.freeze({
+    from_match_mask: "from_video",
+    to_match_mask: "to_video"
+  })
 });
 const SAM_DERIVED_MASK_TOOLS = new Set(Object.keys(SAM_DERIVED_MASK_SOURCES));
 const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -94,7 +98,8 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   chalk_stroke: "source_image",
   neon_glow: "source_image",
   neon_trace: "source_image",
-  number_counter: "source_image"
+  number_counter: "source_image",
+  object_match_cut: "from_video"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
@@ -381,8 +386,6 @@ function isServerDerivedInputSlot(
     || ["dolly", "dolly_zoom", "orbit", "pan_tilt", "parallax_layers"].includes(definition.toolName)
       && slot.name === "camera_target"
     || definition.toolName === "parallax_layers" && slot.name === "depth_map"
-    || definition.toolName === "object_match_cut"
-      && (slot.name === "from_match_mask" || slot.name === "to_match_mask")
     || definition.toolName === "background_remove_compose" && slot.name === "foreground_matte"
     || definition.toolName === "image_depth_parallax" && slot.name === "source_depth"
     || definition.toolName === "smart_crop_animate" && slot.name === "subject_tracks"
@@ -443,9 +446,7 @@ function derivedInputResourceId(
 ): string | undefined {
   if (!isServerDerivedInputSlot(definition, slot)) return undefined;
   const samSourceSlot = SAM_DERIVED_MASK_SOURCES[definition.toolName]?.[slot.name];
-  const sourceSlot = samSourceSlot ?? (definition.toolName === "object_match_cut"
-    ? slot.name === "to_match_mask" ? "to_video" : "from_video"
-      : definition.toolName === "depth_of_field" ? "source_frame"
+  const sourceSlot = samSourceSlot ?? (definition.toolName === "depth_of_field" ? "source_frame"
       : definition.toolName === "paint_on" ? "source_image"
       : definition.toolName === "onset_trigger" || definition.toolName === "vocal_reactive_text"
         ? "audio_analysis"

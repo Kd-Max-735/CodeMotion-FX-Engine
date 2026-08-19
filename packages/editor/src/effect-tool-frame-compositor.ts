@@ -2315,6 +2315,78 @@ function maskSample(
   return (source[offset]! * 0.2126 + source[offset + 1]! * 0.7152 + source[offset + 2]! * 0.0722) / 255;
 }
 
+interface MaskGeometry {
+  readonly centerX: number;
+  readonly centerY: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+function maskGeometry(
+  mask: Uint8Array | undefined,
+  source: Uint8Array,
+  width: number,
+  height: number
+): MaskGeometry | undefined {
+  const pixelCount = width * height;
+  if (mask?.length !== pixelCount && mask?.length !== pixelCount * 4) return undefined;
+  let totalWeight = 0;
+  let weightedX = 0;
+  let weightedY = 0;
+  let minimumX = width;
+  let minimumY = height;
+  let maximumX = -1;
+  let maximumY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const weight = maskSample(mask, source, y * width + x, pixelCount);
+      totalWeight += weight;
+      weightedX += x * weight;
+      weightedY += y * weight;
+      if (weight < 0.2) continue;
+      minimumX = Math.min(minimumX, x);
+      minimumY = Math.min(minimumY, y);
+      maximumX = Math.max(maximumX, x);
+      maximumY = Math.max(maximumY, y);
+    }
+  }
+  if (totalWeight < 1 || maximumX < minimumX || maximumY < minimumY) return undefined;
+  return {
+    centerX: weightedX / totalWeight,
+    centerY: weightedY / totalWeight,
+    width: maximumX - minimumX + 1,
+    height: maximumY - minimumY + 1
+  };
+}
+
+function sampledMask(
+  mask: Uint8Array | undefined,
+  source: Uint8Array,
+  width: number,
+  height: number,
+  x: number,
+  y: number
+): number {
+  const pixelCount = width * height;
+  if (mask?.length === pixelCount) {
+    const safeX = Math.max(0, Math.min(width - 1, x));
+    const safeY = Math.max(0, Math.min(height - 1, y));
+    const x0 = Math.floor(safeX);
+    const y0 = Math.floor(safeY);
+    const x1 = Math.min(width - 1, x0 + 1);
+    const y1 = Math.min(height - 1, y0 + 1);
+    const tx = safeX - x0;
+    const ty = safeY - y0;
+    const top = mask[y0 * width + x0]! * (1 - tx) + mask[y0 * width + x1]! * tx;
+    const bottom = mask[y1 * width + x0]! * (1 - tx) + mask[y1 * width + x1]! * tx;
+    return (top * (1 - ty) + bottom * ty) / 255;
+  }
+  const raster = mask?.length === pixelCount * 4 ? mask : source;
+  return (sampledChannel(raster, width, height, x, y, 0) * 0.2126
+    + sampledChannel(raster, width, height, x, y, 1) * 0.7152
+    + sampledChannel(raster, width, height, x, y, 2) * 0.0722) / 255;
+}
+
 function batch05CameraFrame(
   output: Uint8ClampedArray,
   value: Record<string, unknown>,
@@ -2686,10 +2758,34 @@ function objectMatchFrame(
   const incomingSine = Math.sin(incomingRotation);
   const centerX = (request.width - 1) / 2;
   const centerY = (request.height - 1) / 2;
-  const pixelCount = request.width * request.height;
   const fromMask = inputFrames?.from_match_mask;
   const toMask = inputFrames?.to_match_mask;
-  const activeAlignment = Math.sin(Math.PI * blend);
+  const fromGeometry = maskGeometry(fromMask, outgoing, request.width, request.height);
+  const toGeometry = maskGeometry(toMask, incoming, request.width, request.height);
+  const canAlign = fromGeometry !== undefined && toGeometry !== undefined;
+  const alignmentStrength = Math.max(0, Math.min(1,
+    typeof value.alignmentStrength === "number" ? value.alignmentStrength : 1));
+  const activeAlignment = Math.sin(Math.PI * blend) * alignmentStrength;
+  const automaticScale = !canAlign
+    ? 1
+    : Math.max(0.25, Math.min(4, Math.sqrt(
+      fromGeometry.width * fromGeometry.height / (toGeometry.width * toGeometry.height)
+    )));
+  const alignedIncomingScale = incomingScale * (1 + (automaticScale - 1) * activeAlignment);
+  const desiredIncomingX = !canAlign
+    ? centerX
+    : toGeometry.centerX + (fromGeometry.centerX - toGeometry.centerX) * activeAlignment;
+  const desiredIncomingY = !canAlign
+    ? centerY
+    : toGeometry.centerY + (fromGeometry.centerY - toGeometry.centerY) * activeAlignment;
+  const incomingAnchorX = canAlign ? toGeometry.centerX : centerX;
+  const incomingAnchorY = canAlign ? toGeometry.centerY : centerY;
+  const incomingAnchorDx = incomingAnchorX - centerX;
+  const incomingAnchorDy = incomingAnchorY - centerY;
+  const incomingTranslateX = desiredIncomingX - centerX - alignedIncomingScale
+    * (incomingCosine * incomingAnchorDx - incomingSine * incomingAnchorDy);
+  const incomingTranslateY = desiredIncomingY - centerY - alignedIncomingScale
+    * (incomingSine * incomingAnchorDx + incomingCosine * incomingAnchorDy);
   for (let y = 0; y < request.height; y += 1) {
     for (let x = 0; x < request.width; x += 1) {
       const pixel = y * request.width + x;
@@ -2697,10 +2793,14 @@ function objectMatchFrame(
       const dy = y - centerY;
       const outgoingX = centerX + (outgoingCosine * dx + outgoingSine * dy) / outgoingScale;
       const outgoingY = centerY + (-outgoingSine * dx + outgoingCosine * dy) / outgoingScale;
-      const incomingX = centerX + (incomingCosine * dx + incomingSine * dy) / incomingScale;
-      const incomingY = centerY + (-incomingSine * dx + incomingCosine * dy) / incomingScale;
-      const maskDelta = maskSample(toMask, incoming, pixel, pixelCount)
-        - maskSample(fromMask, outgoing, pixel, pixelCount);
+      const incomingDx = dx - incomingTranslateX;
+      const incomingDy = dy - incomingTranslateY;
+      const incomingX = centerX
+        + (incomingCosine * incomingDx + incomingSine * incomingDy) / alignedIncomingScale;
+      const incomingY = centerY
+        + (-incomingSine * incomingDx + incomingCosine * incomingDy) / alignedIncomingScale;
+      const maskDelta = sampledMask(toMask, incoming, request.width, request.height, incomingX, incomingY)
+        - sampledMask(fromMask, outgoing, request.width, request.height, outgoingX, outgoingY);
       const localBlend = Math.max(0, Math.min(1, blend + maskDelta * activeAlignment * 0.22));
       const offset = pixel * 4;
       for (let channel = 0; channel < 3; channel += 1) {

@@ -518,4 +518,53 @@ describe("effect tool frame compositor", () => {
     expect(output).not.toEqual(outgoing);
     expect(output).not.toEqual(incoming);
   });
+
+  it("aligns segmented subjects at the object match cut and preserves exact endpoints", () => {
+    const outgoing = new Uint8Array(detailedRequest.width * detailedRequest.height * 4);
+    const incoming = new Uint8Array(outgoing.length);
+    const fromMask = new Uint8Array(detailedRequest.width * detailedRequest.height);
+    const toMask = new Uint8Array(fromMask.length);
+    for (let y = 0; y < detailedRequest.height; y += 1) {
+      for (let x = 0; x < detailedRequest.width; x += 1) {
+        const pixel = y * detailedRequest.width + x;
+        const offset = pixel * 4;
+        outgoing[offset + 3] = 255;
+        incoming[offset + 3] = 255;
+        if (x >= 16 && x < 32 && y >= 20 && y < 36) {
+          outgoing[offset + 1] = 255;
+          fromMask[pixel] = 255;
+        }
+        if (x >= 60 && x < 92 && y >= 12 && y < 44) {
+          incoming[offset] = 255;
+          toMask[pixel] = 255;
+        }
+      }
+    }
+    const frames = {
+      from_video: outgoing,
+      to_video: incoming,
+      from_match_mask: fromMask,
+      to_match_mask: toMask
+    };
+    const state = (blend: number) => metadata({
+      operation: "masked_object_match_cut",
+      progress: blend,
+      blend,
+      alignmentStrength: 1,
+      outgoing: { scaleCorrection: 1, rotationCorrectionDegrees: 0 },
+      incoming: { scaleCorrection: 1, rotationCorrectionDegrees: 0 }
+    });
+
+    const middle = composeEffectToolFrame(
+      state(0.5), detailedRequest, "object_match_cut", outgoing, frames
+    );
+    expect(redCentroidX(middle)).toBeGreaterThan(21);
+    expect(redCentroidX(middle)).toBeLessThan(27);
+    expect(Buffer.from(composeEffectToolFrame(
+      state(0), detailedRequest, "object_match_cut", outgoing, frames
+    ))).toEqual(Buffer.from(outgoing));
+    expect(Buffer.from(composeEffectToolFrame(
+      state(1), detailedRequest, "object_match_cut", outgoing, frames
+    ))).toEqual(Buffer.from(incoming));
+  });
 });

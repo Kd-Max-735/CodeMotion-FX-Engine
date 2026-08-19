@@ -332,6 +332,24 @@ describe("batch-05 rendering behavior", () => {
     ]));
   });
 
+  it("normalizes the object match subject without exposing it as a resource", () => {
+    const envelope = validateAndNormalizeEffectEnvelope(
+      OBJECT_MATCH_CUT_DEFINITION,
+      "object_match_cut",
+      { type: "object_match_cut", data: { target: "Red Ball" } }
+    );
+    expect(envelope.data.target).toBe("red ball");
+    expect(schemaProperties(OBJECT_MATCH_CUT_DEFINITION).target).toMatchObject({
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+      default: "main subject"
+    });
+    expect(OBJECT_MATCH_CUT_DEFINITION.inputSlots.map((slot) => slot.name)).toEqual([
+      "from_video", "to_video", "from_match_mask", "to_match_mask"
+    ]);
+  });
+
   it("clamps every transition to exact source and destination boundaries", async () => {
     for (const definition of [
       PAGE_TURN_DEFINITION,

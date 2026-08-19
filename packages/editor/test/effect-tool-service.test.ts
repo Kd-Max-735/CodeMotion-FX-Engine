@@ -877,11 +877,18 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(9);
 
+    const objectMatchCut = EFFECT_TOOL_REGISTRY.getByToolName("object_match_cut")!;
+    await expect(resolver.visionImage(principal, objectMatchCut, {
+      from_video: media.asset.id,
+      to_video: "asset_otherabcdefgh"
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(10);
+
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(9);
+    expect(resolveMedia).toHaveBeenCalledTimes(10);
   });
 
   it.each(["marker_stroke", "chalk_stroke", "neon_glow"])(
@@ -944,6 +951,65 @@ describe("server single effect-tool service", () => {
       expect(inputIds).toEqual({ source_image: media.asset.id });
     }
   );
+
+  it("derives both object match masks from separate images using the same normalized subject", async () => {
+    const width = 4; const height = 2;
+    const fromMedia = {
+      asset: {
+        id: "asset_matchfromabcdefgh", type: "image", uri: "media://match-from.png",
+        hash: "sha256:match-from", metadata: { mime: "image/png", width, height, codec: "png" }
+      },
+      descriptor: { id: "asset_matchfromabcdefgh", type: "media/image", cacheKey: "match-from", metadata: {} },
+      storedPath: "D:\\authorized-media\\match-from.png",
+      arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: true, reason: "test" },
+      trustedBytes: 32
+    } satisfies VerifiedStoredMedia;
+    const toMedia = {
+      ...fromMedia,
+      asset: { ...fromMedia.asset, id: "asset_matchtoabcdefghij", uri: "media://match-to.png", hash: "sha256:match-to" },
+      descriptor: { ...fromMedia.descriptor, id: "asset_matchtoabcdefghij", cacheKey: "match-to" },
+      storedPath: "D:\\authorized-media\\match-to.png"
+    } satisfies VerifiedStoredMedia;
+    const mediaById = new Map([[fromMedia.asset.id, fromMedia], [toMedia.asset.id, toMedia]]);
+    const resolveMedia = vi.fn(async (_owner, id: string) => mediaById.get(id)!);
+    const decode = vi.fn(async () => new Uint8Array(width * height * 4).fill(80));
+    const fromMask = Object.freeze({
+      version: "sam31-mask-v1" as const, width, height,
+      data: Uint8Array.from([255, 255, 0, 0, 255, 255, 0, 0]),
+      score: 0.94, bbox: [0, 0, 2, 2] as const
+    });
+    const toMask = Object.freeze({
+      version: "sam31-mask-v1" as const, width, height,
+      data: Uint8Array.from([0, 0, 255, 255, 0, 0, 255, 255]),
+      score: 0.92, bbox: [2, 0, 4, 2] as const
+    });
+    const segment = vi.fn(async (media: VerifiedStoredMedia) =>
+      media.asset.id === fromMedia.asset.id ? fromMask : toMask);
+    const resolver = new TenantMediaEffectToolInputResolver(
+      { resolve: resolveMedia } as never,
+      undefined,
+      decode as never,
+      { segment } as never
+    );
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("object_match_cut")!;
+    const render = { time: 0.4, fps: 30, width, height, seed: 7, quality: "preview" } as const;
+    const inputIds = { from_video: fromMedia.asset.id, to_video: toMedia.asset.id };
+
+    const preliminary = await resolver.resolve(principal, definition, inputIds, render);
+    expect(preliminary).toHaveProperty("from_video");
+    expect(preliminary).toHaveProperty("to_video");
+    expect(preliminary).not.toHaveProperty("from_match_mask");
+    expect(preliminary).not.toHaveProperty("to_match_mask");
+
+    const resolved = await resolver.resolve(principal, definition, inputIds, render, undefined, {
+      ...definition.defaults,
+      target: "red ball"
+    });
+    expect(segment).toHaveBeenNthCalledWith(1, fromMedia, "red ball", width, height, undefined);
+    expect(segment).toHaveBeenNthCalledWith(2, toMedia, "red ball", width, height, undefined);
+    expect((resolved.from_match_mask as { binding: unknown }).binding).toBe(fromMask);
+    expect((resolved.to_match_mask as { binding: unknown }).binding).toBe(toMask);
+  });
 
   it("derives even output dimensions from the first authorized visual while preserving aspect ratio", async () => {
     const dimensionsById = new Map([
@@ -1253,12 +1319,8 @@ describe("server single effect-tool service", () => {
       from_video: media.asset.id,
       to_video: "asset_imageijklmnop"
     }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
-    expect(matchInputs).toHaveProperty("from_match_mask");
-    expect(matchInputs).toHaveProperty("to_match_mask");
-    expect((matchInputs.from_match_mask as { binding: { data: Uint8Array } }).binding.data)
-      .toHaveLength(width * height);
-    expect((matchInputs.to_match_mask as { binding: { data: Uint8Array } }).binding.data)
-      .toHaveLength(width * height);
+    expect(matchInputs).not.toHaveProperty("from_match_mask");
+    expect(matchInputs).not.toHaveProperty("to_match_mask");
     expect(decode).toHaveBeenCalled();
   });
 

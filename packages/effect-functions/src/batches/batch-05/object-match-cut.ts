@@ -3,6 +3,7 @@ import type { EffectToolDefinition, ServerEffectRenderContext } from "../../type
 import { TRANSITION_BACKEND, assertDistinctInputBindings, effectProgress, frameOutput, invalid, round, valid, type MotionEasing } from "./helpers.js";
 
 export interface ObjectMatchCutParams extends JsonObject {
+  target: string;
   duration: number;
   cutPoint: number;
   blendWindow: number;
@@ -36,6 +37,7 @@ export function renderObjectMatchCut(context: ServerEffectRenderContext, params:
     },
     progress,
     blend: round(blend),
+    alignmentStrength: params.alignmentStrength,
     outgoing: {
       opacity: round(1 - blend),
       scaleCorrection: round(1 + params.scaleCompensation * alignment),
@@ -53,13 +55,20 @@ export const OBJECT_MATCH_CUT_DEFINITION: EffectToolDefinition<ObjectMatchCutPar
   effectId: "fx.transition.objectMatchCut",
   toolName: "object_match_cut",
   displayName: "物体匹配剪辑",
-  version: "1.0.0",
+  version: "2.0.0",
   category: "transition",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
     additionalProperties: false,
     properties: {
+      target: {
+        type: "string",
+        minLength: 1,
+        maxLength: 80,
+        pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$",
+        default: "main subject"
+      },
       duration: { type: "number", minimum: 0.2, maximum: 5, default: 1 },
       cutPoint: { type: "number", minimum: 0.1, maximum: 0.9, default: 0.5 },
       blendWindow: { type: "number", minimum: 0.04, maximum: 2, default: 0.18 },
@@ -69,11 +78,11 @@ export const OBJECT_MATCH_CUT_DEFINITION: EffectToolDefinition<ObjectMatchCutPar
       easing: { type: "string", enum: ["linear", "ease_in", "ease_out", "ease_in_out"], default: "ease_in_out" }
     }
   },
-  defaults: { duration: 1, cutPoint: 0.5, blendWindow: 0.18, alignmentStrength: 0.8, scaleCompensation: 0.12, rotationCompensation: 0, easing: "ease_in_out" },
+  defaults: { target: "main subject", duration: 1, cutPoint: 0.5, blendWindow: 0.18, alignmentStrength: 0.8, scaleCompensation: 0.12, rotationCompensation: 0, easing: "ease_in_out" },
   presets: [
-    { presetId: "object_match_cut.clean", displayName: "精准匹配", params: { duration: 0.8, cutPoint: 0.5, blendWindow: 0.1, alignmentStrength: 0.95, scaleCompensation: 0.08, rotationCompensation: 0, easing: "ease_in_out" } },
-    { presetId: "object_match_cut.soft", displayName: "柔和匹配", params: { duration: 1.4, cutPoint: 0.5, blendWindow: 0.5, alignmentStrength: 0.7, scaleCompensation: 0.16, rotationCompensation: 3, easing: "ease_in_out" } },
-    { presetId: "object_match_cut.snap", displayName: "快速对位", params: { duration: 0.45, cutPoint: 0.55, blendWindow: 0.06, alignmentStrength: 1, scaleCompensation: 0.2, rotationCompensation: -5, easing: "ease_out" } }
+    { presetId: "object_match_cut.clean", displayName: "精准匹配", params: { target: "main subject", duration: 0.8, cutPoint: 0.5, blendWindow: 0.1, alignmentStrength: 0.95, scaleCompensation: 0.08, rotationCompensation: 0, easing: "ease_in_out" } },
+    { presetId: "object_match_cut.soft", displayName: "柔和匹配", params: { target: "main subject", duration: 1.4, cutPoint: 0.5, blendWindow: 0.5, alignmentStrength: 0.7, scaleCompensation: 0.16, rotationCompensation: 3, easing: "ease_in_out" } },
+    { presetId: "object_match_cut.snap", displayName: "快速对位", params: { target: "main subject", duration: 0.45, cutPoint: 0.55, blendWindow: 0.06, alignmentStrength: 1, scaleCompensation: 0.2, rotationCompensation: -5, easing: "ease_out" } }
   ],
   inputSlots: [
     { name: "from_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized outgoing video." },
@@ -84,7 +93,7 @@ export const OBJECT_MATCH_CUT_DEFINITION: EffectToolDefinition<ObjectMatchCutPar
   primaryBackend: TRANSITION_BACKEND,
   fallbackStrategy: { kind: "reject", reason: "Object correspondence requires paired authorized masks and server GPU compositing." },
   performanceGrade: "heavy",
-  normalizeParams: (params) => ({ ...params, duration: round(params.duration), cutPoint: round(params.cutPoint), blendWindow: round(params.blendWindow), alignmentStrength: round(params.alignmentStrength), scaleCompensation: round(params.scaleCompensation), rotationCompensation: round(params.rotationCompensation) }),
+  normalizeParams: (params) => ({ ...params, target: params.target.trim().toLowerCase(), duration: round(params.duration), cutPoint: round(params.cutPoint), blendWindow: round(params.blendWindow), alignmentStrength: round(params.alignmentStrength), scaleCompensation: round(params.scaleCompensation), rotationCompensation: round(params.rotationCompensation) }),
   validateParams: (params) => params.blendWindow <= params.duration * 0.8 ? valid() : invalid("$.blendWindow", "blendWindow must not exceed 80% of duration"),
   render: renderObjectMatchCut
 };
