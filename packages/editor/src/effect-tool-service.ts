@@ -79,6 +79,7 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   dash_flow: "source_image"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_MATERIAL_OUTPUT_EDGE = 640;
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
 export interface EffectToolPrincipal {
@@ -123,6 +124,12 @@ export interface EffectToolInputResolver {
     inputIds: EffectToolInputIds,
     signal?: AbortSignal
   ): Promise<SelectedToolVisionImage | undefined>;
+  outputDimensions?(
+    principal: EffectToolPrincipal,
+    definition: EffectToolDefinition,
+    inputIds: EffectToolInputIds,
+    signal?: AbortSignal
+  ): Promise<Readonly<{ width: number; height: number }> | undefined>;
 }
 
 export interface EffectToolListItem {
@@ -560,6 +567,16 @@ function luminanceValues(data: Uint8Array): number[] {
     values.push((data[offset]! * 0.2126 + data[offset + 1]! * 0.7152 + data[offset + 2]! * 0.0722) / 255);
   }
   return values;
+}
+
+function materialOutputDimensions(width: unknown, height: unknown): Readonly<{ width: number; height: number }> | undefined {
+  if (typeof width !== "number" || !Number.isInteger(width) || width < 2
+    || typeof height !== "number" || !Number.isInteger(height) || height < 2) {
+    return undefined;
+  }
+  const scale = Math.min(1, MAX_MATERIAL_OUTPUT_EDGE / Math.max(width, height));
+  const even = (value: number) => Math.max(2, Math.min(MAX_MATERIAL_OUTPUT_EDGE, Math.round(value * scale / 2) * 2));
+  return Object.freeze({ width: even(width), height: even(height) });
 }
 
 function derivedBrushCoverage(data: Uint8Array, render: EffectToolRenderSettings): Uint8Array {
@@ -1308,6 +1325,25 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     return Object.freeze({ mimeType, base64Data: bytes.toString("base64") });
   }
 
+  async outputDimensions(
+    principal: EffectToolPrincipal,
+    definition: EffectToolDefinition,
+    inputIds: EffectToolInputIds,
+    signal?: AbortSignal
+  ): Promise<Readonly<{ width: number; height: number }> | undefined> {
+    for (const slot of definition.inputSlots) {
+      if (!acceptsUploadedImage(definition, slot) && !acceptsUploadedVideo(definition, slot)) continue;
+      const value = inputIds[slot.name];
+      const resourceId = typeof value === "string" ? value : value?.[0];
+      if (resourceId === undefined) continue;
+      const media = await this.media.resolve(ownerOf(principal), resourceId, signal);
+      if (media.asset.type !== "image" && media.asset.type !== "svg" && media.asset.type !== "video") continue;
+      const dimensions = materialOutputDimensions(media.asset.metadata.width, media.asset.metadata.height);
+      if (dimensions !== undefined) return dimensions;
+    }
+    return undefined;
+  }
+
   async resolve(
     principal: EffectToolPrincipal,
     definition: EffectToolDefinition,
@@ -1785,7 +1821,13 @@ export class EffectToolService {
         data: nativeArguments.effectParams
       });
       const rawInputIds = validateSelectedInputIds(definition, request.inputIds, true);
-      const render = renderSettings(undefined);
+      const dimensions = await this.inputs.outputDimensions?.(
+        principal,
+        definition,
+        rawInputIds,
+        controller.signal
+      );
+      const render = renderSettings(dimensions);
       const authorizedInputs = await this.inputs.resolve(
         principal,
         definition,

@@ -543,6 +543,61 @@ describe("server single effect-tool service", () => {
     })).rejects.toMatchObject({ code: "security" });
   });
 
+  it("passes server-derived material dimensions into the selected-tool video task", async () => {
+    const provider = new NativeRecordingProvider();
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
+    provider.turn = {
+      reasoningContent: "需要执行胶片颗粒。",
+      content: "开始执行。",
+      toolCall: {
+        id: "call-material-aspect-ratio",
+        name: "film_grain",
+        arguments: {
+          effectParams: definition.defaults,
+          output: { durationSeconds: 1, generationMode: "standard" }
+        }
+      }
+    };
+    const baseInputs = new TestInputResolver();
+    const outputDimensions = vi.fn(async () => ({ width: 360, height: 640 }));
+    const inputs: EffectToolInputResolver = {
+      resolve: (...args) => baseInputs.resolve(...args),
+      outputDimensions
+    };
+    const video = await testVideoService();
+    const createPrepared = vi.spyOn(video.service, "createPrepared").mockResolvedValue({
+      id: "video-material-aspect-ratio",
+      status: "queued",
+      toolName: "film_grain",
+      createdAt: "2026-08-19T00:00:00.000Z",
+      updatedAt: "2026-08-19T00:00:00.000Z",
+      source: { kind: "image", assetId: "asset_imageabcdefgh" },
+      video: {
+        format: "mp4",
+        mime: "video/mp4",
+        width: 360,
+        height: 640,
+        durationSeconds: 1,
+        fps: 30,
+        frameCount: 30,
+        audio: false,
+        completedFrames: 0,
+        progress: 0
+      },
+      gpu: { available: false, message: "queued" }
+    } as never);
+    const service = new EffectToolService(provider, inputs, EFFECT_TOOL_REGISTRY, video.service);
+    const turn = await service.selectedTurn(principal, {
+      toolName: "film_grain",
+      prompt: "根据竖图生成一秒胶片颗粒",
+      inputIds: { source_frame: "asset_imageabcdefgh" }
+    });
+    expect(turn).toMatchObject({ execution: { video: { width: 360, height: 640 } } });
+    expect(outputDimensions).toHaveBeenCalledOnce();
+    expect(createPrepared.mock.calls[0]![7]).toBe(360);
+    expect(createPrepared.mock.calls[0]![8]).toBe(640);
+  });
+
   it("exports a prompt-only selected tool without uploaded media", async () => {
     const provider = new NativeRecordingProvider();
     const definition = EFFECT_TOOL_REGISTRY.getByToolName("bounce")!;
@@ -779,6 +834,46 @@ describe("server single effect-tool service", () => {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
     expect(resolveMedia).toHaveBeenCalledOnce();
+  });
+
+  it("derives even output dimensions from the first authorized visual while preserving aspect ratio", async () => {
+    const dimensionsById = new Map([
+      ["asset_landscape", { width: 1200, height: 800 }],
+      ["asset_portrait", { width: 1080, height: 1920 }],
+      ["asset_square", { width: 801, height: 801 }]
+    ]);
+    const resolveMedia = vi.fn(async (_owner, assetId: string) => {
+      const dimensions = dimensionsById.get(assetId);
+      if (dimensions === undefined) throw new Error("Unknown test asset.");
+      return {
+        asset: {
+          id: assetId,
+          type: "image",
+          uri: `media://${assetId}.png`,
+          hash: `sha256:${"a".repeat(64)}`,
+          metadata: { mime: "image/png", codec: "png", ...dimensions }
+        }
+      } as VerifiedStoredMedia;
+    });
+    const resolver = new TenantMediaEffectToolInputResolver({ resolve: resolveMedia } as never);
+    const brush = EFFECT_TOOL_REGISTRY.getByToolName("brush_reveal")!;
+    await expect(resolver.outputDimensions(principal, brush, {
+      source_frame: "asset_landscape",
+      target_frame: "asset_portrait"
+    })).resolves.toEqual({ width: 640, height: 426 });
+    await expect(resolver.outputDimensions(principal, brush, {
+      source_frame: "asset_portrait",
+      target_frame: "asset_landscape"
+    })).resolves.toEqual({ width: 360, height: 640 });
+    await expect(resolver.outputDimensions(principal, brush, {
+      source_frame: "asset_square",
+      target_frame: "asset_landscape"
+    })).resolves.toEqual({ width: 640, height: 640 });
+    expect(resolveMedia).toHaveBeenCalledTimes(3);
+
+    const bounce = EFFECT_TOOL_REGISTRY.getByToolName("bounce")!;
+    await expect(resolver.outputDimensions(principal, bounce, {})).resolves.toBeUndefined();
+    expect(resolveMedia).toHaveBeenCalledTimes(3);
   });
 
   it("creates server-owned inputs for every reported prompt-only tool without resolving media", async () => {
