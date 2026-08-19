@@ -1528,6 +1528,48 @@ describe("reported light and transition semantics", () => {
     return { width, height, data, colorSpace: "srgb", alphaMode: "straight" };
   };
 
+  it("reveals the target through a continuous textured brush path and completes at the target", () => {
+    const effect = effectBySourceId("D02");
+    const source = solidSurface(96, 54, [0, 0, 0, 255]);
+    const target = solidSurface(96, 54, [255, 255, 255, 255]);
+    const renderAt = (progress: number) => {
+      const fixture = realFixture(effect, "reported.brush-reveal", progress, 96, 54);
+      const imageSource = makeRealInputFixture(
+        effect.effectId,
+        "media",
+        96,
+        54,
+        false,
+        "srgb",
+        fixture.time
+      );
+      return effect.renderPixels(source, {
+        ...effect.defaultPreset,
+        progress: 1,
+        size: 0.14,
+        roughness: 0.75
+      }, {
+        ...fixture.options,
+        rasterInput: recolorRasterInput(imageSource.input, source),
+        secondary: target,
+        secondaryRasterInput: recolorRasterInput(fixture.secondary.input, target)
+      });
+    };
+    expect(renderAt(0).data).toEqual(source.data);
+    expect(renderAt(1).data).toEqual(target.data);
+    const coverage = [0.25, 0.5, 0.75].map((progress) => {
+      const frame = renderAt(progress);
+      const red = Array.from({ length: frame.width * frame.height }, (_, index) => frame.data[index * 4]!);
+      return {
+        covered: red.filter((value) => value > 8).length,
+        textured: red.filter((value) => value > 8 && value < 247).length
+      };
+    });
+    expect(coverage[0]!.covered).toBeLessThan(coverage[1]!.covered);
+    expect(coverage[1]!.covered).toBeLessThan(coverage[2]!.covered);
+    expect(coverage[1]!.textured).toBeGreaterThan(96);
+  });
+
   const effectBySourceId = (sourceId: string) => GROUP_2_P0_EFFECTS.find(
     (effect) => effect.sourceId === sourceId
   )!;

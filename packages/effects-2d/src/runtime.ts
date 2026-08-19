@@ -292,7 +292,7 @@ function effectProgress(
   const progressSpec = blueprint.parameters.find((spec) => spec.name === "progress");
   if (progressSpec?.kind !== "number") return options.time.progress;
   const parameter = numberParam(params, "progress", progressSpec.default);
-  if (blueprint.sourceId === "C02" || blueprint.sourceId === "C04") {
+  if (blueprint.sourceId === "C02" || blueprint.sourceId === "C04" || blueprint.sourceId === "D02") {
     return clamp(options.time.progress * parameter);
   }
   return clamp(options.time.progress + parameter - progressSpec.default);
@@ -910,11 +910,12 @@ function renderVectorOrDraw(
     const target = options.secondary!;
     const brush = options.brushCoverage!;
     const progress = effectProgress(blueprint, params, options);
+    if (progress <= 0) return cloneSurface(source);
+    if (progress >= 1) return cloneSurface(target);
     const size = numberParam(params, "size", 0.12);
     const roughness = numberParam(params, "roughness", 0.35);
-    const bands = Math.max(3, Math.min(18, Math.round(0.95 / Math.max(0.06, size))));
-    const overlap = 2.2;
-    const settle = smoothstep(0.88, 1, progress);
+    const bands = Math.max(2, Math.min(12, Math.round(0.72 / Math.max(0.06, size))));
+    const settleDistance = (1.15 + roughness * 0.8) / bands;
     for (let y = 0; y < source.height; y += 1) {
       for (let x = 0; x < source.width; x += 1) {
         const u = source.width === 1 ? 0.5 : x / (source.width - 1);
@@ -922,27 +923,31 @@ function renderVectorOrDraw(
         const band = Math.min(bands - 1, Math.floor(v * bands));
         const localV = fract(v * bands);
         const travel = band % 2 === 0 ? u : 1 - u;
-        const bandProgress = clamp(progress * (bands + overlap) - band);
-        const bristleJitter = (effectRandom(options, "D02.bristles",
-          Math.floor(x / 3), band * 97 + Math.floor(localV * 31), 1, 0, false) - 0.5)
-          * roughness * 0.2;
-        const bristleWave = Math.sin(localV * Math.PI * (18 + roughness * 34)
-          + band * 1.73) * size * (0.025 + roughness * 0.09);
-        const frontier = bandProgress * (1 + size * 1.5) - size * 0.75
-          + bristleJitter + bristleWave;
-        const painted = smoothstep(frontier + size * (0.12 + roughness * 0.18),
-          frontier - size * 0.38, travel);
+        const pathPosition = (band + travel) / bands;
         const bx = Math.min(brush.width - 1,
           Math.floor(fract(u / Math.max(0.025, size)) * brush.width));
         const by = Math.min(brush.height - 1, Math.floor(localV * brush.height));
         const brushAlpha = brush.data[by * brush.width + bx]! / 255;
-        const fiber = 0.08 + brushAlpha * 0.76
-          + (0.5 + 0.5 * Math.sin(localV * Math.PI * 46 + bx * 0.37)) * 0.16;
-        const textured = painted * clamp(fiber);
-        const filledBehind = smoothstep(frontier - size * 0.32, frontier - size * 1.65, travel)
-          * (0.92 + brushAlpha * 0.08);
-        const brushed = Math.max(textured, filledBehind);
-        const coverage = brushed + (1 - brushed) * settle;
+        const coarse = effectRandom(options, "D02.edge-coarse",
+          Math.floor(x / 5), band * 97 + Math.floor(localV * 19), 1, 0, false) - 0.5;
+        const fine = effectRandom(options, "D02.bristles",
+          Math.floor(x / 2), band * 131 + Math.floor(localV * 47), 1, 7, false) - 0.5;
+        const bristleWave = Math.sin(localV * Math.PI * (24 + roughness * 38) + band * 1.73)
+          * (0.0015 + roughness * 0.0045);
+        const edgeOffset = (coarse * 0.018 + fine * 0.008) * roughness + bristleWave;
+        const age = progress - pathPosition + edgeOffset;
+        const reached = smoothstep(-0.008 - roughness * 0.006, 0.01, age);
+        const edgeTaper = smoothstep(0, 0.12, localV) * smoothstep(1, 0.88, localV);
+        const fiberLines = 0.5 + 0.5 * Math.sin(localV * Math.PI * (52 + roughness * 34) + bx * 0.41);
+        const dryBreak = effectRandom(options, "D02.dry-brush",
+          Math.floor(x / 3), band * 173 + Math.floor(localV * 59), 1, 19, false);
+        const pigment = clamp(
+          brushAlpha * (0.58 + edgeTaper * 0.34)
+          + fiberLines * (0.2 + roughness * 0.12)
+          - Math.max(0, dryBreak - (0.82 - roughness * 0.24)) * 1.8
+        );
+        const settled = smoothstep(0, settleDistance, age);
+        const coverage = reached * (pigment + (1 - pigment) * settled);
         write(output, x, y, mixColor(read(source, x, y), read(target, x, y), coverage));
       }
     }

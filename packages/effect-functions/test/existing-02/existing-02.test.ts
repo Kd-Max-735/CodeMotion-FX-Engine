@@ -57,7 +57,7 @@ const EXPECTED = Object.freeze({
     effectId: "fx.draw.brushReveal",
     properties: {
       size: number(0.12, 0.005, 1, 0.005), roughness: number(0.35, 0, 1, 0.01),
-      progress: number(0.5, 0, 1, 0.01)
+      progress: number(1, 0, 1, 0.01)
     },
     slots: [["source_frame", "image"], ["target_frame", "image"], ["brush_texture", "texture"]]
   },
@@ -337,6 +337,15 @@ describe("existing-02 field specifications and adapter contracts", () => {
     expect(schema.properties.centerMode?.enum).toEqual([
       "coordinates", "brightest", "subject_center", "subject_left", "subject_right", "subject_top", "subject_bottom"
     ]);
+  });
+
+  it("defaults brush_reveal to a complete time-driven transition", () => {
+    const definition = definitions().get("brush_reveal")!;
+    const schema = definition.parameterSchema as unknown as {
+      readonly properties: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+    };
+    expect(schema.properties.progress?.default).toBe(1);
+    expect(definition.defaults.progress).toBe(1);
   });
 
   it("maps exactly the assigned 20 snake_case tools to one independent Markdown file", async () => {

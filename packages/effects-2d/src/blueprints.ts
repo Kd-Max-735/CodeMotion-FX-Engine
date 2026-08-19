@@ -216,7 +216,7 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "medium", 7),
   b("D02", "fx.draw.brushReveal", "Brush Reveal", "draw", "Textured brush-mask transition between two images.", [
     text("brushTexture", "builtin://brush/round"), number("size", 0.12, 0.005, 1, 0.005, "canvas"),
-    number("roughness", 0.35, 0, 1, 0.01), number("progress", 0.5, 0, 1, 0.01)
+    number("roughness", 0.35, 0, 1, 0.01), number("progress", 1, 0, 1, 0.01)
   ], "medium", 8),
   b("D03", "fx.draw.inkSpread", "Ink Spread", "draw", "Seeded diffusion and absorption.", [
     number("diffusion", 0.55, 0, 1, 0.01), number("edgeNoise", 0.2, 0, 1, 0.01),
