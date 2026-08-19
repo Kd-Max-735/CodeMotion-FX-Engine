@@ -111,6 +111,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   M07: "1.2.0",
   T02: "1.2.0",
   D02: "1.2.0",
+  D01: "1.1.0",
   D04: "1.1.0",
   L04: "1.2.0"
 });
@@ -129,6 +130,9 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   }
   if (effect.sourceId === "T02") {
     return Object.freeze([slot("source_image", "image", "Owner-authorized background image.")]);
+  }
+  if (effect.sourceId === "D01") {
+    return Object.freeze([slot("source_image", "image", "Owner-authorized image receiving the handwriting overlay.")]);
   }
   if (effect.sourceId === "D02") {
     return Object.freeze([
@@ -152,7 +156,6 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   }
   if (effect.sourceId === "T04") slots.push(slot("motion_path", "data", "Server-bound text motion path."));
   if (effect.sourceId === "V02") slots.push(slot("morph_paths", "data", "Server-bound source and target vector paths."));
-  if (effect.sourceId === "D01") slots.push(slot("stroke_path", "data", "Server-bound handwriting path."));
   if (effect.sourceId === "H01") slots.push(slot("mask_layer", "mask", "Owner-authorized reveal mask."));
   if (effect.sourceId === "H02") slots.push(slot("matte_layer", "mask", "Owner-authorized track matte."));
   if (effect.sourceId === "H03") slots.push(slot("overlay_layer", "image", "Owner-authorized overlay layer."));
@@ -169,7 +172,7 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
   const schema = structuredClone(effect.parameterSchema) as JsonObject;
   const properties = schema.properties as JsonObject;
   for (const name of RESOURCE_FIELDS[effect.effectId] ?? []) delete properties[name];
-  if (effect.sourceId === "T02") {
+  if (effect.sourceId === "T02" || effect.sourceId === "D01") {
     (properties.text as JsonObject).minLength = 1;
     (properties.color as JsonObject).pattern = "^#[0-9A-Fa-f]{6}$";
   }
@@ -197,6 +200,7 @@ function rasterBinding(context: ServerEffectRenderContext, name: string): Existi
 
 function primarySlotName(effect: P0CatalogEffectDefinition): string {
   if (effect.sourceId === "T02") return "source_image";
+  if (effect.sourceId === "D01") return "source_image";
   if (effect.sourceId === "D02") return "source_frame";
   if (effect.category === "text") return "text_raster";
   if (effect.category === "vector" || effect.category === "draw") return "vector_source";
@@ -232,6 +236,33 @@ function characterCascadeBinding(
   return Object.freeze({ surface: rasterizeLayerInput(rasterInput), rasterInput });
 }
 
+function serverTextBinding(
+  context: ServerEffectRenderContext,
+  params: Readonly<JsonObject>,
+  sourceId: "character-cascade" | "handwriting"
+): ExistingRasterBinding {
+  const background = rasterBinding(context, "source_image");
+  const source = createServerTextRasterSourceV1({
+    text: params.text as string,
+    fontFamily: params.fontFamily as "song" | "kai" | "sans",
+    fontSize: params.fontSize as number,
+    color: params.color as string,
+    positionX: params.positionX as number,
+    positionY: params.positionY as number,
+    width: context.width,
+    height: context.height
+  });
+  const layerId = `single-tool:${sourceId}:${context.requestId}`;
+  const rasterInput: EffectRuntimeOptions["rasterInput"] = Object.freeze({
+    ...background.rasterInput,
+    layerId,
+    layerType: "text" as const,
+    source,
+    time: Object.freeze({ ...background.rasterInput.time, layerId })
+  });
+  return Object.freeze({ surface: rasterizeLayerInput(rasterInput), rasterInput });
+}
+
 function internalParams(
   effect: P0CatalogEffectDefinition,
   context: ServerEffectRenderContext,
@@ -244,7 +275,6 @@ function internalParams(
     output.fromPath = paths.fromPath;
     output.toPath = paths.toPath;
   }
-  if (effect.sourceId === "D01") output.path = singleBinding<ExistingPathBinding>(context, "stroke_path").path;
   if (effect.sourceId === "D02") {
     output.brushTexture = singleBinding<ExistingBrushBinding>(context, "brush_texture").reference;
   }
@@ -336,7 +366,9 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         });
       } else {
         const primary = effect.sourceId === "T02"
-          ? characterCascadeBinding(context, params)
+          ? serverTextBinding(context, params, "character-cascade")
+          : effect.sourceId === "D01"
+            ? serverTextBinding(context, params, "handwriting")
           : rasterBinding(context, primarySlotName(effect));
         const secondaryName = secondarySlotName(effect);
         const secondary = secondaryName === undefined ? undefined : rasterBinding(context, secondaryName);

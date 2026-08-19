@@ -205,7 +205,10 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "medium", 8),
 
   b("D01", "fx.draw.handwriting", "Handwriting", "draw", "Pressure-shaped handwriting stroke.", [
-    text("path", "M0.1,0.7 C0.25,0.2 0.75,0.8 0.9,0.3"), number("pressure", 0.7, 0, 1, 0.01),
+    text("path", "M0.1,0.7 C0.25,0.2 0.75,0.8 0.9,0.3"), text("text", "手写文字", 80),
+    choice("fontFamily", "kai", ["song", "kai", "sans"]), number("fontSize", 72, 12, 240, 1, "pixels"),
+    number("positionX", 0.5, 0, 1, 0.01, "canvas"), number("positionY", 0.5, 0, 1, 0.01, "canvas"),
+    text("color", "#202020", 16), number("pressure", 0.7, 0, 1, 0.01),
     number("speedVariation", 0.25, 0, 1, 0.01), number("progress", 0.5, 0, 1, 0.01)
   ], "medium", 7),
   b("D02", "fx.draw.brushReveal", "Brush Reveal", "draw", "Textured brush-mask transition between two images.", [

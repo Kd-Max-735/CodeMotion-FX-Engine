@@ -4,7 +4,7 @@ import type { FrameRequest } from "@codemotion/exporter";
 type PixelBytes = Uint8Array | Uint8ClampedArray;
 
 const TEXT_OVERLAY_TOOLS = new Set([
-  "character_cascade", "kinetic_typography", "scramble_decode", "text_morph",
+  "character_cascade", "handwriting", "kinetic_typography", "scramble_decode", "text_morph",
   "text_extrude_3d", "text_path_reveal", "typewriter", "word_explode"
 ]);
 
