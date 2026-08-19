@@ -829,11 +829,17 @@ describe("server single effect-tool service", () => {
     expect(vision).toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledOnce();
 
+    const kenBurns = EFFECT_TOOL_REGISTRY.getByToolName("ken_burns")!;
+    await expect(resolver.visionImage(principal, kenBurns, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(2);
+
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledOnce();
+    expect(resolveMedia).toHaveBeenCalledTimes(2);
   });
 
   it("derives even output dimensions from the first authorized visual while preserving aspect ratio", async () => {

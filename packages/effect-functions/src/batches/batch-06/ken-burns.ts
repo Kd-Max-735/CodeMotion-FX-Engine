@@ -69,7 +69,7 @@ export const KEN_BURNS_DEFINITION: EffectToolDefinition<KenBurnsParams> = {
   effectId: "fx.media.kenBurns",
   toolName: "ken_burns",
   displayName: "肯·伯恩斯平移缩放",
-  version: "1.1.0",
+  version: "1.2.0",
   category: "media",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
