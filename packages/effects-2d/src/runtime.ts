@@ -613,6 +613,11 @@ function renderText(
   const scaleMap = blueprint.sourceId === "T03"
     ? numericMap(stringParam(params, "scaleMap", "0.8,1.2,1"), "scaleMap")
     : undefined;
+  const kineticDuration = blueprint.sourceId === "T03"
+    ? numberParam(params, "jumpDuration", 1)
+    : 0;
+  const kineticActive = kineticDuration > 0 && seconds < kineticDuration;
+  const kineticProgress = kineticActive ? clamp(seconds / kineticDuration) : 1;
   const textPath = blueprint.sourceId === "T04"
     ? flattenVectorPath(parseSvgPathData(stringParam(params, "path", "")))
     : undefined;
@@ -651,17 +656,20 @@ function renderText(
       } else if (blueprint.sourceId === "T03") {
         const strength = numberParam(params, "strength", 0.35);
         const layout = stringParam(params, "layoutMode", "grid");
-        const beat = sampledMap(beatMap!, p);
-        const scaleValue = sampledMap(scaleMap!, p);
+        const beat = kineticActive ? sampledMap(beatMap!, kineticProgress) : 0;
+        const scaleValue = kineticActive ? sampledMap(scaleMap!, kineticProgress) : 1;
         const layoutPhase = layout === "radial"
           ? Math.atan2(v - 0.5, u - 0.5) : layout === "stack" ? v * 8 : cell.index % 7;
-        const pulse = Math.max(0.05, scaleValue + Math.sin(layoutPhase + p * TAU * (1 + Math.abs(beat) * 3))
-          * strength * (0.15 + Math.abs(scaleValue) * 0.25));
+        const pulse = kineticActive
+          ? Math.max(0.05, scaleValue + Math.sin(
+            layoutPhase + kineticProgress * TAU * (1 + Math.abs(beat) * 3)
+          ) * strength * (0.15 + Math.abs(scaleValue) * 0.25))
+          : 1;
         sample = transformedSample(source, u, v, (su, sv) => {
           const centerU = u - (cell.localX - 0.5) * 0.08;
           const centerV = v - (cell.localY - 0.5) * 0.16;
-          const radialOffset = layout === "radial" ? (pulse - 1) * 0.04 : 0;
-          const scaleMapOffset = (scaleValue - 1) * strength * 0.18;
+          const radialOffset = kineticActive && layout === "radial" ? (pulse - 1) * 0.04 : 0;
+          const scaleMapOffset = kineticActive ? (scaleValue - 1) * strength * 0.18 : 0;
           return [
             centerU + (su - centerU) / pulse
               + (su - 0.5) * (radialOffset + scaleMapOffset),

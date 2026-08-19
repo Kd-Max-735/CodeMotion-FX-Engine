@@ -835,11 +835,17 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(2);
 
+    const kineticTypography = EFFECT_TOOL_REGISTRY.getByToolName("kinetic_typography")!;
+    await expect(resolver.visionImage(principal, kineticTypography, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(3);
+
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(2);
+    expect(resolveMedia).toHaveBeenCalledTimes(3);
   });
 
   it("derives even output dimensions from the first authorized visual while preserving aspect ratio", async () => {

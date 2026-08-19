@@ -722,6 +722,25 @@ describe("Group 2 P0 catalog", () => {
     expect(hashPixelSurface(fast)).not.toBe(hashPixelSurface(slow));
   });
 
+  it("limits kinetic typography jumping to jumpDuration and settles afterward", () => {
+    const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "T03")!;
+    const params = {
+      ...effect.defaultPreset,
+      beatMap: "0,1,0,1,0",
+      scaleMap: "0.75,1.35,0.8,1.25,1",
+      strength: 0.9,
+      jumpDuration: 2
+    };
+    const activeFixture = realFixture(effect, "test.kinetic-duration", 1 / 6, 64, 36, "srgb", 20260728, "final", 0, 30, 6);
+    const settledFixture = realFixture(effect, "test.kinetic-duration", 0.5, 64, 36, "srgb", 20260728, "final", 0, 30, 6);
+    const heldFixture = realFixture(effect, "test.kinetic-duration", 5 / 6, 64, 36, "srgb", 20260728, "final", 0, 30, 6);
+    const active = effect.renderPixels(activeFixture.source.surface, params, activeFixture.options);
+    const settled = effect.renderPixels(settledFixture.source.surface, params, settledFixture.options);
+    const held = effect.renderPixels(heldFixture.source.surface, params, heldFixture.options);
+    expect(hashPixelSurface(active)).not.toBe(hashPixelSurface(activeFixture.source.surface));
+    expect(hashPixelSurface(settled)).toBe(hashPixelSurface(held));
+  });
+
   it("uses elapsed seconds for every declared second/rate parameter in the first 40 effects", async () => {
     const cases = [
       ["M01", "duration", "seconds", { duration: 1, easing: "linear" }],
