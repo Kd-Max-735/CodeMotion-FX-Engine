@@ -478,8 +478,8 @@ describe("existing-02 field specifications and adapter contracts", () => {
     const middle = await renderAt(0.5);
     expect(Array.from(middle.data)).not.toEqual(Array.from(source.data));
     expect(Array.from(middle.data)).not.toEqual(Array.from(target.data));
-    expect(Array.from((await renderAt(1)).data)).toEqual(Array.from(target.data));
-    expect(Array.from((await renderAt(1.5)).data)).toEqual(Array.from(target.data));
+    expect(Array.from((await renderAt(2)).data)).toEqual(Array.from(target.data));
+    expect(Array.from((await renderAt(3)).data)).toEqual(Array.from(target.data));
   });
 
   it("uses an optional custom mask in mask_reveal without replacing uncovered source pixels", async () => {

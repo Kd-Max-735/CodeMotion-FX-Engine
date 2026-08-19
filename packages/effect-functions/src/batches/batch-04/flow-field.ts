@@ -51,7 +51,7 @@ export const FLOW_FIELD_DEFINITION: EffectToolDefinition<FlowFieldParams> = {
   effectId: "fx.particle.flowField",
   toolName: "particle_flow_field",
   displayName: "粒子流场",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "particle",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -73,13 +73,10 @@ export const FLOW_FIELD_DEFINITION: EffectToolDefinition<FlowFieldParams> = {
     { presetId: "flow_field.gust", displayName: "快速阵风", params: { ...FLOW_FIELD_DEFAULTS, particleCount: 260, fieldStrength: 3.6, advectionSpeed: 2.2, turbulence: 0.55 } },
     { presetId: "flow_field.chaotic", displayName: "湍动流场", params: { ...FLOW_FIELD_DEFAULTS, particleCount: 360, fieldScale: 2.5, turbulence: 1.5, drag: 0.45 } }
   ],
-  inputSlots: [{
-    name: "vector_field",
-    kind: "data",
-    required: false,
-    cardinality: "one",
-    description: "Optional owner-locked server vector grid; never exposed to model parameters."
-  }],
+  inputSlots: [
+    { name: "background_image", kind: "image", required: true, cardinality: "one", description: "Owner-authorized image or decoded video frame receiving the flow field." },
+    { name: "vector_field", kind: "data", required: false, cardinality: "one", description: "Optional owner-locked server vector grid; never exposed to model parameters." }
+  ],
   primaryBackend: BATCH_04_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",

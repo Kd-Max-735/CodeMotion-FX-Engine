@@ -94,6 +94,20 @@ export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> 
     ? { valid: false, issues: [{ path: "$.data", message: "Marker endpoints must be distinct." }] }
     : VALID_PARAMS,
   render: (context, params) => {
+    const maskInput = context.inputs.subject_mask;
+    const maskBinding = !Array.isArray(maskInput) && maskInput !== undefined
+      ? (maskInput as { binding: unknown }).binding as { data?: Uint8Array; width?: number; height?: number }
+      : undefined;
+    const mask = maskBinding?.data;
+    let bounds: { left: number; top: number; right: number; bottom: number } | undefined;
+    if (mask instanceof Uint8Array && mask.length === context.width * context.height) {
+      let left = context.width; let top = context.height; let right = -1; let bottom = -1;
+      for (let y = 0; y < context.height; y += 1) for (let x = 0; x < context.width; x += 1) {
+        if (mask[y * context.width + x]! < 128) continue;
+        left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x); bottom = Math.max(bottom, y);
+      }
+      if (right >= left && bottom >= top) bounds = { left, top, right, bottom };
+    }
     const start = {
       x: params.startX * (context.width - 1),
       y: params.startY * (context.height - 1)
@@ -122,22 +136,37 @@ export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> 
       })
     };
     const spacing = Math.max(0.5, params.width * params.spacing * (1 - params.overlap * 0.5));
-    const samples = resamplePath(path, spacing);
-    const dabs = samples.map((point, index) => {
-      const previous = samples[Math.max(0, index - 1)]!;
-      const next = samples[Math.min(samples.length - 1, index + 1)]!;
-      const dx = next.x - previous.x;
-      const dy = next.y - previous.y;
-      const length = Math.hypot(dx, dy) || 1;
-      const offset = (randomAt(context.seed, index) - 0.5) * params.width * params.edgeRoughness;
-      const bleedScale = 1 + randomAt(context.seed ^ 0x51f15e, index) * params.bleed;
-      return {
-        center: roundPoint({ x: point.x - dy / length * offset, y: point.y + dx / length * offset }),
-        width: round(params.width * bleedScale),
-        height: round(params.width * (0.72 + params.overlap * 0.18)),
-        opacity: round(params.opacity * (0.9 + randomAt(context.seed ^ 0x21a3, index) * 0.1)),
-        angle: round(Math.atan2(dy, dx))
-      };
+    const rowCount = bounds === undefined ? 0
+      : Math.max(1, Math.ceil((bounds.bottom - bounds.top + 1) / Math.max(2, params.width * 0.58)));
+    const semanticPaths = bounds === undefined ? [path] : Array.from({ length: rowCount }, (_, row) => {
+      const y = bounds!.top + (row + 0.5) / rowCount * (bounds!.bottom - bounds!.top);
+      const reverse = row % 2 === 1;
+      return { closed: false, points: [
+        { x: reverse ? bounds!.right : bounds!.left, y },
+        { x: reverse ? bounds!.left : bounds!.right, y }
+      ] };
+    });
+    let dabIndex = 0;
+    const dabs = semanticPaths.flatMap((semanticPath) => {
+      const samples = resamplePath(semanticPath, spacing);
+      return samples.map((point, index) => {
+        const randomIndex = dabIndex++;
+        const previous = samples[Math.max(0, index - 1)]!;
+        const next = samples[Math.min(samples.length - 1, index + 1)]!;
+        const dx = next.x - previous.x;
+        const dy = next.y - previous.y;
+        const length = Math.hypot(dx, dy) || 1;
+        const offset = (randomAt(context.seed, randomIndex) - 0.5)
+          * params.width * params.edgeRoughness;
+        const bleedScale = 1 + randomAt(context.seed ^ 0x51f15e, randomIndex) * params.bleed;
+        return {
+          center: roundPoint({ x: point.x - dy / length * offset, y: point.y + dx / length * offset }),
+          width: round(params.width * bleedScale),
+          height: round(params.width * (0.72 + params.overlap * 0.18)),
+          opacity: round(params.opacity * (0.9 + randomAt(context.seed ^ 0x21a3, randomIndex) * 0.1)),
+          angle: round(Math.atan2(dy, dx))
+        };
+      });
     });
     return effectResult("metadata", {
       algorithm: "overlapping_marker_dabs",

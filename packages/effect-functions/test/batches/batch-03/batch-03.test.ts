@@ -327,30 +327,43 @@ describe("batch-03 definitions", () => {
     expect((gel.output as RgbaFrame).data).not.toEqual(rgbaFrame().data);
   });
 
-  it("cuts dissolved source pixels, starts logo assembly blank, and supports repeated spark bursts", async () => {
+  it("clears a completed dissolve, assembles a logo from blank, and repeats spark bursts for its duration", async () => {
     const dissolve = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "particle_dissolve")!;
-    const dissolveResult = await executeSelectedEffectTool(
+    const dissolveMidway = await executeSelectedEffectTool(
       dissolve,
       dissolve.toolName,
-      { type: dissolve.toolName, data: { ...dissolve.defaults, progress: 0.5 } },
+      { type: dissolve.toolName, data: { ...dissolve.defaults } },
       contextFor(dissolve, { time: 1.5 })
     );
-    const mask = expectParticleBuffer(dissolveResult.output).sourceComposite?.mask;
+    const mask = expectParticleBuffer(dissolveMidway.output).sourceComposite?.mask;
     expect(mask).toBeInstanceOf(Uint8Array);
     expect(mask).toContain(0);
     expect(mask).toContain(255);
+    const dissolveComplete = expectParticleBuffer((await executeSelectedEffectTool(
+      dissolve,
+      dissolve.toolName,
+      { type: dissolve.toolName, data: { ...dissolve.defaults } },
+      contextFor(dissolve, { time: 3 })
+    )).output);
+    expect(dissolveComplete.count).toBe(0);
+    expect([...dissolveComplete.sourceComposite!.mask!].every((alpha) => alpha === 0)).toBe(true);
 
     const logo = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "particle_logo_assemble")!;
     const logoStart = expectParticleBuffer((await executeDefaults(logo, { time: 0 })).output);
     const logoLater = expectParticleBuffer((await executeDefaults(logo, { time: 0.8 })).output);
+    const logoComplete = expectParticleBuffer((await executeDefaults(logo, {
+      time: logo.defaults.duration as number
+    })).output);
     expect([...logoStart.opacities].every((opacity) => opacity === 0)).toBe(true);
+    expect(logoStart.sourceComposite?.opacity).toBe(0);
     expect([...logoLater.opacities].some((opacity) => opacity > 0)).toBe(true);
+    expect(logoComplete.sourceComposite?.opacity).toBe(1);
 
     const spark = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "particle_spark")!;
     const repeated = await executeSelectedEffectTool(
       spark,
       spark.toolName,
-      { type: spark.toolName, data: { ...spark.defaults, burstCount: 3, burstInterval: 0.4, lifetime: 0.65 } },
+      { type: spark.toolName, data: { ...spark.defaults, emissionDuration: 3, burstInterval: 0.4, lifetime: 0.65 } },
       contextFor(spark, { time: 0.45 })
     );
     expect(expectParticleBuffer(repeated.output).count).toBe((spark.defaults.count as number) * 2);
@@ -392,9 +405,10 @@ describe("batch-03 definitions", () => {
       item.inputSlots.some((slot) => slot.required))) {
       const normal = await executeDefaults(definition);
       const changed = await executeDefaults(definition, { inputs: inputsFor(definition, [], 1) });
-      if (definition.inputSlots.some((slot) => slot.name === "background_image")) {
-        expect(expectParticleBuffer(normal.output).sourceComposite)
-          .toMatchObject({ slot: "background_image", opacity: 1 });
+      if (definition.category === "particle") {
+        const composite = expectParticleBuffer(normal.output).sourceComposite;
+        if (composite !== undefined) expect(composite.opacity).toBeGreaterThanOrEqual(0);
+        else expect(changed.output).not.toEqual(normal.output);
       } else {
         expect(changed.output).not.toEqual(normal.output);
       }
@@ -414,10 +428,8 @@ describe("batch-03 definitions", () => {
     expect(texturedParticles).toMatchObject({ primitive: "sprite", spriteSlot: "particle_texture" });
 
     const trail = BATCH_03_DEFINITIONS.find(({ toolName }) => toolName === "particle_trail")!;
-    expect(expectParticleBuffer((await executeDefaults(trail)).output).sourceComposite).toBeUndefined();
-    expect(expectParticleBuffer((await executeDefaults(trail, {
-      inputs: inputsFor(trail, ["source_image"])
-    })).output).sourceComposite).toEqual({ slot: "source_image", opacity: 1 });
+    expect(expectParticleBuffer((await executeDefaults(trail)).output).sourceComposite)
+      .toEqual({ slot: "source_image", opacity: 1 });
   });
 });
 

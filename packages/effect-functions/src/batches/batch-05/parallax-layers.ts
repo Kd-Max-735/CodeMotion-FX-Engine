@@ -35,7 +35,7 @@ export function renderParallaxLayers(context: ServerEffectRenderContext, params:
     };
   });
   return frameOutput(context, "depth_map_parallax_layers", {
-    sourceSlot: "source_video",
+    sourceSlot: "source_image",
     depthSlot: "depth_map",
     targetSlot: hasInput(context, "camera_target") ? "camera_target" : null,
     ...cameraOutput("depth-map-parallax-layers", position, rotation, 50, progress),
@@ -48,7 +48,7 @@ export const PARALLAX_LAYERS_DEFINITION: EffectToolDefinition<ParallaxLayersPara
   effectId: "fx.3d.parallaxLayers",
   toolName: "parallax_layers",
   displayName: "景深分层视差",
-  version: "1.0.0",
+  version: "2.0.0",
   category: "3d",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -73,7 +73,7 @@ export const PARALLAX_LAYERS_DEFINITION: EffectToolDefinition<ParallaxLayersPara
     { presetId: "parallax_layers.diagonal", displayName: "斜向穿行", params: { travelX: -4, travelY: 2, travelZ: 4, depthStrength: 1.1, nearDepth: 0.08, farDepth: 0.95, layerCount: 16, duration: 6, easing: "ease_in_out" } }
   ],
   inputSlots: [
-    { name: "source_video", kind: "video", required: true, cardinality: "one", description: "Server-authorized source video." },
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized static image separated into depth layers." },
     { name: "depth_map", kind: "depth-map", required: true, cardinality: "one", description: "Server-derived locked preview depth map used to construct spatial layers." },
     { name: "camera_target", kind: "data", required: false, cardinality: "one", description: "Optional server-authorized convergence target." }
   ],

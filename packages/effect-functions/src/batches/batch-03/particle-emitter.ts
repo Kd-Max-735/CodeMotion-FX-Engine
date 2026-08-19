@@ -30,7 +30,7 @@ export const PARTICLE_EMITTER_DEFINITION: EffectToolDefinition<ParticleEmitterPa
   effectId: "fx.particle.emitter",
   toolName: "particle_emitter",
   displayName: "粒子发射器",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "particle",
   parameterSchema: {
     ...CLOSED_SCHEMA,
@@ -51,19 +51,25 @@ export const PARTICLE_EMITTER_DEFINITION: EffectToolDefinition<ParticleEmitterPa
     { presetId: "emitter.fountain", displayName: "喷泉", params: { ...defaults } },
     { presetId: "emitter.jet", displayName: "高速喷流", params: { ...defaults, rate: 420, speed: 720, spread: 12, lifetime: 0.8, size: 4, gravity: 40, drag: 0.02 } }
   ],
-  inputSlots: [{ name: "particle_texture", kind: "texture", required: false, cardinality: "one", description: "可选的服务端授权粒子纹理；缺省使用程序化圆形。" }],
+  inputSlots: [
+    { name: "background_image", kind: "image", required: true, cardinality: "one", description: "Owner-authorized image or decoded video frame receiving the particles." },
+    { name: "particle_texture", kind: "texture", required: false, cardinality: "one", description: "可选的服务端授权粒子纹理；缺省使用程序化圆形。" }
+  ],
   primaryBackend: BATCH_03_BACKEND,
   fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
+    rgbaInput(context, "background_image", true);
     const texture = rgbaInput(context, "particle_texture", false, false);
     const firstEmission = Math.max(0, Math.ceil((context.time - params.lifetime) * params.rate));
     const lastEmission = Math.max(firstEmission, Math.floor(context.time * params.rate));
     const count = lastEmission - firstEmission;
     const buffer = createParticleBuffer(context, count, texture === undefined ? "disc" : "sprite",
-      texture === undefined ? { glow: 0.72 } : { spriteSlot: "particle_texture", glow: 0.38 });
+      texture === undefined
+        ? { sourceComposite: { slot: "background_image", opacity: 1 }, glow: 0.72 }
+        : { sourceComposite: { slot: "background_image", opacity: 1 }, spriteSlot: "particle_texture", glow: 0.38 });
     for (let index = 0; index < count; index += 1) {
       const emissionIndex = firstEmission + index;
       const birthTime = emissionIndex / params.rate;

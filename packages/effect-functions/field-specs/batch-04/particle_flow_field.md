@@ -1,13 +1,13 @@
 # 粒子流场 `particle_flow_field`
 
-用户已经选中本工具。你只决定参数值；工具会以固定时间步将高密度发光粒子沿程序化或服务端绑定的二维矢量场推进，并以粒子亮芯、柔光和短速度拖尾呈现连续流动。
+用户已经选中本工具。你只决定参数值；工具会在用户上传的图片或视频素材上，以固定时间步将高密度发光粒子沿程序化或服务端绑定的二维矢量场推进，并以粒子亮芯、柔光和短速度拖尾呈现连续流动。
 
 只输出 JSON，不要输出说明或代码围栏。`type` 必须严格为 `particle_flow_field`，`data` 不得有表外字段。`vector_field` 由服务端授权绑定，不得放入模型 `data`。
 
 合法示例：
 
 ```json
-{"type":"particle_flow_field","data":{"particleCount":72,"fieldStrength":3.2,"fieldScale":1.8,"turbulence":0.6,"drag":0.8,"advectionSpeed":1.6,"spawnRadius":0.75}}
+{"type":"particle_flow_field","data":{"particleCount":180,"fieldStrength":1.8,"fieldScale":1.2,"turbulence":0.35,"drag":1.1,"advectionSpeed":1,"spawnRadius":0.8}}
 ```
 
 | 字段 | 必填 | 取值 | 选择策略 |
@@ -37,4 +37,6 @@
 
 中性值与默认行为：默认生成 180 个发光粒子、适中推进和轻微湍动；未提及的维度保持默认，避免把所有参数同时推高。
 
-不适用范围：流体体积守恒、烟雾密度、刚体碰撞、三维风场、路径或资源选择。精确 `vector_field` 由服务端绑定。
+服务器输入行为：`background_image` 是必需的授权素材帧，可来自图片或逐帧解码的视频，渲染时保留素材并在其上叠加流场；精确 `vector_field` 可由服务端另行绑定，二者都不进入模型 `data`。
+
+不适用范围：流体体积守恒、烟雾密度、刚体碰撞、三维风场、路径或资源选择。

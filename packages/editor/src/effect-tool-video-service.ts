@@ -603,17 +603,22 @@ export class EffectToolVideoService {
           task.view.source.assetId,
           task.controller.signal
         );
-        if (media.asset.type !== "image" && media.asset.type !== "svg") {
+        const videoInImageSlot = ["live_binding", "particle_emitter", "particle_flow_field", "particle_orbit_field",
+          "particle_snow_rain", "particle_spark", "particle_trail"].includes(definition.toolName);
+        if (media.asset.type !== "image" && media.asset.type !== "svg"
+          && !(videoInImageSlot && media.asset.type === "video")) {
           throw new TypeError("The preview source must remain an authorized image.");
         }
-        sourcePixels = await this.decodeFrame(media, {
-          frame: 0,
-          time: 0,
-          deltaTime: 1 / metadata.fps,
-          fps: metadata.fps,
-          width: metadata.width,
-          height: metadata.height
-        }, { signal: task.controller.signal });
+        if (media.asset.type !== "video") {
+          sourcePixels = await this.decodeFrame(media, {
+            frame: 0,
+            time: 0,
+            deltaTime: 1 / metadata.fps,
+            fps: metadata.fps,
+            width: metadata.width,
+            height: metadata.height
+          }, { signal: task.controller.signal });
+        }
       }
       const preset = validateExportPreset({
         id: "ae-agent-mp4",
@@ -644,6 +649,9 @@ export class EffectToolVideoService {
             const mutableInputs: Record<string, AuthorizedEffectInputs[string]> = { ...task.prepared.inputs };
             for (const slot of definition.inputSlots.filter((item) => item.kind === "video"
               || definition.toolName === "glass" && item.name === "source_image"
+              || ["live_binding", "particle_emitter", "particle_flow_field", "particle_orbit_field",
+                "particle_snow_rain", "particle_spark", "particle_trail"].includes(definition.toolName)
+                && item.kind === "image"
               || definition.toolName === "mask_reveal"
                 && (item.name === "source_frame" || item.name === "target_frame"))) {
               const rawId = task.prepared.inputIds[slot.name];
@@ -653,7 +661,9 @@ export class EffectToolVideoService {
               if (media === undefined) {
                 media = await this.options.media.resolve(task.owner, assetId, signal);
                 if (media.asset.type !== "video"
-                  && definition.toolName !== "glass" && definition.toolName !== "mask_reveal") {
+                  && definition.toolName !== "glass" && definition.toolName !== "mask_reveal"
+                  && !["live_binding", "particle_emitter", "particle_flow_field", "particle_orbit_field",
+                    "particle_snow_rain", "particle_spark", "particle_trail"].includes(definition.toolName)) {
                   throw new TypeError(`${slot.name} requires an authorized video asset.`);
                 }
                 preparedMedia.set(assetId, media);

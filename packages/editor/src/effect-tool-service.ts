@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import type { JsonObject, RenderQuality } from "@codemotion/core";
+import { PNG } from "pngjs";
 import {
   EFFECT_TOOL_REGISTRY,
   EffectToolContractError,
@@ -99,10 +100,17 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   neon_glow: "source_image",
   neon_trace: "source_image",
   number_counter: "source_image",
+  live_binding: "source_image",
+  particle_spark: "background_image",
+  particle_trail: "source_image",
   object_match_cut: "from_video"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
+const VIDEO_IN_IMAGE_SLOT_TOOLS = new Set([
+  "live_binding", "particle_emitter", "particle_flow_field", "particle_orbit_field",
+  "particle_snow_rain", "particle_spark", "particle_trail"
+]);
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
 export interface EffectToolPrincipal {
@@ -427,6 +435,7 @@ function acceptsUploadedVideo(
   if (isServerDerivedInputSlot(definition, slot)) return false;
   return slot.kind === "video"
     || definition.toolName === "glass" && slot.name === "source_image"
+    || VIDEO_IN_IMAGE_SLOT_TOOLS.has(definition.toolName) && slot.kind === "image"
     || definition.toolName === "mask_reveal"
       && (slot.name === "source_frame" || slot.name === "target_frame");
 }
@@ -454,6 +463,7 @@ function derivedInputResourceId(
         ? "source_image"
       : definition.toolName === "background_remove_compose" && slot.name === "foreground_matte"
         ? "foreground_video"
+      : definition.toolName === "parallax_layers" ? "source_image"
       : definition.toolName === "image_depth_parallax" && slot.name === "source_depth"
         ? "source_image" : "source_video");
   const value = inputIds[sourceSlot];
@@ -1336,6 +1346,24 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     const resourceId = typeof value === "string" ? value : value?.[0];
     if (resourceId === undefined) return undefined;
     const media = await this.media.resolve(ownerOf(principal), resourceId, signal);
+    if (media.asset.type === "video") {
+      const dimensions = materialOutputDimensions(media.asset.metadata.width, media.asset.metadata.height);
+      if (dimensions === undefined) return undefined;
+      const pixels = await this.decodeFrame(media, {
+        frame: 0,
+        time: 0,
+        deltaTime: 1 / 30,
+        fps: 30,
+        width: dimensions.width,
+        height: dimensions.height
+      }, signal === undefined ? {} : { signal });
+      if (pixels.length !== dimensions.width * dimensions.height * 4) return undefined;
+      const png = new PNG({ width: dimensions.width, height: dimensions.height });
+      png.data = Buffer.from(pixels);
+      const bytes = PNG.sync.write(png);
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_VISION_IMAGE_BYTES) return undefined;
+      return Object.freeze({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    }
     if (media.asset.type !== "image" && media.asset.type !== "svg") return undefined;
     const proxy = media.asset.type === "svg";
     const path = proxy ? media.rasterProxyPath : media.storedPath;

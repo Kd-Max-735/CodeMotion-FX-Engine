@@ -26,12 +26,15 @@ export interface ParticleTrailParams extends JsonObject {
   direction: number;
   hue: number;
   saturation: number;
+  emissionDuration: number;
+  intensity: number;
 }
 
 const defaults: ParticleTrailParams = {
-  emissionRate: 180, trailLength: 1.2, speed: 220, width: 10, fade: 0.72,
+  emissionRate: 180, trailLength: 1.2, speed: 220, width: 3, fade: 0.72,
   waviness: 0.18, lifetime: 1.6, startX: 0.5, startY: 0.5,
-  trajectory: "orbit", direction: -20, hue: 195, saturation: 0.78
+  trajectory: "linear", direction: -20, hue: 195, saturation: 0.78,
+  emissionDuration: 3, intensity: 1
 };
 
 function hsvColor(hue: number, saturation: number): readonly number[] {
@@ -49,7 +52,7 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
   effectId: "fx.particle.trail",
   toolName: "particle_trail",
   displayName: "粒子拖尾",
-  version: "1.0.0",
+  version: "2.0.0",
   category: "particle",
   parameterSchema: {
     ...CLOSED_SCHEMA,
@@ -57,16 +60,18 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
       emissionRate: { type: "number", minimum: 1, maximum: 5000, default: 180 },
       trailLength: { type: "number", minimum: 0.05, maximum: 10, default: 1.2 },
       speed: { type: "number", minimum: 0, maximum: 2000, default: 220 },
-      width: { type: "number", minimum: 0.5, maximum: 200, default: 10 },
+      width: { type: "number", minimum: 0.5, maximum: 30, default: 3 },
       fade: { type: "number", minimum: 0, maximum: 1, default: 0.72 },
       waviness: { type: "number", minimum: 0, maximum: 1, default: 0.18 },
       lifetime: { type: "number", minimum: 0.05, maximum: 20, default: 1.6 },
       startX: { type: "number", minimum: 0, maximum: 1, default: 0.5 },
       startY: { type: "number", minimum: 0, maximum: 1, default: 0.5 },
-      trajectory: { type: "string", enum: ["linear", "wave", "orbit"], default: "orbit" },
+      trajectory: { type: "string", enum: ["linear", "wave", "orbit"], default: "linear" },
       direction: { type: "number", minimum: -180, maximum: 180, default: -20 },
       hue: { type: "number", minimum: 0, maximum: 360, default: 195 },
-      saturation: { type: "number", minimum: 0, maximum: 1, default: 0.78 }
+      saturation: { type: "number", minimum: 0, maximum: 1, default: 0.78 },
+      emissionDuration: { type: "number", minimum: 0.1, maximum: 30, default: 3 },
+      intensity: { type: "number", minimum: 0.1, maximum: 3, default: 1 }
     }
   },
   defaults,
@@ -75,19 +80,22 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
     { presetId: "trail.comet", displayName: "彗星拖尾", params: { ...defaults } },
     { presetId: "trail.electric", displayName: "电光轨迹", params: { ...defaults, emissionRate: 520, trailLength: 0.55, speed: 620, width: 4, fade: 0.9, waviness: 0.7, lifetime: 0.65, trajectory: "linear", hue: 205, saturation: 1 } }
   ],
-  inputSlots: [{ name: "source_image", kind: "image", required: false, cardinality: "one", description: "可选的服务端授权拖尾主体图像。" }],
+  inputSlots: [{ name: "source_image", kind: "image", required: true, cardinality: "one", description: "Owner-authorized image or decoded video frame receiving the positioned trail." }],
   primaryBackend: BATCH_03_BACKEND,
   fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
-    const source = rgbaInput(context, "source_image", false);
-    const historyWindow = Math.min(context.time, params.trailLength, params.lifetime);
-    const count = Math.floor(params.emissionRate * historyWindow);
-    const buffer = createParticleBuffer(context, count, "disc", source === undefined
-      ? { glow: 0.82 }
-      : { sourceComposite: { slot: "source_image", opacity: 1 }, glow: 0.82 });
+    rgbaInput(context, "source_image", true);
+    const emissionEnd = Math.min(context.time, params.emissionDuration);
+    const historyStart = Math.max(0, context.time - params.trailLength, context.time - params.lifetime);
+    const historyWindow = Math.max(0, emissionEnd - historyStart);
+    const effectiveRate = params.emissionRate * params.intensity;
+    const count = Math.floor(effectiveRate * historyWindow);
+    const buffer = createParticleBuffer(context, count, "disc", {
+      sourceComposite: { slot: "source_image", opacity: 1 }, glow: 0.82
+    });
     const originX = params.startX * context.width;
     const originY = params.startY * context.height;
     const direction = params.direction * Math.PI / 180;
@@ -120,8 +128,9 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
     };
     const color = hsvColor(params.hue, params.saturation);
     for (let index = 0; index < count; index += 1) {
-      const age = index / params.emissionRate;
-      const sampleTime = Math.max(0, context.time - age);
+      const emissionTime = emissionEnd - index / effectiveRate;
+      const age = Math.max(0, context.time - emissionTime);
+      const sampleTime = Math.max(0, emissionTime);
       const head = headAt(sampleTime);
       const previous = headAt(Math.max(0, sampleTime - 1 / 120));
       const headX = head[0];
@@ -137,7 +146,7 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
         y: headY + normalY * lateral,
         vx: tangentX,
         vy: tangentY,
-        size: params.width,
+        size: params.width * Math.sqrt(params.intensity),
         opacity: Math.exp(-params.fade * age) * (1 - age / params.lifetime),
         color
       });

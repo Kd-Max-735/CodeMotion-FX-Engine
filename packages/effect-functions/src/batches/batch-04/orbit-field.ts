@@ -51,7 +51,7 @@ export const ORBIT_FIELD_DEFINITION: EffectToolDefinition<OrbitFieldParams> = {
   effectId: "fx.particle.orbitField",
   toolName: "particle_orbit_field",
   displayName: "粒子轨道场",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "particle",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -73,13 +73,10 @@ export const ORBIT_FIELD_DEFINITION: EffectToolDefinition<OrbitFieldParams> = {
     { presetId: "orbit_field.vortex", displayName: "紧凑涡旋", params: { ...ORBIT_FIELD_DEFAULTS, particleCount: 240, orbitStrength: 5.2, tangentialSpeed: 2.2, spread: 0.4 } },
     { presetId: "orbit_field.reverse", displayName: "反向宽轨", params: { ...ORBIT_FIELD_DEFAULTS, particleCount: 160, direction: "clockwise", fieldScale: 1.8, spread: 0.9 } }
   ],
-  inputSlots: [{
-    name: "vector_field",
-    kind: "data",
-    required: false,
-    cardinality: "one",
-    description: "Optional owner-locked server vector field; never exposed to model parameters."
-  }],
+  inputSlots: [
+    { name: "background_image", kind: "image", required: true, cardinality: "one", description: "Owner-authorized image or decoded video frame receiving the orbit field." },
+    { name: "vector_field", kind: "data", required: false, cardinality: "one", description: "Optional owner-locked server vector field; never exposed to model parameters." }
+  ],
   primaryBackend: BATCH_04_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "medium",

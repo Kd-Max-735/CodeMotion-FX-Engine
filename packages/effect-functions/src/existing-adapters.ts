@@ -118,7 +118,8 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   L01: "2.0.0",
   L03: "1.1.0",
   L04: "1.3.0",
-  H01: "2.0.0"
+  H01: "2.0.0",
+  C03: "2.0.0"
 });
 
 function slot(
@@ -214,12 +215,13 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
         progress: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 1 },
         feather: { type: "number", minimum: 0, maximum: 0.5, multipleOf: 0.005, default: 0.04 },
         invert: { type: "boolean", default: false },
-        shape: { type: "string", enum: ["circle", "ellipse", "rectangle", "diamond", "custom"], default: "circle" },
+        shape: { type: "string", enum: ["circle", "ellipse", "rectangle", "diamond", "triangle", "star", "custom"], default: "circle" },
         motion: { type: "string", enum: ["expand", "left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top"], default: "expand" },
         centerX: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 0.5 },
         centerY: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 0.5 },
         rotation: { type: "number", minimum: -180, maximum: 180, multipleOf: 1, default: 0 },
-        size: { type: "number", minimum: 0.1, maximum: 2, multipleOf: 0.01, default: 1 }
+        size: { type: "number", minimum: 0.1, maximum: 2, multipleOf: 0.01, default: 1 },
+        duration: { type: "number", minimum: 0.2, maximum: 30, multipleOf: 0.1, default: 2 }
       }
     };
   }
@@ -244,6 +246,9 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
       pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$",
       default: "main subject"
     };
+  }
+  if (effect.sourceId === "C03") {
+    properties.duration = { type: "number", minimum: 0.2, maximum: 30, multipleOf: 0.1, default: 2 };
   }
   if (effect.sourceId === "T02" || effect.sourceId === "T03" || effect.sourceId === "D01") {
     (properties.text as JsonObject).minLength = 1;
@@ -378,7 +383,8 @@ const MASK_REVEAL_DEFAULTS: Readonly<JsonObject> = Object.freeze({
   centerX: 0.5,
   centerY: 0.5,
   rotation: 0,
-  size: 1
+  size: 1,
+  duration: 2
 });
 
 function directMaskValues(context: ServerEffectRenderContext, name: string): Uint8Array {
@@ -553,7 +559,8 @@ function maskRevealFrame(
   const source = directPixelSurface(context, "source_frame");
   const target = directPixelSurface(context, "target_frame");
   const limit = Math.min(1, Math.max(0, params.progress as number));
-  const reveal = Math.min(limit, Math.max(0, context.time) * limit);
+  const duration = params.duration as number;
+  const reveal = Math.min(limit, Math.max(0, context.time / duration) * limit);
   if (reveal <= 0) return { ...source, data: new Uint8ClampedArray(source.data) };
   if (reveal >= 1) return { ...target, data: new Uint8ClampedArray(target.data) };
   const shape = params.shape as string;
@@ -593,10 +600,16 @@ function maskRevealFrame(
         Math.hypot(1 - centerX, 1 - centerY),
         0.001
       ) * size;
+      const radius = Math.hypot(rx, ry);
+      const angle = Math.atan2(ry, rx) - Math.PI / 2;
       metric = shape === "rectangle" ? Math.max(Math.abs(rx) / 0.82, Math.abs(ry) / 0.58) / extent
         : shape === "diamond" ? (Math.abs(rx) + Math.abs(ry)) / (extent * 1.38)
+          : shape === "triangle" ? radius / (extent * Math.max(0.34,
+              Math.cos(Math.PI / 3) / Math.cos(((angle + Math.PI / 3) % (Math.PI * 2 / 3)
+                + Math.PI * 2 / 3) % (Math.PI * 2 / 3) - Math.PI / 3)))
+            : shape === "star" ? radius / (extent * (0.58 + 0.24 * Math.cos(angle * 5)))
           : shape === "ellipse" ? Math.hypot(rx, ry / 0.62) / extent
-            : Math.hypot(rx, ry) / extent;
+            : radius / extent;
     }
     let coverage = 1 - smoothUnit(reveal - feather, reveal + feather, metric);
     if (params.invert === true) coverage = 1 - coverage;
@@ -610,7 +623,7 @@ function maskRevealFrame(
   return { ...source, data: output };
 }
 
-function effectTime(effectId: string, context: ServerEffectRenderContext) {
+function effectTime(effectId: string, context: ServerEffectRenderContext, duration = 1) {
   return Object.freeze({
     contractVersion: "1.1.0" as const,
     effectId,
@@ -619,7 +632,7 @@ function effectTime(effectId: string, context: ServerEffectRenderContext) {
     projectTime: context.time,
     layerTime: context.time,
     effectTime: context.time,
-    progress: Math.min(1, Math.max(0, context.time)),
+    progress: Math.min(1, Math.max(0, context.time / duration)),
     deltaTime: context.deltaTime,
     fps: context.fps,
     frame: context.frame
@@ -657,7 +670,9 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
           ...withoutResourceFields(effect.effectId, effect.defaultPreset),
           target: "main subject"
         })
-    : Object.freeze(withoutResourceFields(effect.effectId, effect.defaultPreset));
+    : effect.sourceId === "C03"
+      ? Object.freeze({ ...withoutResourceFields(effect.effectId, effect.defaultPreset), duration: 2 })
+      : Object.freeze(withoutResourceFields(effect.effectId, effect.defaultPreset));
   return Object.freeze({
     effectId: effect.effectId,
     toolName: identity.toolName,
@@ -694,7 +709,8 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
     },
     validateParams: () => ({ valid: true as const }),
     render(context: ServerEffectRenderContext, params: Readonly<JsonObject>) {
-      const time = effectTime(effect.effectId, context);
+      const time = effectTime(effect.effectId, context,
+        effect.sourceId === "C03" ? params.duration as number : 1);
       const resolved = internalParams(effect, context, params);
       let output: PixelSurface;
       if (effect.sourceId === "H01") {

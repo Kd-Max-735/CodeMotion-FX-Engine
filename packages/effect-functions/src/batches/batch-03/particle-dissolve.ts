@@ -23,26 +23,28 @@ export interface ParticleDissolveParams extends JsonObject {
   turbulence: number;
   lifetime: number;
   particleSize: number;
+  duration: number;
 }
 
-const defaults: ParticleDissolveParams = { progress: 0.5, particleCount: 4000, force: 320, direction: -35, turbulence: 0.45, lifetime: 1.4, particleSize: 3 };
+const defaults: ParticleDissolveParams = { progress: 1, particleCount: 4000, force: 320, direction: -35, turbulence: 0.45, lifetime: 1.4, particleSize: 3, duration: 3 };
 
 export const PARTICLE_DISSOLVE_DEFINITION: EffectToolDefinition<ParticleDissolveParams> = {
   effectId: "fx.particle.dissolve",
   toolName: "particle_dissolve",
   displayName: "粒子溶解",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "particle",
   parameterSchema: {
     ...CLOSED_SCHEMA,
     properties: {
-      progress: { type: "number", minimum: 0, maximum: 1, default: 0.5 },
+      progress: { type: "number", minimum: 0, maximum: 1, default: 1 },
       particleCount: { type: "integer", minimum: 100, maximum: 50000, default: 4000 },
       force: { type: "number", minimum: 0, maximum: 2000, default: 320 },
       direction: { type: "number", minimum: -180, maximum: 180, default: -35 },
       turbulence: { type: "number", minimum: 0, maximum: 1, default: 0.45 },
       lifetime: { type: "number", minimum: 0.05, maximum: 10, default: 1.4 },
-      particleSize: { type: "number", minimum: 0.5, maximum: 40, default: 3 }
+      particleSize: { type: "number", minimum: 0.5, maximum: 40, default: 3 },
+      duration: { type: "number", minimum: 0.2, maximum: 30, default: 3 }
     }
   },
   defaults,
@@ -61,7 +63,7 @@ export const PARTICLE_DISSOLVE_DEFINITION: EffectToolDefinition<ParticleDissolve
     const target = rgbaInput(context, "target_image", true)!;
     const targetPixels = opaquePixelIndices(target);
     const direction = params.direction * Math.PI / 180;
-    const revealDuration = 1.5;
+    const revealDuration = params.duration;
     const timeline = Math.min(1, Math.max(0, context.time / revealDuration));
     const effectiveProgress = params.progress * timeline;
     const sourceMask = new Uint8Array(target.width * target.height);
@@ -70,12 +72,13 @@ export const PARTICLE_DISSOLVE_DEFINITION: EffectToolDefinition<ParticleDissolve
     }
     const dissolvedPixels = targetPixels.filter((pixelIndex) => sourceMask[pixelIndex] === 0);
     const active: { index: number; age: number }[] = [];
+    const completed = context.time >= revealDuration && params.progress >= 1;
     for (let index = 0; index < params.particleCount; index += 1) {
       const threshold = seededUnit(context.seed, index * 4);
       if (threshold > effectiveProgress || params.progress <= Number.EPSILON) continue;
       const birthTime = threshold / params.progress * revealDuration;
       const age = Math.max(0, context.time - birthTime);
-      if (age <= params.lifetime) active.push({ index, age });
+      if (!completed && age <= params.lifetime) active.push({ index, age });
     }
     const buffer = createParticleBuffer(context, active.length, "disc", {
       sourceComposite: { slot: "target_image", opacity: 1, mask: sourceMask },

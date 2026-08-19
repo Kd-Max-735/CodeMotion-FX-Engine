@@ -972,7 +972,7 @@ function simulationFrame(
   if (state === undefined) return false;
 
   if (toolName === "particle_flow_field" || toolName === "particle_orbit_field") {
-    shadeFrame(output, source === undefined ? 0.3 : 0.48, toolName === "particle_orbit_field"
+    shadeFrame(output, source === undefined ? 0.3 : 0.9, toolName === "particle_orbit_field"
       ? [4, 5, 18] : [5, 12, 18]);
     const particles = stateRecords(state, "particles");
     if (toolName === "particle_orbit_field") {
@@ -1647,15 +1647,18 @@ function batch0708Frame(
   }
 
   if (toolName === "live_binding") {
+    const background = inputFrames?.source_image ?? source;
+    if (background === undefined || background.length !== output.length) return false;
+    output.set(background);
     const mapping = typeof value.mapping === "string" ? value.mapping : "normalized";
-    const raw = Number(value.value ?? 0);
-    const amount = Math.max(0, Math.min(1, Math.abs(raw)));
+    const amount = Math.max(0, Math.min(1, Number(value.progress ?? 0)));
+    const configuredColor = hexColor(value.color, [72, 226, 255, 255]);
     const activeColor = mapping === "threshold" ? [255, 82, 86, 255] as const
       : mapping === "pulse" ? [255, 190, 68, 255] as const
-        : [72, 226, 255, 255] as const;
-    clearFrame(output, [7 + amount * 5, 13 + amount * 8, 22 + amount * 12, 255]);
-    const centerX = request.width / 2; const centerY = request.height * 0.55;
-    const radius = Math.min(request.width, request.height) * 0.27;
+        : configuredColor;
+    const centerX = Number(value.positionX ?? 0.5) * request.width;
+    const centerY = Number(value.positionY ?? 0.55) * request.height;
+    const radius = Math.min(request.width, request.height) * Number(value.size ?? 0.42) * 0.5;
     drawDisc(output, request.width, request.height, centerX, centerY,
       radius * (0.38 + amount * 0.2), activeColor, 0.06 + amount * 0.12);
     if (mapping === "pulse" && amount > 0.01) {
@@ -1838,7 +1841,7 @@ function polishedStructuredFrame(
   }
   if (batch0708Frame(output, value, request, toolName, source, inputFrames)) return true;
   if (batch05Frame(output, value, request, toolName, source, inputFrames)) return true;
-  if (simulationFrame(output, value, request, toolName, source)) return true;
+  if (simulationFrame(output, value, request, toolName, inputFrames?.background_image ?? source)) return true;
   if (toolName === "shape_boolean_animate") {
     const grid = numericGrid(value, "alpha");
     if (grid === undefined) return false;
@@ -2823,7 +2826,8 @@ function batch05Frame(
 ): boolean {
   if (!["dolly", "dolly_zoom", "handheld", "object_match_cut", "orbit", "page_turn",
     "pan_tilt", "parallax_layers", "portal", "zoom_tunnel"].includes(toolName)) return false;
-  const sourceSlot = toolName === "object_match_cut" || toolName === "page_turn"
+  const sourceSlot = toolName === "parallax_layers" ? "source_image"
+    : toolName === "object_match_cut" || toolName === "page_turn"
     || toolName === "portal" || toolName === "zoom_tunnel" ? "from_video" : "source_video";
   const source = rgbaInputFrame(inputFrames, sourceSlot, fallbackSource, request);
   if (source === undefined) return false;

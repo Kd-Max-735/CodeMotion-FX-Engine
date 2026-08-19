@@ -7,6 +7,7 @@ import {
 } from "./common.js";
 
 export interface PaintOnParams extends JsonObject {
+  duration: number;
   coverage: number;
   strokeOrder: string;
   brushShape: string;
@@ -17,7 +18,7 @@ export interface PaintOnParams extends JsonObject {
 }
 
 const defaults: PaintOnParams = {
-  coverage: 1, strokeOrder: "forward", brushShape: "round", brushSize: 36,
+  duration: 4, coverage: 1, strokeOrder: "forward", brushShape: "round", brushSize: 36,
   hardness: 0.7, spacing: 0.25, feather: 4
 };
 
@@ -25,9 +26,10 @@ export const PAINT_ON_DEFINITION: EffectToolDefinition<PaintOnParams> = {
   effectId: "fx.draw.paintOn",
   toolName: "paint_on",
   displayName: "逐笔绘制显现",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "draw",
   parameterSchema: parameterSchema({
+    duration: numberField(4, 0.5, 30),
     coverage: numberField(1, 0, 1),
     strokeOrder: enumField("forward", ["forward", "reverse", "alternating"]),
     brushShape: enumField("round", ["round", "flat"]),
@@ -49,7 +51,7 @@ export const PAINT_ON_DEFINITION: EffectToolDefinition<PaintOnParams> = {
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: SERVER_CPU_FALLBACK,
   performanceGrade: "medium",
-  normalizeParams: (params) => ({ ...params, coverage: round(params.coverage), brushSize: round(params.brushSize, 2) }),
+  normalizeParams: (params) => ({ ...params, duration: round(params.duration), coverage: round(params.coverage), brushSize: round(params.brushSize, 2) }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
     const source = readImageDimensions(context, "source_image");
@@ -60,7 +62,7 @@ export const PAINT_ON_DEFINITION: EffectToolDefinition<PaintOnParams> = {
       strokes = strokes.map((stroke, index) => index % 2 === 0 ? stroke : { ...stroke, points: [...stroke.points].reverse() });
     }
     const lengths = strokes.map((stroke) => pathLength(stroke.points, stroke.closed));
-    const revealProgress = clamp(context.time / 1.6, 0, 1);
+    const revealProgress = clamp(context.time / params.duration, 0, 1);
     const effectiveCoverage = params.coverage * revealProgress;
     const targetLength = lengths.reduce((sum, length) => sum + length, 0) * effectiveCoverage;
     let consumed = 0;

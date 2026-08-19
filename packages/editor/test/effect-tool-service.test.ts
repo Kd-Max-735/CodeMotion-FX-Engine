@@ -877,18 +877,62 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(9);
 
+    const liveBinding = EFFECT_TOOL_REGISTRY.getByToolName("live_binding")!;
+    await expect(resolver.visionImage(principal, liveBinding, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(10);
+
+    const particleSpark = EFFECT_TOOL_REGISTRY.getByToolName("particle_spark")!;
+    await expect(resolver.visionImage(principal, particleSpark, {
+      background_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(11);
+
+    const particleTrail = EFFECT_TOOL_REGISTRY.getByToolName("particle_trail")!;
+    await expect(resolver.visionImage(principal, particleTrail, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(12);
+
     const objectMatchCut = EFFECT_TOOL_REGISTRY.getByToolName("object_match_cut")!;
     await expect(resolver.visionImage(principal, objectMatchCut, {
       from_video: media.asset.id,
       to_video: "asset_otherabcdefgh"
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
-    expect(resolveMedia).toHaveBeenCalledTimes(10);
+    expect(resolveMedia).toHaveBeenCalledTimes(13);
+
+    const videoMedia: VerifiedStoredMedia = {
+      ...media,
+      asset: {
+        ...media.asset,
+        id: "asset_video_positioning",
+        type: "video",
+        uri: "media://positioning.mp4",
+        metadata: { mime: "video/mp4", width: 2, height: 2, duration: 1, codec: "h264" }
+      }
+    };
+    const decodeFrame = vi.fn(async () => new Uint8Array([
+      255, 0, 0, 255, 0, 255, 0, 255,
+      0, 0, 255, 255, 255, 255, 255, 255
+    ]));
+    const videoResolver = new TenantMediaEffectToolInputResolver(
+      { resolve: vi.fn(async () => videoMedia) } as never,
+      undefined,
+      decodeFrame as never
+    );
+    const videoVision = await videoResolver.visionImage(principal, liveBinding, {
+      source_image: videoMedia.asset.id
+    });
+    expect(videoVision?.mimeType).toBe("image/png");
+    expect(videoVision?.base64Data.length).toBeGreaterThan(0);
+    expect(decodeFrame).toHaveBeenCalledOnce();
 
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(10);
+    expect(resolveMedia).toHaveBeenCalledTimes(13);
   });
 
   it.each(["marker_stroke", "chalk_stroke", "neon_glow"])(
@@ -1096,11 +1140,27 @@ describe("server single effect-tool service", () => {
     expect(resolveMedia).not.toHaveBeenCalled();
   });
 
-  it("feeds live_binding a changing server-owned preview stream without uploaded media", async () => {
-    const resolveMedia = vi.fn(async () => { throw new Error("live_binding preview must not resolve media."); });
-    const resolver = new TenantMediaEffectToolInputResolver({ resolve: resolveMedia } as never);
+  it("feeds live_binding a changing server-owned stream over an uploaded visual", async () => {
+    const media = {
+      asset: {
+        id: "asset_livebackgroundabcd", type: "image", uri: "media://live.png",
+        hash: "sha256:live", metadata: { mime: "image/png", width: 96, height: 64, codec: "png" }
+      },
+      descriptor: { id: "asset_livebackgroundabcd", type: "media/image", cacheKey: "live", metadata: {} },
+      storedPath: "D:\\authorized-media\\live.png",
+      arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: true, reason: "test" },
+      trustedBytes: 96 * 64 * 4
+    } satisfies VerifiedStoredMedia;
+    const resolveMedia = vi.fn(async () => media);
+    const resolver = new TenantMediaEffectToolInputResolver(
+      { resolve: resolveMedia } as never,
+      undefined,
+      vi.fn(async () => new Uint8Array(96 * 64 * 4).fill(120)) as never
+    );
     const definition = EFFECT_TOOL_REGISTRY.getByToolName("live_binding")!;
-    const resolveAt = (time: number) => resolver.resolve(principal, definition, {}, {
+    const resolveAt = (time: number) => resolver.resolve(principal, definition, {
+      source_image: media.asset.id
+    }, {
       time, fps: 30, width: 96, height: 64, seed: 20260819, quality: "preview"
     });
     const early = await resolveAt(0.4);
@@ -1111,7 +1171,7 @@ describe("server single effect-tool service", () => {
       return (input as { binding: { value: number } }).binding.value;
     };
     expect(valueOf(early)).not.toBe(valueOf(later));
-    expect(resolveMedia).not.toHaveBeenCalled();
+    expect(resolveMedia).toHaveBeenCalled();
   });
 
   it("derives structured image previews for the reported existing tools", async () => {
@@ -1309,7 +1369,7 @@ describe("server single effect-tool service", () => {
 
     const parallaxDefinition = EFFECT_TOOL_REGISTRY.getByToolName("parallax_layers")!;
     const parallaxInputs = await resolver.resolve(principal, parallaxDefinition, {
-      source_video: media.asset.id
+      source_image: media.asset.id
     }, { time: 0.45, fps: 30, width, height, seed: 20260817, quality: "preview" });
     const parallaxDepth = (parallaxInputs.depth_map as { binding: { data: Uint8Array } }).binding.data;
     expect(parallaxDepth).toHaveLength(width * height);
@@ -1567,11 +1627,20 @@ describe("server single effect-tool service", () => {
       });
       expect(catalog.tools.find((item) => item.toolName === "parallax_layers")).toMatchObject({
         inputRequirements: [
-          { name: "source_video", required: true, acceptsUploadedImage: true },
+          { name: "source_image", required: true, acceptsUploadedImage: true },
           { name: "depth_map", required: true, acceptsUploadedImage: false },
           { name: "camera_target", required: false, acceptsUploadedImage: false }
         ]
       });
+      for (const toolName of [
+        "live_binding", "particle_emitter", "particle_flow_field", "particle_orbit_field",
+        "particle_snow_rain", "particle_spark", "particle_trail"
+      ]) {
+        const material = catalog.tools.find((item) => item.toolName === toolName)!.inputRequirements[0];
+        expect(material).toMatchObject({
+          required: true, acceptsUploadedImage: true, acceptsUploadedVideo: true
+        });
+      }
       expect(catalog.tools.find((item) => item.toolName === "background_remove_compose")).toMatchObject({
         inputRequirements: [
           { name: "foreground_video", acceptsUploadedVideo: true },

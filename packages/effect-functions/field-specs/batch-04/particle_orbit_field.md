@@ -1,13 +1,13 @@
 # 粒子轨道场 `particle_orbit_field`
 
-用户已经选中本工具。你只负责根据用户描述决定参数值；工具会用固定时间步模拟高密度发光粒子围绕能量核心的径向恢复、切向追随和阻尼运动，并呈现多层景深和彗尾。
+用户已经选中本工具。你只负责根据用户描述决定参数值；工具会在用户上传的图片或视频素材上，用固定时间步模拟高密度发光粒子围绕能量核心的径向恢复、切向追随和阻尼运动，并呈现多层景深和彗尾。
 
 只输出一个合法 JSON 对象，不要输出 Markdown、解释、注释或额外字段。`type` 必须严格等于 `particle_orbit_field`，`data` 只能包含下表字段。服务端绑定的 `vector_field` 不是模型参数，不得输出资源 ID、路径、URL 或资源内容。
 
 合法示例：
 
 ```json
-{"type":"particle_orbit_field","data":{"particleCount":48,"orbitStrength":3.6,"tangentialSpeed":1.8,"radialDamping":1.1,"fieldScale":1.2,"spread":0.55,"direction":"counterclockwise"}}
+{"type":"particle_orbit_field","data":{"particleCount":120,"orbitStrength":2.4,"tangentialSpeed":1.2,"radialDamping":0.8,"fieldScale":1,"spread":0.65,"direction":"counterclockwise"}}
 ```
 
 | 字段 | 必填 | 取值 | 选择策略 |
@@ -37,4 +37,6 @@
 
 中性值与默认行为：省略字段时使用默认值，得到 120 个发光粒子、中等收束、逆时针、半径适中的稳定轨道。描述含糊时优先保留默认值。
 
-不适用范围：真实天体力学、三维轨道、粒子碰撞、重力坠落、多中心路径规划、资源选择。需要外部矢量场时由服务端绑定，不写入 `data`。
+服务器输入行为：`background_image` 是必需的授权素材帧，可来自图片或逐帧解码的视频，渲染时保留素材并在其上叠加轨道粒子；外部 `vector_field` 可由服务端另行绑定，二者都不写入 `data`。
+
+不适用范围：真实天体力学、三维轨道、粒子碰撞、重力坠落、多中心路径规划、资源选择。

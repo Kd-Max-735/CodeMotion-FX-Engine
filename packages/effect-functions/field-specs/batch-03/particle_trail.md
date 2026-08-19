@@ -9,7 +9,7 @@
 只输出以下结构的 JSON，不附加解释或代码块：
 
 ```json
-{"type":"particle_trail","data":{"emissionRate":180,"trailLength":1.2,"speed":220,"width":10,"fade":0.72,"waviness":0.18,"lifetime":1.6,"startX":0.5,"startY":0.5,"trajectory":"orbit","direction":-20,"hue":195,"saturation":0.78}}
+{"type":"particle_trail","data":{"emissionRate":180,"trailLength":1.2,"speed":220,"width":3,"fade":0.72,"waviness":0.18,"lifetime":1.6,"startX":0.5,"startY":0.5,"trajectory":"linear","direction":-20,"hue":195,"saturation":0.78,"emissionDuration":3,"intensity":1}}
 ```
 
 ## 完整参数表
@@ -19,16 +19,18 @@
 | `emissionRate` | 数字 `1..5000` | `180` | 每秒补充的轨迹粒子数。 |
 | `trailLength` | 数字 `0.05..10` | `1.2` | 保留运动历史的秒数。 |
 | `speed` | 数字 `0..2000` | `220` | 粒子沿轨迹离开主体的速度。 |
-| `width` | 数字 `0.5..200` | `10` | 拖尾宽度（像素）。 |
+| `width` | 数字 `0.5..30` | `3` | 单粒子尺寸（像素）。 |
 | `fade` | 数字 `0..1` | `0.72` | 随年龄衰减强度。 |
 | `waviness` | 数字 `0..1` | `0.18` | 横向波动量。 |
 | `lifetime` | 数字 `0.05..20` | `1.6` | 单粒子最长寿命（秒）。 |
 | `startX` | 数字 `0..1` | `0.5` | 轨迹起点横向位置，`0/1` 对应左/右。 |
 | `startY` | 数字 `0..1` | `0.5` | 轨迹起点纵向位置，`0/1` 对应上/下。 |
-| `trajectory` | `linear/wave/orbit` | `orbit` | 直线、波浪或环绕轨迹。 |
+| `trajectory` | `linear/wave/orbit` | `linear` | 直线、波浪或环绕轨迹。 |
 | `direction` | 数字 `-180..180` | `-20` | 直线/波浪前进方向或环绕初始角度。 |
 | `hue` | 数字 `0..360` | `195` | 粒子色相角。 |
 | `saturation` | 数字 `0..1` | `0.78` | 粒子颜色饱和度；`0` 为白色。 |
+| `emissionDuration` | 数字 `0.1..30` | `3` | 重复生成拖尾粒子的持续时间（秒）。 |
+| `intensity` | 数字 `0.1..3` | `1` | 拖尾剧烈程度，影响密度和粒子尺寸。 |
 
 ## 表达映射与选择顺序
 
@@ -39,16 +41,17 @@
 - `emissionRate` 与 `width` 都让拖尾更厚：密度请求改前者，粗细请求改后者。
 - 位置先用 `startX/startY`，轨迹形态用 `trajectory`，运动朝向用 `direction`；三者不可互相代替。
 - 颜色名称映射到 `hue`，柔和或接近白色时降低 `saturation`。
+- “持续拖尾几秒”设置 `emissionDuration`，期间持续补充粒子，而不是拉长一轮动画；“更剧烈”提高 `intensity`。
 
 ## 自然语言示例
 
 | 用户表达 | `data` |
 | --- | --- |
-| 左下向右的紫色波浪丝带 | `{"emissionRate":300,"trailLength":2.8,"speed":120,"width":18,"fade":0.45,"waviness":0.4,"lifetime":3.2,"startX":0.15,"startY":0.75,"trajectory":"wave","direction":-15,"hue":285,"saturation":0.55}` |
-| 常规蓝色环绕拖尾 | `{"emissionRate":180,"trailLength":1.2,"speed":220,"width":10,"fade":0.72,"waviness":0.18,"lifetime":1.6,"startX":0.5,"startY":0.5,"trajectory":"orbit","direction":-20,"hue":195,"saturation":0.78}` |
-| 从左侧水平向右的红色拖尾 | `{"emissionRate":480,"trailLength":2,"speed":180,"width":10,"fade":0.5,"waviness":0.05,"lifetime":2.5,"startX":0.08,"startY":0.5,"trajectory":"linear","direction":0,"hue":0,"saturation":0.9}` |
-| 短促青色电光 | `{"emissionRate":520,"trailLength":0.55,"speed":620,"width":4,"fade":0.9,"waviness":0.7,"lifetime":0.65,"startX":0.5,"startY":0.5,"trajectory":"linear","direction":-35,"hue":190,"saturation":1}` |
-| 右上白色环形余辉 | `{"emissionRate":240,"trailLength":2,"speed":100,"width":35,"fade":0.35,"waviness":0.2,"lifetime":2.4,"startX":0.75,"startY":0.25,"trajectory":"orbit","direction":90,"hue":210,"saturation":0}` |
+| 左下向右的紫色波浪拖尾 | `{"emissionRate":300,"trailLength":2.8,"speed":120,"width":3,"fade":0.45,"waviness":0.4,"lifetime":3.2,"startX":0.15,"startY":0.75,"trajectory":"wave","direction":-15,"hue":285,"saturation":0.55,"emissionDuration":5,"intensity":1}` |
+| 常规蓝色直线拖尾 | `{"emissionRate":180,"trailLength":1.2,"speed":220,"width":3,"fade":0.72,"waviness":0.18,"lifetime":1.6,"startX":0.5,"startY":0.5,"trajectory":"linear","direction":-20,"hue":195,"saturation":0.78,"emissionDuration":3,"intensity":1}` |
+| 从左侧水平向右的红色拖尾 | `{"emissionRate":480,"trailLength":2,"speed":180,"width":2,"fade":0.5,"waviness":0.05,"lifetime":2.5,"startX":0.08,"startY":0.5,"trajectory":"linear","direction":0,"hue":0,"saturation":0.9,"emissionDuration":6,"intensity":1.2}` |
+| 短促青色电光 | `{"emissionRate":520,"trailLength":0.55,"speed":620,"width":2,"fade":0.9,"waviness":0.7,"lifetime":0.65,"startX":0.5,"startY":0.5,"trajectory":"linear","direction":-35,"hue":190,"saturation":1,"emissionDuration":1,"intensity":1.5}` |
+| 右上白色环形余辉 | `{"emissionRate":240,"trailLength":2,"speed":100,"width":4,"fade":0.35,"waviness":0.2,"lifetime":2.4,"startX":0.75,"startY":0.25,"trajectory":"orbit","direction":90,"hue":210,"saturation":0,"emissionDuration":4,"intensity":0.8}` |
 
 ## 推荐值、默认值和中性值
 
@@ -56,7 +59,7 @@
 
 ## 服务器输入行为
 
-`source_image` 是可选的服务器授权 RGBA 图像；省略时只输出确定性程序化拖尾粒子，绑定时由公共粒子合成器在轨迹头部合成主体。无效绑定必须拒绝。
+`source_image` 是必需的服务器授权素材帧，可来自图片或逐帧解码的视频；拖尾始终合成在该素材上。Ark 仅在用户要求特定物体或部位时分析素材并产生 `startX/startY`，无效绑定必须拒绝。
 
 ## 不适用范围
 

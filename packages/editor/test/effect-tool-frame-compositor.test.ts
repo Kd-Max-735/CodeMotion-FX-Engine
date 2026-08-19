@@ -473,7 +473,7 @@ describe("effect tool frame compositor", () => {
     const output = composeEffectToolFrame(metadata({
       operation: "depth_map_parallax_layers", position: { x: 5, y: -2, z: 7 },
       rotationDegrees: { x: 0, y: 0, z: 0 }, progress: 0.8
-    }), detailedRequest, "parallax_layers", source, { source_video: source, depth_map: depth });
+    }), detailedRequest, "parallax_layers", source, { source_image: source, depth_map: depth });
     expect(changedPixelCount(source, output)).toBeGreaterThan(500);
   });
 

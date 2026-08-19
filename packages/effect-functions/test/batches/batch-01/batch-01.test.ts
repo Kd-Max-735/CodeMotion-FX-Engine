@@ -234,7 +234,7 @@ describe("batch-01 effect definitions", () => {
       .toEqual([0, 0.5, 1]);
   });
 
-  it("positions and colors marker strokes from closed model parameters over one source image", async () => {
+  it("fills the server-segmented subject with colored marker rows", async () => {
     const marker = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === "marker_stroke")!;
     expect(marker.inputSlots.map((slot) => [slot.name, slot.kind])).toEqual([
       ["source_image", "image"],
@@ -252,8 +252,10 @@ describe("batch-01 effect definitions", () => {
       dabs: readonly { center: { x: number; y: number } }[];
     };
     expect(output.color).toBe("#22aa66");
-    expect(output.dabs[0]!.center.x).toBeGreaterThan(90);
-    expect(output.dabs.at(-1)!.center.x).toBeGreaterThan(output.dabs[0]!.center.x);
+    expect(output.dabs.length).toBeGreaterThan(4);
+    expect(new Set(output.dabs.map((dab) => Math.round(dab.center.y))).size).toBeGreaterThan(1);
+    expect(output.dabs.every((dab) => dab.center.x >= 0 && dab.center.x < 160
+      && dab.center.y >= 0 && dab.center.y < 96)).toBe(true);
   });
 
   it("builds the directed neon path from vision coordinates over one source image", async () => {
@@ -277,7 +279,7 @@ describe("batch-01 effect definitions", () => {
   it.each([
     ["shape_boolean_animate", "progress", 1.4],
     ["neon_trace", "revealProgress", 1.4],
-    ["paint_on", "revealProgress", 1.6]
+    ["paint_on", "revealProgress", 4]
   ] as const)("animates %s toward its requested target over server render time", async (
     toolName,
     progressKey,

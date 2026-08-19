@@ -133,6 +133,9 @@ function validInputs(definition: EffectToolDefinition): AuthorizedEffectInputs {
       };
     case "live_binding":
       return {
+        source_image: authorized("source_image", "image", {
+          version: "rgba8-frame-v1", width: 1920, height: 1080, data: new Uint8Array(1920 * 1080 * 4)
+        }),
         validated_binding: authorized("validated_binding", "data", {
           version: "validated-live-binding-v1",
           value: 75,
@@ -346,6 +349,9 @@ describe("batch-08 definitions", () => {
 
   it("limits live binding to validated snapshots and allow-listed target properties", async () => {
     const validInput = {
+      source_image: authorized("source_image", "image", {
+        version: "rgba8-frame-v1", width: 1920, height: 1080, data: new Uint8Array(1920 * 1080 * 4)
+      }),
       validated_binding: authorized("validated_binding", "data", {
         version: "validated-live-binding-v1",
         value: 75,
@@ -365,6 +371,7 @@ describe("batch-08 definitions", () => {
     });
 
     const changed = await run(LIVE_BINDING_DEFINITION, {
+      source_image: validInput.source_image,
       validated_binding: authorized("validated_binding", "data", {
         version: "validated-live-binding-v1",
         value: 20,
@@ -374,10 +381,11 @@ describe("batch-08 definitions", () => {
         targetHandle: "layer-safe-3",
         targetProperty: "opacity"
       })
-    });
+    }, 5);
     expect(changed.output).not.toEqual(result.output);
 
     await expect(run(LIVE_BINDING_DEFINITION, {
+      source_image: validInput.source_image,
       validated_binding: authorized("validated_binding", "data", {
         version: "validated-live-binding-v1",
         value: 1,
