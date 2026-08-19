@@ -221,6 +221,25 @@ describe("batch-01 effect definitions", () => {
       .toEqual([0, 0.5, 1]);
   });
 
+  it("positions and colors marker strokes from closed model parameters over one source image", async () => {
+    const marker = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === "marker_stroke")!;
+    expect(marker.inputSlots.map((slot) => [slot.name, slot.kind])).toEqual([["source_image", "image"]]);
+    const result = await executeSelectedEffectTool(
+      marker,
+      marker.toolName,
+      { type: marker.toolName, data: { ...marker.defaults,
+        startX: 0.62, startY: 0.28, endX: 0.9, endY: 0.34, curve: 0.2, color: "#22AA66" } },
+      contextFor(marker, 173, 1.4)
+    );
+    const output = result.output as {
+      color: string;
+      dabs: readonly { center: { x: number; y: number } }[];
+    };
+    expect(output.color).toBe("#22aa66");
+    expect(output.dabs[0]!.center.x).toBeGreaterThan(90);
+    expect(output.dabs.at(-1)!.center.x).toBeGreaterThan(output.dabs[0]!.center.x);
+  });
+
   it.each([
     ["shape_boolean_animate", "progress", 1.4],
     ["neon_trace", "revealProgress", 1.4],

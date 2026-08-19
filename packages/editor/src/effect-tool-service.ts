@@ -79,7 +79,8 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   dash_flow: "source_image",
   ken_burns: "source_image",
   kinetic_typography: "source_image",
-  lens_flare: "source_frame"
+  lens_flare: "source_frame",
+  marker_stroke: "source_image"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
@@ -1056,9 +1057,6 @@ function previewDataBinding(
     return { points: pixelContour(pixels, render), closed: true };
   }
   if (definition.toolName === "lightning_trace" && slot.name === "guide_path") {
-    return { points: derivedFeaturePath(pixels, render), closed: false };
-  }
-  if (definition.toolName === "marker_stroke" && slot.name === "stroke_path") {
     return { points: derivedFeaturePath(pixels, render), closed: false };
   }
   if (definition.toolName === "shape_boolean_animate" && slot.name === "shape_a") {

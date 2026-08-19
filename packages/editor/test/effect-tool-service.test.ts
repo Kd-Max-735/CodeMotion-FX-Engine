@@ -847,11 +847,17 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(4);
 
+    const markerStroke = EFFECT_TOOL_REGISTRY.getByToolName("marker_stroke")!;
+    await expect(resolver.visionImage(principal, markerStroke, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(5);
+
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(4);
+    expect(resolveMedia).toHaveBeenCalledTimes(5);
   });
 
   it("derives even output dimensions from the first authorized visual while preserving aspect ratio", async () => {
@@ -1100,7 +1106,6 @@ describe("server single effect-tool service", () => {
       ["dash_flow", "source_path", 32, true],
       ["electric_arc", "terminals", 4, false],
       ["lightning_trace", "guide_path", 11, false],
-      ["marker_stroke", "stroke_path", 11, false],
       ["shape_boolean_animate", "shape_a", 32, true],
       ["shape_boolean_animate", "shape_b", 32, true],
       ["wave_path", "source_path", 11, false],

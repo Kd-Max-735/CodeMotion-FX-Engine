@@ -450,7 +450,8 @@ function drawMarkerDab(
   request: FrameRequest,
   dab: Record<string, unknown>,
   bleed: number,
-  roughness: number
+  roughness: number,
+  color: readonly number[]
 ): void {
   const center = finitePoint(dab.center);
   const width = typeof dab.width === "number" ? Math.max(1, Math.min(400, dab.width)) : 1;
@@ -458,7 +459,7 @@ function drawMarkerDab(
   const opacity = typeof dab.opacity === "number" ? Math.max(0, Math.min(1, dab.opacity)) : 0.8;
   const angle = typeof dab.angle === "number" && Number.isFinite(dab.angle) ? dab.angle : 0;
   if (center === undefined || opacity <= 0) return;
-  const pixel = pointToPixel(center, request.width, request.height);
+  const pixel = [center.x, center.y] as const;
   const cosine = Math.cos(angle);
   const sine = Math.sin(angle);
   const halfAlong = height * 0.5;
@@ -479,8 +480,8 @@ function drawMarkerDab(
       const body = edge <= 1 ? 1 - Math.max(0, edge - 0.78) / 0.22 : 0;
       const feather = edge > 1 ? (bleedEdge - edge) / Math.max(0.001, bleedEdge - 1) : 0;
       const paperGrain = 0.84 + 0.16 * (0.5 + 0.5 * Math.sin(x * 0.73 + y * 1.13));
-      const alpha = opacity * paperGrain * (body * 0.24 + feather * 0.075);
-      blendPixel(output, request.width, request.height, x, y, [255, 78, 118, 255], alpha);
+      const alpha = opacity * paperGrain * (body * 0.46 + feather * 0.12);
+      blendPixel(output, request.width, request.height, x, y, color, alpha);
     }
   }
 }
@@ -2040,6 +2041,8 @@ function polishedStructuredFrame(
   }
 
   if (toolName === "marker_stroke") {
+    const background = inputFrames?.source_image ?? source;
+    if (background !== undefined && background.length === output.length) output.set(background);
     const dabs = Array.isArray(value.dabs) ? value.dabs : [];
     const reveal = typeof value.revealProgress === "number"
       ? Math.max(0, Math.min(1, value.revealProgress)) : 1;
@@ -2047,17 +2050,18 @@ function polishedStructuredFrame(
     const bleed = typeof value.bleed === "number" ? Math.max(0, Math.min(1, value.bleed)) : 0.12;
     const roughness = typeof value.edgeRoughness === "number"
       ? Math.max(0, Math.min(0.5, value.edgeRoughness)) : 0.08;
+    const color = hexColor(value.color, [255, 78, 118, 255]);
     for (let index = 0; index < visibleCount; index += 1) {
       const dab = record(dabs[index]);
-      if (dab !== undefined) drawMarkerDab(output, request, dab, bleed, roughness);
+      if (dab !== undefined) drawMarkerDab(output, request, dab, bleed, roughness, color);
     }
     const tip = record(dabs[Math.max(0, visibleCount - 1)]);
     const tipCenter = finitePoint(tip?.center);
     const tipOpacity = typeof tip?.opacity === "number" ? tip.opacity : 0;
     if (visibleCount > 0 && tipCenter !== undefined && tipOpacity > 0) {
-      const pixel = pointToPixel(tipCenter, request.width, request.height);
+      const pixel = [tipCenter.x, tipCenter.y] as const;
       drawDisc(output, request.width, request.height, pixel[0], pixel[1], 4,
-        [255, 188, 92, 255], 0.28);
+        color, 0.34);
     }
     return true;
   }

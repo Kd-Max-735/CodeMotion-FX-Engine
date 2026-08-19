@@ -209,11 +209,23 @@ describe("effect tool frame compositor", () => {
     ["electric_arc", { arcs: [{ points: [{ x: 8, y: 8 }, { x: 88, y: 56 }] }], intensity: 0, glowRadius: 20 }],
     ["marker_stroke", {
       dabs: [{ center: { x: 48, y: 32 }, width: 40, height: 30, opacity: 0, angle: 0 }],
-      bleed: 0.3, edgeRoughness: 0.2, revealProgress: 1
+      bleed: 0.3, edgeRoughness: 0.2, color: "#ff4e76", revealProgress: 1
     }]
   ] as const)("keeps %s visually neutral when its opacity control is zero", (toolName, value) => {
     const source = solidSource();
     expect(composeEffectToolFrame(metadata(value), detailedRequest, toolName, source)).toEqual(source);
+  });
+
+  it("draws marker color over the uploaded source image", () => {
+    const source = gradientSource();
+    const green = composeEffectToolFrame(metadata({
+      dabs: [{ center: { x: 48, y: 32 }, width: 38, height: 24, opacity: 0.9, angle: 0 }],
+      bleed: 0.12, edgeRoughness: 0.08, color: "#22cc66", revealProgress: 1
+    }), detailedRequest, "marker_stroke", undefined, { source_image: source });
+    expect(green).not.toEqual(source);
+    const center = (32 * detailedRequest.width + 48) * 4;
+    expect(green[center + 1]).toBeGreaterThan(source[center + 1]!);
+    expect([...green.slice(0, 4)]).toEqual([...source.slice(0, 4)]);
   });
 
   it("composites particle masks, source overlays, glow discs, and velocity streaks", () => {

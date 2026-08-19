@@ -2,7 +2,7 @@ import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
 import {
   SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, clamp, effectResult, numberField,
-  parameterSchema, randomAt, readPath, resamplePath, round, roundPoint
+  parameterSchema, randomAt, resamplePath, round, roundPoint
 } from "./common.js";
 
 export interface MarkerStrokeParams extends JsonObject {
@@ -12,17 +12,24 @@ export interface MarkerStrokeParams extends JsonObject {
   bleed: number;
   edgeRoughness: number;
   spacing: number;
+  color: string;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  curve: number;
 }
 
 const defaults: MarkerStrokeParams = {
-  width: 28, opacity: 0.82, overlap: 0.35, bleed: 0.12, edgeRoughness: 0.08, spacing: 0.3
+  width: 28, opacity: 0.82, overlap: 0.35, bleed: 0.12, edgeRoughness: 0.08, spacing: 0.3,
+  color: "#ff4e76", startX: 0.2, startY: 0.55, endX: 0.8, endY: 0.55, curve: 0
 };
 
 export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> = {
   effectId: "fx.draw.markerStroke",
   toolName: "marker_stroke",
   displayName: "马克笔涂抹",
-  version: "1.0.0",
+  version: "2.0.0",
   category: "draw",
   parameterSchema: parameterSchema({
     width: numberField(28, 1, 400),
@@ -30,7 +37,13 @@ export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> 
     overlap: numberField(0.35, 0, 1),
     bleed: numberField(0.12, 0, 1),
     edgeRoughness: numberField(0.08, 0, 0.5),
-    spacing: numberField(0.3, 0.05, 1)
+    spacing: numberField(0.3, 0.05, 1),
+    color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$", default: "#ff4e76" },
+    startX: numberField(0.2, 0, 1),
+    startY: numberField(0.55, 0, 1),
+    endX: numberField(0.8, 0, 1),
+    endY: numberField(0.55, 0, 1),
+    curve: numberField(0, -1, 1)
   }),
   defaults,
   presets: [
@@ -38,14 +51,58 @@ export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> 
     { presetId: "marker_stroke.paper", displayName: "纸面马克笔", params: { ...defaults } },
     { presetId: "marker_stroke.wet", displayName: "湿润叠色", params: { ...defaults, width: 42, overlap: 0.65, bleed: 0.28, edgeRoughness: 0.16 } }
   ],
-  inputSlots: [{ name: "stroke_path", kind: "data", required: true, cardinality: "one", description: "Server-bound marker centerline." }],
+  inputSlots: [{
+    name: "source_image",
+    kind: "image",
+    required: true,
+    cardinality: "one",
+    description: "Owner-authorized image receiving the semantically positioned marker stroke."
+  }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: SERVER_CPU_FALLBACK,
   performanceGrade: "medium",
-  normalizeParams: (params) => ({ ...params, width: round(params.width, 2), opacity: round(params.opacity) }),
-  validateParams: () => VALID_PARAMS,
+  normalizeParams: (params) => ({
+    ...params,
+    width: round(params.width, 2),
+    opacity: round(params.opacity),
+    color: params.color.toLowerCase(),
+    startX: round(params.startX),
+    startY: round(params.startY),
+    endX: round(params.endX),
+    endY: round(params.endY),
+    curve: round(params.curve)
+  }),
+  validateParams: (params) => Math.hypot(params.endX - params.startX, params.endY - params.startY) < 0.01
+    ? { valid: false, issues: [{ path: "$.data", message: "Marker endpoints must be distinct." }] }
+    : VALID_PARAMS,
   render: (context, params) => {
-    const path = readPath(context, "stroke_path");
+    const start = {
+      x: params.startX * (context.width - 1),
+      y: params.startY * (context.height - 1)
+    };
+    const end = {
+      x: params.endX * (context.width - 1),
+      y: params.endY * (context.height - 1)
+    };
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const length = Math.hypot(dx, dy);
+    const bend = params.curve * Math.min(context.width, context.height) * 0.38;
+    const control = {
+      x: (start.x + end.x) / 2 - dy / length * bend,
+      y: (start.y + end.y) / 2 + dx / length * bend
+    };
+    const path = {
+      closed: false,
+      points: Array.from({ length: 33 }, (_, index) => {
+        const t = index / 32;
+        const inverse = 1 - t;
+        return {
+          x: inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * end.x,
+          y: inverse * inverse * start.y + 2 * inverse * t * control.y + t * t * end.y
+        };
+      })
+    };
     const spacing = Math.max(0.5, params.width * params.spacing * (1 - params.overlap * 0.5));
     const samples = resamplePath(path, spacing);
     const dabs = samples.map((point, index) => {
@@ -71,6 +128,7 @@ export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> 
       bleed: round(params.bleed),
       edgeRoughness: round(params.edgeRoughness),
       overlap: round(params.overlap),
+      color: params.color,
       revealProgress: round(clamp(context.time / 1.4, 0, 1))
     });
   }
