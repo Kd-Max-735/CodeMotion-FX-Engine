@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type {
-  AuthorizedEffectInput,
   AuthorizedEffectInputs,
   EffectToolDefinition,
   ServerEffectRenderContext
@@ -28,6 +27,14 @@ const shapeB = {
   closed: true
 };
 
+const sourceImagePixels = Uint8Array.from({ length: 160 * 120 * 4 }, (_, index) => {
+  const pixel = Math.floor(index / 4);
+  const channel = index % 4;
+  if (channel === 3) return 255;
+  const x = pixel % 160; const y = Math.floor(pixel / 160);
+  return x >= 32 && x <= 126 && y >= 28 && y <= 94 ? 32 : 245;
+});
+
 function slotBinding(name: string): unknown {
   if (name === "shape_a") return shapeA;
   if (name === "shape_b" || name === "source_shape") return shapeB;
@@ -46,7 +53,7 @@ function slotBinding(name: string): unknown {
       ]
     };
   }
-  if (name === "source_image") return { width: 160, height: 120, decoded: true };
+  if (name === "source_image") return { width: 160, height: 120, data: sourceImagePixels, decoded: true };
   if (name === "terminals") {
     return { points: [{ x: 15, y: 18 }, { x: 80, y: 96 }, { x: 148, y: 24 }], closed: false };
   }
@@ -281,20 +288,21 @@ describe("batch-01 effect definitions", () => {
     )).rejects.toMatchObject({ code: "INPUT_AUTHORIZATION_INVALID" });
   });
 
-  it("rejects degenerate server path geometry instead of producing non-finite dash output", async () => {
+  it("rejects identical dash anchors and resolves subject bounds from source pixels", async () => {
     const definition = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === "dash_flow")!;
-    const context = contextFor(definition);
-    const source = context.inputs.source_path as AuthorizedEffectInput;
-    const inputs = {
-      ...context.inputs,
-      source_path: { ...source, binding: { points: [{ x: 4, y: 4 }, { x: 4, y: 4 }] } }
-    } as AuthorizedEffectInputs;
-    await expect(executeSelectedEffectTool(
+    expect(() => validateAndNormalizeEffectEnvelope(
       definition,
       definition.toolName,
-      { type: definition.toolName, data: {} },
-      { ...context, inputs }
-    )).rejects.toThrow("zero-length path");
+      { type: definition.toolName, data: { startAnchor: "brightest", endAnchor: "brightest" } }
+    )).toThrow(expect.objectContaining({ code: "PARAMETER_INVALID" }));
+    const result = await executeSelectedEffectTool(
+      definition,
+      definition.toolName,
+      { type: definition.toolName, data: { startAnchor: "subject_left", endAnchor: "subject_right" } },
+      contextFor(definition)
+    );
+    assertFiniteJson(result.output);
+    expect((result.output as { segments: readonly unknown[] }).segments.length).toBeGreaterThan(0);
   });
 
   it.each(BATCH_01_DEFINITIONS)("keeps the $toolName Markdown JSON example Schema-valid", (definition) => {

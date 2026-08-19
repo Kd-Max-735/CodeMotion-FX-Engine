@@ -2,7 +2,8 @@ import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
 import {
   SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, effectResult, enumField,
-  numberField, parameterSchema, pathLength, round, slicePath
+  numberField, parameterSchema, pathLength, round, slicePath, visualAnchors,
+  type VisualAnchorName
 } from "./common.js";
 
 export interface DashFlowParams extends JsonObject {
@@ -19,18 +20,21 @@ export interface DashFlowParams extends JsonObject {
   curve: number;
   color: string;
   thickness: number;
+  startAnchor: VisualAnchorName;
+  endAnchor: VisualAnchorName;
 }
 
 const defaults: DashFlowParams = {
   dashLength: 32, gapLength: 18, speed: 80, direction: "forward", offset: 0, lineCap: "round",
-  startX: 0.15, startY: 0.5, endX: 0.85, endY: 0.5, curve: 0, color: "#20dcff", thickness: 3
+  startX: 0.15, startY: 0.5, endX: 0.85, endY: 0.5, curve: 0, color: "#20dcff", thickness: 3,
+  startAnchor: "coordinates", endAnchor: "coordinates"
 };
 
 export const DASH_FLOW_DEFINITION: EffectToolDefinition<DashFlowParams> = {
   effectId: "fx.vector.dashFlow",
   toolName: "dash_flow",
   displayName: "虚线沿路径流动",
-  version: "1.1.0",
+  version: "1.2.0",
   category: "vector",
   parameterSchema: parameterSchema({
     dashLength: numberField(32, 1, 500),
@@ -45,7 +49,9 @@ export const DASH_FLOW_DEFINITION: EffectToolDefinition<DashFlowParams> = {
     endY: numberField(0.5, 0, 1),
     curve: numberField(0, -1, 1),
     color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$", default: "#20dcff" },
-    thickness: numberField(3, 0.5, 30)
+    thickness: numberField(3, 0.5, 30),
+    startAnchor: enumField("coordinates", ["coordinates", "subject_left", "subject_right", "subject_top", "subject_bottom", "subject_center", "brightest"]),
+    endAnchor: enumField("coordinates", ["coordinates", "subject_left", "subject_right", "subject_top", "subject_bottom", "subject_center", "brightest"])
   }),
   defaults,
   presets: [
@@ -67,17 +73,31 @@ export const DASH_FLOW_DEFINITION: EffectToolDefinition<DashFlowParams> = {
     endY: round(params.endY),
     curve: round(params.curve),
     color: params.color.toLowerCase(),
-    thickness: round(params.thickness, 2)
+    thickness: round(params.thickness, 2),
+    startAnchor: params.startAnchor,
+    endAnchor: params.endAnchor
   }),
-  validateParams: (params) => Math.hypot(params.endX - params.startX, params.endY - params.startY) >= 0.02
-    ? VALID_PARAMS
-    : { valid: false, issues: [{ path: "$.data", message: "Dash path endpoints must be distinct." }] },
+  validateParams: (params) => {
+    const invalidCoordinates = params.startAnchor === "coordinates" && params.endAnchor === "coordinates"
+      && Math.hypot(params.endX - params.startX, params.endY - params.startY) < 0.02;
+    const identicalDerivedAnchor = params.startAnchor !== "coordinates" && params.startAnchor === params.endAnchor;
+    return invalidCoordinates || identicalDerivedAnchor
+      ? { valid: false, issues: [{ path: "$.data", message: "Dash path endpoints must be distinct." }] }
+      : VALID_PARAMS;
+  },
   render: (context, params) => {
-    const start = { x: params.startX * (context.width - 1), y: params.startY * (context.height - 1) };
-    const end = { x: params.endX * (context.width - 1), y: params.endY * (context.height - 1) };
+    const anchors = params.startAnchor === "coordinates" && params.endAnchor === "coordinates"
+      ? undefined : visualAnchors(context, "source_image");
+    const normalizedStart = params.startAnchor === "coordinates"
+      ? { x: params.startX, y: params.startY } : anchors![params.startAnchor];
+    const normalizedEnd = params.endAnchor === "coordinates"
+      ? { x: params.endX, y: params.endY } : anchors![params.endAnchor];
+    const start = { x: normalizedStart.x * (context.width - 1), y: normalizedStart.y * (context.height - 1) };
+    const end = { x: normalizedEnd.x * (context.width - 1), y: normalizedEnd.y * (context.height - 1) };
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const length = Math.hypot(dx, dy);
+    if (length < 1e-6) throw new RangeError("Resolved dash path has zero length.");
     const bend = params.curve * Math.min(context.width, context.height) * 0.45;
     const control = {
       x: (start.x + end.x) / 2 - dy / length * bend,

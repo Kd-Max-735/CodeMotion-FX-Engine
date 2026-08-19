@@ -1,9 +1,9 @@
 # 虚线沿路径流动 `dash_flow`
 
-在用户上传图片上，根据自然语言给出的画面起点、终点和弯曲程度生成路径，再将其分割为可移动的弧长虚线段。需要调用时只输出 JSON，不要附加解释、Markdown 或代码块：
+在用户上传图片上，根据自然语言给出的坐标或服务端派生的主体锚点生成路径，再将其分割为可移动的弧长虚线段。需要调用时只输出 JSON，不要附加解释、Markdown 或代码块：
 
 ```json
-{"type":"dash_flow","data":{"dashLength":32,"gapLength":18,"speed":80,"direction":"forward","offset":0,"lineCap":"round","startX":0.15,"startY":0.5,"endX":0.85,"endY":0.5,"curve":0,"color":"#20dcff","thickness":3}}
+{"type":"dash_flow","data":{"dashLength":32,"gapLength":18,"speed":80,"direction":"forward","offset":0,"lineCap":"round","startX":0.15,"startY":0.5,"endX":0.85,"endY":0.5,"curve":0,"color":"#20dcff","thickness":3,"startAnchor":"coordinates","endAnchor":"coordinates"}}
 ```
 
 | `data` 字段 | 必填 | 取值 | 选择策略 |
@@ -21,10 +21,12 @@
 | `curve` | 否 | `-1..1`，默认 `0` | 0 为直线，正负值向连线两侧弯曲 |
 | `color` | 否 | `#RRGGBB`，默认 `#20dcff` | 虚线颜色 |
 | `thickness` | 否 | `0.5..30` px，默认 `3` | 虚线线宽 |
+| `startAnchor` | 否 | `coordinates/subject_left/subject_right/subject_top/subject_bottom/subject_center/brightest`，默认 `coordinates` | 起点定位模式；非坐标模式由服务器分析授权图片 |
+| `endAnchor` | 否 | 同 `startAnchor`，默认 `coordinates` | 终点定位模式；非坐标模式由服务器分析授权图片 |
 
 ## 参数选择规则
 
-1. 先把用户给出的画面方位转换成左上角原点的归一化坐标；例如“左上到右下”可用 `(0.15,0.2)` 到 `(0.85,0.8)`。
+1. 用户给出百分比或画面方位时使用 `coordinates` 并转换成左上角原点的归一化坐标；例如“左上到右下”可用 `(0.15,0.2)` 到 `(0.85,0.8)`。描述主体左右、上下两端或中心时使用对应 `subject_*`；描述太阳、灯光等最亮目标时可用 `brightest`。
 2. 再确定 `curve`、`color` 和 `thickness`，然后确定虚线比例：短划线用小 `dashLength`，稀疏节奏用大 `gapLength`。
 3. 运动方向只由 `direction` 表达，不输出负 `speed`。
 4. 用户没有明确对齐要求时保持 `offset=0`；端帽风格最后决定。起点和终点必须至少相距画布比例 `0.02`。
@@ -39,6 +41,8 @@
 | 起点向后错开十像素 | `offset=-10` |
 | 红色粗虚线从左上弯向右下 | `startX=0.15, startY=0.2, endX=0.85, endY=0.8, curve=0.3, color="#ff3344", thickness=6` |
 | 蓝色细虚线从画面中央流向右侧 | `startX=0.5, startY=0.5, endX=0.9, endY=0.5, curve=0, color="#238cff", thickness=2` |
+| 从主体左端流向主体右端 | `startAnchor="subject_left", endAnchor="subject_right"` |
+| 从最亮处流向主体底部 | `startAnchor="brightest", endAnchor="subject_bottom"` |
 
 | 程度 | `speed` | `dashLength/gapLength` |
 | --- | ---: | --- |
@@ -49,7 +53,7 @@
 
 默认值为示例中的完整 `data`。中性动画值是 `speed=0`、`offset=0`；几何没有完全中性值。工具不适用于实体描边生长、粒子沿路径飞行或多路径连接。`data` 中不得出现素材或资源标识。
 
-当前模型只读取提示词，不读取上传图片像素，因此只能可靠处理用户明确给出的画面方位或坐标，不能把“鸟头”“鸟尾”等图片语义部位自动定位成坐标。提示词只有语义部位而没有可推导方位时，不得声称已识别图片内容，应使用默认左右路径。
+当前模型只读取提示词，不读取上传图片像素；服务器可以从边缘背景差异派生主体边界和最亮显著区域，但这不是视觉模型级语义识别。用户说明“鸟头在左、鸟尾在右”时使用 `subject_left` 到 `subject_right`；只说“鸟头到鸟尾”而没有方向时只能近似为主体水平两端，不得声称已识别鸟类部位。需要精确语义关键点时，用户应同时给出画面方位或归一化坐标。
 
 ## 服务器输入槽（不进入模型 `data`）
 
