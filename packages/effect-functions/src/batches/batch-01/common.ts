@@ -88,6 +88,65 @@ function bindingFor(context: ServerEffectRenderContext, slot: string): unknown {
   return (value as AuthorizedEffectInput).binding;
 }
 
+export type VisualAnchorName = "coordinates" | "subject_left" | "subject_right"
+  | "subject_top" | "subject_bottom" | "subject_center" | "brightest";
+
+export function visualAnchors(
+  context: ServerEffectRenderContext,
+  slot: string
+): Readonly<Record<Exclude<VisualAnchorName, "coordinates">, Point>> {
+  const binding = bindingFor(context, slot);
+  if (!isRecord(binding) || !Number.isInteger(binding.width) || !Number.isInteger(binding.height)) {
+    throw new TypeError(`Input slot ${slot} must expose decoded image pixels.`);
+  }
+  const width = binding.width as number;
+  const height = binding.height as number;
+  const raw = binding.data;
+  const data = raw instanceof Uint8Array || raw instanceof Uint8ClampedArray
+    ? raw : Array.isArray(raw) ? Uint8Array.from(raw as number[]) : undefined;
+  if (width < 1 || height < 1 || data?.length !== width * height * 4) {
+    throw new TypeError(`Input slot ${slot} contains invalid decoded image pixels.`);
+  }
+  const background = [0, 0, 0];
+  let backgroundCount = 0;
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    if (x !== 0 && y !== 0 && x !== width - 1 && y !== height - 1) continue;
+    const offset = (y * width + x) * 4;
+    for (let channel = 0; channel < 3; channel += 1) background[channel]! += data[offset + channel]!;
+    backgroundCount += 1;
+  }
+  for (let channel = 0; channel < 3; channel += 1) background[channel]! /= Math.max(1, backgroundCount);
+  let minX = width - 1; let maxX = 0; let minY = height - 1; let maxY = 0; let foregroundCount = 0;
+  let brightWeight = 0; let brightX = 0; let brightY = 0;
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const offset = (y * width + x) * 4;
+    const difference = Math.hypot(data[offset]! - background[0]!, data[offset + 1]! - background[1]!,
+      data[offset + 2]! - background[2]!) / 441.7;
+    if (difference > 0.12) {
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      foregroundCount += 1;
+    }
+    const luminance = (data[offset]! * 0.2126 + data[offset + 1]! * 0.7152 + data[offset + 2]! * 0.0722) / 255;
+    const weight = Math.max(0, luminance - 0.78) ** 3;
+    brightWeight += weight; brightX += x * weight; brightY += y * weight;
+  }
+  if (foregroundCount === 0) { minX = width * 0.2; maxX = width * 0.8; minY = height * 0.2; maxY = height * 0.8; }
+  const normalizeX = (x: number) => round(x / Math.max(1, width - 1), 5);
+  const normalizeY = (y: number) => round(y / Math.max(1, height - 1), 5);
+  const centerX = (minX + maxX) / 2; const centerY = (minY + maxY) / 2;
+  const brightest = brightWeight > 1e-6
+    ? { x: normalizeX(brightX / brightWeight), y: normalizeY(brightY / brightWeight) }
+    : { x: normalizeX(centerX), y: normalizeY(centerY) };
+  return Object.freeze({
+    subject_left: { x: normalizeX(minX), y: normalizeY(centerY) },
+    subject_right: { x: normalizeX(maxX), y: normalizeY(centerY) },
+    subject_top: { x: normalizeX(centerX), y: normalizeY(minY) },
+    subject_bottom: { x: normalizeX(centerX), y: normalizeY(maxY) },
+    subject_center: { x: normalizeX(centerX), y: normalizeY(centerY) },
+    brightest
+  });
+}
+
 function finitePoint(value: unknown): Point | undefined {
   if (!isRecord(value) || !Number.isFinite(value.x) || !Number.isFinite(value.y)) return undefined;
   return { x: value.x as number, y: value.y as number };

@@ -2,7 +2,8 @@ import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
 import {
   SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, animatedSeed, effectResult,
-  integerField, numberField, parameterSchema, randomAt, round, roundPoint
+  enumField, integerField, numberField, parameterSchema, randomAt, round, roundPoint,
+  visualAnchors, type VisualAnchorName
 } from "./common.js";
 
 export interface ElectricArcParams extends JsonObject {
@@ -20,18 +21,21 @@ export interface ElectricArcParams extends JsonObject {
   arcCount: number;
   spread: number;
   color: string;
+  startAnchor: VisualAnchorName;
+  endAnchor: VisualAnchorName;
 }
 
 const defaults: ElectricArcParams = {
   segmentCount: 32, branchCount: 4, noise: 24, glow: 14, intensity: 1.5, branchLength: 0.25, flickerRate: 12,
-  startX: 0.18, startY: 0.5, endX: 0.82, endY: 0.5, arcCount: 4, spread: 0.18, color: "#48d8ff"
+  startX: 0.18, startY: 0.5, endX: 0.82, endY: 0.5, arcCount: 2, spread: 0.08, color: "#48d8ff",
+  startAnchor: "coordinates", endAnchor: "coordinates"
 };
 
 export const ELECTRIC_ARC_DEFINITION: EffectToolDefinition<ElectricArcParams> = {
   effectId: "fx.light.electricArc",
   toolName: "electric_arc",
   displayName: "电弧连接",
-  version: "1.1.0",
+  version: "1.2.0",
   category: "light",
   parameterSchema: parameterSchema({
     segmentCount: integerField(32, 4, 256),
@@ -45,9 +49,11 @@ export const ELECTRIC_ARC_DEFINITION: EffectToolDefinition<ElectricArcParams> = 
     startY: numberField(0.5, 0, 1),
     endX: numberField(0.82, 0, 1),
     endY: numberField(0.5, 0, 1),
-    arcCount: integerField(4, 1, 12),
-    spread: numberField(0.18, 0, 1),
-    color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$", default: "#48d8ff" }
+    arcCount: integerField(2, 1, 12),
+    spread: numberField(0.08, 0, 1),
+    color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$", default: "#48d8ff" },
+    startAnchor: enumField("coordinates", ["coordinates", "subject_left", "subject_right", "subject_top", "subject_bottom", "subject_center", "brightest"]),
+    endAnchor: enumField("coordinates", ["coordinates", "subject_left", "subject_right", "subject_top", "subject_bottom", "subject_center", "brightest"])
   }),
   defaults,
   presets: [
@@ -69,15 +75,20 @@ export const ELECTRIC_ARC_DEFINITION: EffectToolDefinition<ElectricArcParams> = 
     endX: round(params.endX),
     endY: round(params.endY),
     spread: round(params.spread),
-    color: params.color.toLowerCase()
+    color: params.color.toLowerCase(),
+    startAnchor: params.startAnchor,
+    endAnchor: params.endAnchor
   }),
   validateParams: (params) => Math.hypot(params.endX - params.startX, params.endY - params.startY) >= 0.02
     ? VALID_PARAMS
     : { valid: false, issues: [{ path: "$.data", message: "Electric arc endpoints must be distinct." }] },
   render: (context, params) => {
     const seed = animatedSeed(context, params.flickerRate, 313);
-    const baseStart = { x: params.startX * (context.width - 1), y: params.startY * (context.height - 1) };
-    const baseEnd = { x: params.endX * (context.width - 1), y: params.endY * (context.height - 1) };
+    const anchors = visualAnchors(context, "source_image");
+    const normalizedStart = params.startAnchor === "coordinates" ? { x: params.startX, y: params.startY } : anchors[params.startAnchor];
+    const normalizedEnd = params.endAnchor === "coordinates" ? { x: params.endX, y: params.endY } : anchors[params.endAnchor];
+    const baseStart = { x: normalizedStart.x * (context.width - 1), y: normalizedStart.y * (context.height - 1) };
+    const baseEnd = { x: normalizedEnd.x * (context.width - 1), y: normalizedEnd.y * (context.height - 1) };
     const baseDx = baseEnd.x - baseStart.x;
     const baseDy = baseEnd.y - baseStart.y;
     const baseLength = Math.hypot(baseDx, baseDy) || 1;

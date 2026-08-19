@@ -411,8 +411,8 @@ function drawElectricPath(
     drawPolyline(output, points, request, shadow, 0.13 * energy, Math.max(2, glow * 0.72), false, coordinateSpace);
     drawPolyline(output, points, request, halo, 0.24 * energy, Math.max(1.4, glow * 0.38), false, coordinateSpace);
   }
-  drawPolyline(output, points, request, color, 0.55 * energy, 2.2, false, coordinateSpace);
-  drawPolyline(output, points, request, [238, 252, 255, 255], Math.min(1, 0.82 * energy), 0.8, false, coordinateSpace);
+  drawPolyline(output, points, request, color, 0.48 * energy, 1.35, false, coordinateSpace);
+  drawPolyline(output, points, request, [238, 252, 255, 255], Math.min(1, 0.72 * energy), 0.5, false, coordinateSpace);
 }
 
 function fillPolygon(
@@ -1924,9 +1924,9 @@ function polishedStructuredFrame(
       drawElectricPath(output, points, request, glow, intensity, color, "pixel");
       for (const endpoint of [points[0]!, points[points.length - 1]!]) {
         const pixel = [endpoint.x, endpoint.y] as const;
-        drawDisc(output, request.width, request.height, pixel[0], pixel[1], Math.max(5, glow * 0.7),
-          color, 0.28);
-        drawDisc(output, request.width, request.height, pixel[0], pixel[1], 2.2,
+        drawDisc(output, request.width, request.height, pixel[0], pixel[1], Math.max(3, glow * 0.45),
+          color, 0.18);
+        drawDisc(output, request.width, request.height, pixel[0], pixel[1], 1.4,
           [245, 255, 255, 255], 0.95);
       }
     });
