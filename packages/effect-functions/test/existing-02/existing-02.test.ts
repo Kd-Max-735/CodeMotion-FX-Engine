@@ -329,6 +329,23 @@ function expectDocumentedProperty(field: string, property: PropertyContract, tex
 }
 
 describe("existing-02 field specifications and adapter contracts", () => {
+  it("keeps lens_flare image-grounded coordinates within its closed Schema", async () => {
+    const definition = definitions().get("lens_flare")!;
+    const markdown = await readFile(resolve(SPEC_DIRECTORY, "lens_flare.md"), "utf8");
+    const jsonBlock = markdown.match(/```json\s*([\s\S]*?)```/u)?.[1];
+    expect(jsonBlock).toBeDefined();
+    expect(() => validateAndNormalizeEffectEnvelope(
+      definition,
+      "lens_flare",
+      JSON.parse(jsonBlock!) as unknown
+    )).not.toThrow();
+    expect(definition.version).toBe("1.1.0");
+    expect(markdown).toContain("必须检查随本工具附带的图片");
+    expect(markdown).toContain("source_frame");
+    expect(markdown).not.toContain("streak\":1.1");
+    expect(markdown).not.toContain("chromatic\":0.65");
+  });
+
   it("exposes coordinate and server-fallback positioning modes for energy_pulse", () => {
     const definition = definitions().get("energy_pulse")!;
     const schema = definition.parameterSchema as unknown as {

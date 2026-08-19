@@ -841,11 +841,17 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(3);
 
+    const lensFlare = EFFECT_TOOL_REGISTRY.getByToolName("lens_flare")!;
+    await expect(resolver.visionImage(principal, lensFlare, {
+      source_frame: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(4);
+
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(3);
+    expect(resolveMedia).toHaveBeenCalledTimes(4);
   });
 
   it("derives even output dimensions from the first authorized visual while preserving aspect ratio", async () => {

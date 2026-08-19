@@ -78,7 +78,8 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   energy_pulse: "source_frame",
   dash_flow: "source_image",
   ken_burns: "source_image",
-  kinetic_typography: "source_image"
+  kinetic_typography: "source_image",
+  lens_flare: "source_frame"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
