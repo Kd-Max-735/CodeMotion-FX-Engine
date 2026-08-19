@@ -59,7 +59,7 @@ const EXPECTED = Object.freeze({
       size: number(0.12, 0.005, 1, 0.005), roughness: number(0.35, 0, 1, 0.01),
       progress: number(0.5, 0, 1, 0.01)
     },
-    slots: [["vector_source", "data"], ["brush_texture", "texture"]]
+    slots: [["source_frame", "image"], ["target_frame", "image"], ["brush_texture", "texture"]]
   },
   chalk_stroke: {
     effectId: "fx.draw.chalkStroke",
@@ -214,7 +214,7 @@ const TOOL_NAMES = Object.freeze(Object.keys(EXPECTED).sort());
 const SPEC_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), "../../field-specs/existing-02");
 const DOC_INPUT_TERMS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   blend: ["底层和上层画面由服务端绑定"],
-  brush_reveal: ["服务端绑定的真实笔刷覆盖", "源画面"],
+  brush_reveal: ["服务端绑定的真实笔刷覆盖", "起始图片", "目标图片"],
   chalk_stroke: ["路径和源图形由服务端绑定"],
   directional_blur: ["服务端绑定的画面"],
   displacement_map: ["置换图和源画面由服务端绑定"],

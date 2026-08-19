@@ -110,7 +110,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   M05: "1.1.0",
   M07: "1.2.0",
   T02: "1.1.0",
-  D02: "1.1.0",
+  D02: "1.2.0",
   D04: "1.1.0",
   L04: "1.2.0"
 });
