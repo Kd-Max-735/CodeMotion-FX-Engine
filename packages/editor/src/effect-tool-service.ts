@@ -1090,10 +1090,21 @@ function previewDataBinding(
   switch (slot.name) {
     case "audio_analysis": return previewAudioBinding(definition, render);
     case "number_range": return { version: "validated-number-v1", from: 0, to: 100 };
-    case "validated_binding": return {
-      version: "validated-live-binding-v1", value: 0.72, previousValue: 0.48,
-      minimum: 0, maximum: 1, targetHandle: "preview-layer", targetProperty: "opacity"
-    };
+    case "validated_binding": {
+      const cycleSeconds = 3.2;
+      const phase = render.time / cycleSeconds * Math.PI * 2 - Math.PI / 2;
+      const previousPhase = (render.time - 1 / Math.max(1, render.fps))
+        / cycleSeconds * Math.PI * 2 - Math.PI / 2;
+      return {
+        version: "validated-live-binding-v1",
+        value: 0.5 + Math.sin(phase) * 0.46,
+        previousValue: 0.5 + Math.sin(previousPhase) * 0.46,
+        minimum: 0,
+        maximum: 1,
+        targetHandle: "preview-layer",
+        targetProperty: "opacity"
+      };
+    }
     case "target_effect": return { version: "effect-target-v1", handle: "preview-effect" };
     case "text_layer": return { version: "text-layer-v1", layerHandle: "preview-text" };
     case "text_font": return { version: "font-binding-v1", fontHandle: "preview-font" };

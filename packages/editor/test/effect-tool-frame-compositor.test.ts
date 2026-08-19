@@ -106,6 +106,17 @@ describe("effect tool frame compositor", () => {
       .toEqual([250, 0, 0, 128]);
   });
 
+  it("renders live binding values and mapping modes as visibly different states", () => {
+    const low = composeEffectToolFrame(metadata({ value: 0.12, mapping: "normalized" }),
+      detailedRequest, "live_binding");
+    const high = composeEffectToolFrame(metadata({ value: 0.88, mapping: "normalized" }),
+      detailedRequest, "live_binding");
+    const pulse = composeEffectToolFrame(metadata({ value: 0.88, mapping: "pulse" }),
+      detailedRequest, "live_binding");
+    expect(low).not.toEqual(high);
+    expect(high).not.toEqual(pulse);
+  });
+
   it.each([
     "blob_morph", "dash_flow", "electric_arc", "lightning_trace", "marker_stroke",
     "shape_boolean_animate", "volumetric_ray", "wave_path", "neon_trace", "paint_on",

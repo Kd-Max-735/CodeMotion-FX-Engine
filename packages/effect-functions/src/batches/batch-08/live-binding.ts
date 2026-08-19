@@ -34,6 +34,7 @@ interface LiveBindingSnapshot {
 export interface LiveBindingOutput {
   readonly targetHandle: string;
   readonly targetProperty: SafeTargetProperty;
+  readonly mapping: LiveBindingParams["mapping"];
   readonly applied: boolean;
   readonly value: number | null;
 }
@@ -99,7 +100,7 @@ export const LIVE_BINDING_DEFINITION: EffectToolDefinition<LiveBindingParams, Au
   effectId: "fx.data.liveBinding",
   toolName: "live_binding",
   displayName: "实时数据绑定",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "data",
   parameterSchema: {
     $schema: JSON_SCHEMA,
@@ -135,7 +136,13 @@ export const LIVE_BINDING_DEFINITION: EffectToolDefinition<LiveBindingParams, Au
         return {
           kind: "metadata",
           backendId: CPU_BACKEND.backendId,
-          output: Object.freeze({ targetHandle: snapshot.targetHandle, targetProperty: snapshot.targetProperty, applied: false, value: null }),
+          output: Object.freeze({
+            targetHandle: snapshot.targetHandle,
+            targetProperty: snapshot.targetProperty,
+            mapping: params.mapping,
+            applied: false,
+            value: null
+          }),
           degraded: false,
           warnings: ["Validated source value is missing; update skipped by policy."]
         };
@@ -152,6 +159,7 @@ export const LIVE_BINDING_DEFINITION: EffectToolDefinition<LiveBindingParams, Au
       output: Object.freeze({
         targetHandle: snapshot.targetHandle,
         targetProperty: snapshot.targetProperty,
+        mapping: params.mapping,
         applied: true,
         value: round(smoothed * params.gain + params.offset)
       }),

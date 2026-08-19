@@ -327,7 +327,25 @@ describe("batch-08 definitions", () => {
       })
     };
     const result = await run(LIVE_BINDING_DEFINITION, validInput);
-    expect(result.output).toMatchObject({ targetHandle: "layer-safe-3", targetProperty: "opacity", applied: true });
+    expect(result.output).toMatchObject({
+      targetHandle: "layer-safe-3",
+      targetProperty: "opacity",
+      mapping: "normalized",
+      applied: true
+    });
+
+    const changed = await run(LIVE_BINDING_DEFINITION, {
+      validated_binding: authorized("validated_binding", "data", {
+        version: "validated-live-binding-v1",
+        value: 20,
+        previousValue: 10,
+        minimum: 0,
+        maximum: 100,
+        targetHandle: "layer-safe-3",
+        targetProperty: "opacity"
+      })
+    });
+    expect(changed.output).not.toEqual(result.output);
 
     await expect(run(LIVE_BINDING_DEFINITION, {
       validated_binding: authorized("validated_binding", "data", {

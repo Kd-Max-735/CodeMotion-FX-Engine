@@ -939,6 +939,24 @@ describe("server single effect-tool service", () => {
     expect(resolveMedia).not.toHaveBeenCalled();
   });
 
+  it("feeds live_binding a changing server-owned preview stream without uploaded media", async () => {
+    const resolveMedia = vi.fn(async () => { throw new Error("live_binding preview must not resolve media."); });
+    const resolver = new TenantMediaEffectToolInputResolver({ resolve: resolveMedia } as never);
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("live_binding")!;
+    const resolveAt = (time: number) => resolver.resolve(principal, definition, {}, {
+      time, fps: 30, width: 96, height: 64, seed: 20260819, quality: "preview"
+    });
+    const early = await resolveAt(0.4);
+    const later = await resolveAt(1.2);
+    const valueOf = (inputs: AuthorizedEffectInputs) => {
+      const input = inputs.validated_binding;
+      expect(Array.isArray(input)).toBe(false);
+      return (input as { binding: { value: number } }).binding.value;
+    };
+    expect(valueOf(early)).not.toBe(valueOf(later));
+    expect(resolveMedia).not.toHaveBeenCalled();
+  });
+
   it("derives structured image previews for the reported existing tools", async () => {
     const width = 96;
     const height = 64;

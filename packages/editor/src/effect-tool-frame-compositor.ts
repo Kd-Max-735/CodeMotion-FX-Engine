@@ -1625,24 +1625,44 @@ function batch0708Frame(
   }
 
   if (toolName === "live_binding") {
-    clearFrame(output, [7, 13, 22, 255]);
+    const mapping = typeof value.mapping === "string" ? value.mapping : "normalized";
     const raw = Number(value.value ?? 0);
-    const amount = Math.max(0, Math.min(1, Math.abs(raw + Math.sin(request.time * 1.7) * 0.12)));
+    const amount = Math.max(0, Math.min(1, Math.abs(raw)));
+    const activeColor = mapping === "threshold" ? [255, 82, 86, 255] as const
+      : mapping === "pulse" ? [255, 190, 68, 255] as const
+        : [72, 226, 255, 255] as const;
+    clearFrame(output, [7 + amount * 5, 13 + amount * 8, 22 + amount * 12, 255]);
     const centerX = request.width / 2; const centerY = request.height * 0.55;
     const radius = Math.min(request.width, request.height) * 0.27;
+    drawDisc(output, request.width, request.height, centerX, centerY,
+      radius * (0.38 + amount * 0.2), activeColor, 0.06 + amount * 0.12);
+    if (mapping === "pulse" && amount > 0.01) {
+      for (let ring = 0; ring < 3; ring += 1) {
+        const ringRadius = radius * (0.42 + ring * 0.19 + amount * 0.12);
+        const segments = 48;
+        for (let index = 0; index < segments; index += 1) {
+          const a = index / segments * Math.PI * 2;
+          const b = (index + 1) / segments * Math.PI * 2;
+          drawLine(output, request.width, request.height,
+            centerX + Math.cos(a) * ringRadius, centerY + Math.sin(a) * ringRadius,
+            centerX + Math.cos(b) * ringRadius, centerY + Math.sin(b) * ringRadius,
+            activeColor, amount * (0.26 - ring * 0.055), 1.4);
+        }
+      }
+    }
     for (let index = 0; index < 72; index += 1) {
       const ratio = index / 71; const angle = Math.PI * (0.75 + ratio * 1.5);
       const active = ratio <= amount;
       drawLine(output, request.width, request.height,
         centerX + Math.cos(angle) * radius * 0.78, centerY + Math.sin(angle) * radius * 0.78,
         centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius,
-        active ? hueColor(170 - ratio * 120) : [56, 68, 82, 255], active ? 0.9 : 0.48, 2.4);
+        active ? activeColor : [56, 68, 82, 255], active ? 0.92 : 0.38, 2.4);
     }
     const needle = Math.PI * (0.75 + amount * 1.5);
     drawLine(output, request.width, request.height, centerX, centerY,
       centerX + Math.cos(needle) * radius * 0.72, centerY + Math.sin(needle) * radius * 0.72,
       [248, 252, 255, 255], 0.9, 2.2);
-    drawDisc(output, request.width, request.height, centerX, centerY, 7, [72, 226, 255, 255], 0.9);
+    drawDisc(output, request.width, request.height, centerX, centerY, 7, activeColor, 0.95);
     return true;
   }
 
