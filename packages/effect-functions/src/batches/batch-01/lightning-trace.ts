@@ -2,8 +2,8 @@ import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
 import {
   SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, animatedSeed, clamp, effectResult,
-  integerField, numberField, parameterSchema, randomAt, readPath, resamplePath,
-  round, roundPoint, slicePath
+  enumField, integerField, numberField, parameterSchema, randomAt, resamplePath,
+  round, roundPoint, slicePath, visualAnchors, type Point, type VisualAnchorName
 } from "./common.js";
 
 export interface LightningTraceParams extends JsonObject {
@@ -14,26 +14,40 @@ export interface LightningTraceParams extends JsonObject {
   branchLength: number;
   segmentLength: number;
   glow: number;
+  startMode: VisualAnchorName;
+  endMode: VisualAnchorName;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
 }
 
 const defaults: LightningTraceParams = {
-  progress: 1, branchCount: 5, jitter: 18, flicker: 0.35, branchLength: 0.22, segmentLength: 18, glow: 10
+  progress: 1, branchCount: 3, jitter: 12, flicker: 0.35, branchLength: 0.18, segmentLength: 14, glow: 6,
+  startMode: "subject_left", endMode: "subject_right", startX: 0.2, startY: 0.5, endX: 0.8, endY: 0.5
 };
+
+const ANCHOR_MODES: readonly VisualAnchorName[] = ["coordinates", "subject_left", "subject_right",
+  "subject_top", "subject_bottom", "subject_center", "brightest"];
 
 export const LIGHTNING_TRACE_DEFINITION: EffectToolDefinition<LightningTraceParams> = {
   effectId: "fx.draw.lightningTrace",
   toolName: "lightning_trace",
   displayName: "闪电沿路径传播",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "draw",
   parameterSchema: parameterSchema({
     progress: numberField(1, 0, 1),
-    branchCount: integerField(5, 0, 32),
-    jitter: numberField(18, 0, 200),
+    branchCount: integerField(3, 0, 32),
+    jitter: numberField(12, 0, 200),
     flicker: numberField(0.35, 0, 1),
-    branchLength: numberField(0.22, 0.02, 0.8),
-    segmentLength: numberField(18, 2, 100),
-    glow: numberField(10, 0, 100)
+    branchLength: numberField(0.18, 0.02, 0.8),
+    segmentLength: numberField(14, 2, 100),
+    glow: numberField(6, 0, 100)
+    , startMode: enumField("subject_left", ANCHOR_MODES)
+    , endMode: enumField("subject_right", ANCHOR_MODES)
+    , startX: numberField(0.2, 0, 1), startY: numberField(0.5, 0, 1)
+    , endX: numberField(0.8, 0, 1), endY: numberField(0.5, 0, 1)
   }),
   defaults,
   presets: [
@@ -41,14 +55,21 @@ export const LIGHTNING_TRACE_DEFINITION: EffectToolDefinition<LightningTracePara
     { presetId: "lightning_trace.storm", displayName: "风暴闪电", params: { ...defaults, branchCount: 10, jitter: 32, flicker: 0.65, branchLength: 0.35, glow: 18 } },
     { presetId: "lightning_trace.travel", displayName: "传播电光", params: { ...defaults, progress: 0.58, branchCount: 4, jitter: 14 } }
   ],
-  inputSlots: [{ name: "guide_path", kind: "data", required: true, cardinality: "one", description: "Server-bound lightning propagation guide." }],
+  inputSlots: [{ name: "source_image", kind: "image", required: true, cardinality: "one", description: "Owner-authorized image under the generated lightning path." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: SERVER_CPU_FALLBACK,
   performanceGrade: "medium",
   normalizeParams: (params) => ({ ...params, progress: round(params.progress), branchCount: Math.round(params.branchCount) }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
-    const guide = readPath(context, "guide_path");
+    const anchors = visualAnchors(context, "source_image");
+    const resolve = (mode: VisualAnchorName, x: number, y: number): Point => {
+      const normalized = mode === "coordinates" ? { x, y } : anchors[mode];
+      return { x: normalized.x * Math.max(1, context.width - 1), y: normalized.y * Math.max(1, context.height - 1) };
+    };
+    const start = resolve(params.startMode, params.startX, params.startY);
+    const end = resolve(params.endMode, params.endX, params.endY);
+    const guide = { points: [start, end], closed: false };
     const revealProgress = clamp(context.time / 1.25, 0, 1);
     const activeProgress = params.progress * revealProgress;
     if (activeProgress <= Number.EPSILON) {
