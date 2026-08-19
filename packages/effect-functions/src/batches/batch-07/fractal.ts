@@ -12,19 +12,23 @@ export interface FractalParams extends JsonObject {
   rotation: number;
   speed: number;
   strength: number;
+  levels: number;
+  recursionScale: number;
+  rotationStep: number;
   insideColor: string;
   outsideColor: string;
 }
 
 const defaults: FractalParams = {
   gridSize: 48, iterations: 120, centerX: -0.5, centerY: 0, zoom: 1,
-  rotation: 0, speed: 0.18, strength: 0.65, insideColor: "#081C15", outsideColor: "#D8F3DC"
+  rotation: 0, speed: 0.18, strength: 0.78, levels: 6, recursionScale: 0.62,
+  rotationStep: 12, insideColor: "#081C15", outsideColor: "#D8F3DC"
 };
 export const fractalDefinition: EffectToolDefinition<FractalParams> = {
   effectId: "fx.gen.fractal",
   toolName: "fractal",
   displayName: "分形",
-  version: "1.1.0",
+  version: "1.2.0",
   category: "generative",
   parameterSchema: schema({
     gridSize: { type: "integer", minimum: 8, maximum: 64, default: defaults.gridSize },
@@ -35,24 +39,28 @@ export const fractalDefinition: EffectToolDefinition<FractalParams> = {
     rotation: { type: "number", minimum: -180, maximum: 180, default: defaults.rotation },
     speed: { type: "number", minimum: -2, maximum: 2, default: defaults.speed },
     strength: { type: "number", minimum: 0, maximum: 1, default: defaults.strength },
+    levels: { type: "integer", minimum: 2, maximum: 10, default: defaults.levels },
+    recursionScale: { type: "number", minimum: 0.35, maximum: 0.85, default: defaults.recursionScale },
+    rotationStep: { type: "number", minimum: -90, maximum: 90, default: defaults.rotationStep },
     insideColor: { ...COLOR_SCHEMA, default: defaults.insideColor },
     outsideColor: { ...COLOR_SCHEMA, default: defaults.outsideColor }
   }),
   defaults,
   presets: [
     { presetId: "batch07.fractal.classic", displayName: "经典集合", params: { ...defaults } },
-    { presetId: "batch07.fractal.seahorse", displayName: "海马谷", params: { ...defaults, gridSize: 48, iterations: 160, centerX: -0.745, centerY: 0.11, zoom: 35 } },
-    { presetId: "batch07.fractal.orbit", displayName: "旋转轨道", params: { ...defaults, iterations: 120, zoom: 3, rotation: 28, speed: 0.25, insideColor: "#240046", outsideColor: "#FF9E00" } }
+    { presetId: "batch07.fractal.seahorse", displayName: "深层递归", params: { ...defaults, levels: 8, recursionScale: 0.58, rotationStep: 7, iterations: 160 } },
+    { presetId: "batch07.fractal.orbit", displayName: "旋转轨道", params: { ...defaults, zoom: 3, rotation: 28, speed: 0.25, levels: 7, recursionScale: 0.67, rotationStep: 24, insideColor: "#240046", outsideColor: "#FF9E00" } }
   ],
   inputSlots: [{ name: "background_image", kind: "image", required: true, cardinality: "one",
-    description: "Server-authorized image refracted and shaded by the animated fractal field." }],
+    description: "Server-authorized image recursively repeated, transformed, and shaded by the fractal field." }],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: REJECT_FALLBACK,
   performanceGrade: "heavy",
   normalizeParams: (params) => ({ ...params, centerX: round(params.centerX, 6),
     centerY: round(params.centerY, 6), zoom: round(params.zoom, 4),
     rotation: round(params.rotation, 3), speed: round(params.speed, 4),
-    strength: round(params.strength, 4),
+    strength: round(params.strength, 4), recursionScale: round(params.recursionScale, 4),
+    rotationStep: round(params.rotationStep, 3),
     insideColor: normalizeColor(params.insideColor), outsideColor: normalizeColor(params.outsideColor) }),
   validateParams: (params) => params.gridSize * params.gridSize * params.iterations <= 1_048_576
     ? valid() : invalid("$", "gridSize squared times iterations must not exceed 1,048,576"),
@@ -83,8 +91,10 @@ export const fractalDefinition: EffectToolDefinition<FractalParams> = {
         escape.push(round(Math.max(0, Math.min(1, smoothCount / params.iterations)), 6));
       }
     }
-    return metadataResult({ algorithm: "smooth_mandelbrot_refraction", width: params.gridSize,
+    return metadataResult({ algorithm: "recursive_image_fractal", width: params.gridSize,
       height: params.gridSize, escape, strength: params.strength,
+      levels: params.levels, recursionScale: params.recursionScale,
+      rotationStep: params.rotationStep, speed: params.speed,
       colors: [params.insideColor, params.outsideColor] });
   }
 };

@@ -256,7 +256,7 @@ describe("batch-07 definitions", () => {
   it("returns consumable finite field or geometry data under an exact output contract", async () => {
     const contracts: ReadonlyArray<readonly [string, readonly string[], readonly string[], string]> = [
       ["noise_field", ["algorithm", "colors", "height", "seed", "values", "width"], ["values"], "values"],
-      ["fractal", ["algorithm", "colors", "escape", "height", "width"], ["escape"], "escape"],
+      ["fractal", ["algorithm", "colors", "escape", "height", "levels", "recursionScale", "rotationStep", "speed", "strength", "width"], ["escape"], "escape"],
       ["l_system", ["algorithm", "pattern", "segments", "strokeColor"], ["segments"], "segments"],
       ["voronoi", ["algorithm", "cells", "colors", "edges", "height", "seed", "sites", "width"], ["sites", "cells", "edges"], "cells"],
       ["metaballs", ["algorithm", "colors", "field", "height", "seed", "threshold", "width"], ["field"], "field"],

@@ -537,6 +537,25 @@ function clampedFramePixel(
   return [frame[offset]!, frame[offset + 1]!, frame[offset + 2]!, frame[offset + 3]!];
 }
 
+function bilinearFramePixel(
+  frame: Uint8Array,
+  request: FrameRequest,
+  x: number,
+  y: number
+): readonly [number, number, number, number] {
+  const sx = Math.max(0, Math.min(request.width - 1, x));
+  const sy = Math.max(0, Math.min(request.height - 1, y));
+  const x0 = Math.floor(sx); const y0 = Math.floor(sy);
+  const x1 = Math.min(request.width - 1, x0 + 1); const y1 = Math.min(request.height - 1, y0 + 1);
+  const tx = sx - x0; const ty = sy - y0;
+  const sample = (px: number, py: number, channel: number) => frame[(py * request.width + px) * 4 + channel]!;
+  return [0, 1, 2, 3].map((channel) => {
+    const top = sample(x0, y0, channel) * (1 - tx) + sample(x1, y0, channel) * tx;
+    const bottom = sample(x0, y1, channel) * (1 - tx) + sample(x1, y1, channel) * tx;
+    return clampByte(top * (1 - ty) + bottom * ty);
+  }) as unknown as readonly [number, number, number, number];
+}
+
 function blendChannel(base: number, overlay: number, mode: string): number {
   const a = base / 255;
   const b = overlay / 255;
@@ -1273,6 +1292,10 @@ function batch0708Frame(
           }
         } else {
           const strength = Math.max(0, Math.min(1, Number(value.strength ?? 0.65)));
+          const levels = Math.max(2, Math.min(10, Math.round(Number(value.levels ?? 6))));
+          const recursionScale = Math.max(0.35, Math.min(0.85, Number(value.recursionScale ?? 0.62)));
+          const rotationStep = Math.max(-90, Math.min(90, Number(value.rotationStep ?? 12)));
+          const speed = Math.max(-2, Math.min(2, Number(value.speed ?? 0.18)));
           const left = bilinearGridValue(grid, x - 2, y, request);
           const right = bilinearGridValue(grid, x + 2, y, request);
           const top = bilinearGridValue(grid, x, y - 2, request);
@@ -1280,16 +1303,42 @@ function batch0708Frame(
           const gradientX = right - left;
           const gradientY = bottom - top;
           const edge = Math.min(1, Math.hypot(gradientX, gradientY) * 38);
-          const displacement = strength * 42;
-          const base = snapshot === undefined ? secondary
-            : wrappedFramePixel(snapshot, request, x + gradientX * displacement, y + gradientY * displacement);
+          const displacement = strength * 8;
+          let base = snapshot === undefined ? secondary
+            : bilinearFramePixel(snapshot, request, x + gradientX * displacement, y + gradientY * displacement);
+          if (snapshot !== undefined && strength > 0) {
+            const centerX = (request.width - 1) / 2;
+            const centerY = (request.height - 1) / 2;
+            const localX = x - centerX; const localY = y - centerY;
+            for (let level = 1; level <= levels; level += 1) {
+              const scale = recursionScale ** level;
+              const angle = (rotationStep * level + request.time * speed * 22) * Math.PI / 180;
+              const cos = Math.cos(angle); const sin = Math.sin(angle);
+              const rotatedX = localX * cos + localY * sin;
+              const rotatedY = -localX * sin + localY * cos;
+              const halfWidth = centerX * scale; const halfHeight = centerY * scale;
+              if (Math.abs(rotatedX) > halfWidth || Math.abs(rotatedY) > halfHeight) continue;
+              const sourceX = centerX + rotatedX / scale;
+              const sourceY = centerY + rotatedY / scale;
+              const recursive = bilinearFramePixel(snapshot, request, sourceX, sourceY);
+              const edgeDistance = Math.min(halfWidth - Math.abs(rotatedX), halfHeight - Math.abs(rotatedY));
+              const feather = Math.max(0, Math.min(1, edgeDistance / Math.max(1, Math.min(halfWidth, halfHeight) * 0.07)));
+              const mix = strength * (0.72 + level / levels * 0.2) * feather;
+              base = [
+                clampByte(base[0]! * (1 - mix) + recursive[0]! * mix),
+                clampByte(base[1]! * (1 - mix) + recursive[1]! * mix),
+                clampByte(base[2]! * (1 - mix) + recursive[2]! * mix),
+                255
+              ];
+            }
+          }
           const detail = raw >= 0.999 ? 0.04
             : 0.5 + 0.5 * Math.sin(raw * 180 + Math.log1p(raw * 600) * 9);
-          const overlayAmount = strength * (0.16 + detail * 0.22 + edge * 0.3);
+          const overlayAmount = strength * (0.035 + detail * 0.045 + edge * 0.09);
           for (let channel = 0; channel < 3; channel += 1) {
             const color = secondary[channel]! + (primary[channel]! - secondary[channel]!) * detail;
             output[offset + channel] = clampByte(base[channel]! * (1 - overlayAmount)
-              + color * overlayAmount + 238 * edge * strength * 0.22);
+              + color * overlayAmount + 238 * edge * strength * 0.06);
           }
         }
         output[offset + 3] = 255;
