@@ -45,12 +45,12 @@ function parseDepth(value: unknown): number {
 }
 
 const defaults: HologramParams = Object.freeze({
-  scanline: 0.65,
-  flicker: 0.18,
+  scanline: 0.34,
+  flicker: 0.12,
   glitch: 0.12,
   depth: 0.4,
-  brightness: 1.2,
-  opacity: 0.72,
+  brightness: 1.5,
+  opacity: 0.78,
   colorMode: "cyan"
 });
 
@@ -66,7 +66,7 @@ export const HOLOGRAM_DEFINITION: EffectToolDefinition<HologramParams, Authorize
     additionalProperties: false,
     required: ["scanline", "flicker", "glitch", "depth"],
     properties: {
-      scanline: { type: "number", minimum: 0, maximum: 1, default: 0.65 },
+      scanline: { type: "number", minimum: 0, maximum: 1, default: 0.34 },
       flicker: { type: "number", minimum: 0, maximum: 1, default: 0.18 },
       glitch: { type: "number", minimum: 0, maximum: 1, default: 0.12 },
       depth: { type: "number", minimum: 0, maximum: 1, default: 0.4 },

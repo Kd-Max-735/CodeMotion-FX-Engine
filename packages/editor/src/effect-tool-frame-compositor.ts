@@ -1704,7 +1704,7 @@ function batch0708Frame(
     } else if (toolName === "hologram") {
       const emissive = Array.isArray(value.emissive) ? value.emissive as readonly number[] : [0.1, 0.9, 1, 0.7];
       const glitch = Number(value.glitchOffset ?? 0);
-      const flicker = Math.max(0.2, Number(value.flickerLevel ?? 1));
+      const flicker = Math.max(0.55, Number(value.flickerLevel ?? 1));
       for (let y = 0; y < request.height; y += 1) {
         const scan = 0.48 + 0.52 * Math.sin(y * 0.31 - request.time * 18);
         const shift = Math.abs(glitch) > 0.01 && (y + request.frame * 7) % 47 < 7 ? glitch * request.width * 0.22 : 0;
@@ -1713,15 +1713,17 @@ function batch0708Frame(
           const luminance = (sample[0] * 0.21 + sample[1] * 0.72 + sample[2] * 0.07) / 255;
           const offset = (y * request.width + x) * 4;
           for (let channel = 0; channel < 3; channel += 1) {
-            output[offset + channel] = clampByte(sample[channel]! * 0.16
-              + Number(emissive[channel] ?? 0.8) * 255 * luminance * flicker * (0.58 + scan * 0.42));
+            const sourceLift = sample[channel]! * (0.62 + luminance * 0.18);
+            const emission = Number(emissive[channel] ?? 0.8) * 255
+              * (0.22 + luminance * 0.42) * flicker * (0.76 + scan * 0.24);
+            output[offset + channel] = clampByte(sourceLift + emission);
           }
           output[offset + 3] = 255;
         }
       }
-      for (let y = request.frame % 9; y < request.height; y += 9) {
+      for (let y = request.frame % 18; y < request.height; y += 18) {
         drawLine(output, request.width, request.height, 0, y, request.width, y,
-          [180, 255, 255, 255], 0.18, 0.7);
+          [180, 255, 255, 255], 0.10, 0.55);
       }
     } else {
       const f0 = Array.isArray(value.f0) ? value.f0 as readonly number[] : [0.9, 0.9, 0.86, 1];
