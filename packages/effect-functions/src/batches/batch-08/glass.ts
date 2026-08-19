@@ -6,7 +6,7 @@ import { parseMaterialSurface, parsePixelLayer, type Rgba } from "./visual-input
 export interface GlassParams extends JsonObject {
   blur: number;
   refraction: number;
-  tint: "clear" | "cool" | "warm" | "mint";
+  tintColor: string;
   tintStrength: number;
   border: number;
   opacity: number;
@@ -22,17 +22,24 @@ export interface GlassOutput {
   readonly transmission: number;
 }
 
-const TINTS: Readonly<Record<GlassParams["tint"], readonly [number, number, number]>> = Object.freeze({
-  clear: Object.freeze([1, 1, 1] as const),
-  cool: Object.freeze([0.72, 0.88, 1] as const),
-  warm: Object.freeze([1, 0.86, 0.68] as const),
-  mint: Object.freeze([0.68, 1, 0.86] as const)
-});
+const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/u;
+
+function normalizeColor(value: string): string {
+  return value.toUpperCase();
+}
+
+function colorToRgb(value: string): readonly [number, number, number] {
+  return Object.freeze([
+    Number.parseInt(value.slice(1, 3), 16) / 255,
+    Number.parseInt(value.slice(3, 5), 16) / 255,
+    Number.parseInt(value.slice(5, 7), 16) / 255
+  ] as const);
+}
 
 const defaults: GlassParams = Object.freeze({
   blur: 12,
   refraction: 0.35,
-  tint: "clear",
+  tintColor: "#FFFFFF",
   tintStrength: 0.18,
   border: 1.5,
   opacity: 0.72
@@ -42,17 +49,17 @@ export const GLASS_DEFINITION: EffectToolDefinition<GlassParams, AuthorizedEffec
   effectId: "fx.material.glass",
   toolName: "glass",
   displayName: "玻璃材质",
-  version: "1.1.0",
+  version: "1.2.0",
   category: "material",
   parameterSchema: {
     $schema: JSON_SCHEMA,
     type: "object",
     additionalProperties: false,
-    required: ["blur", "refraction", "tint"],
+    required: ["blur", "refraction", "tintColor"],
     properties: {
       blur: { type: "number", minimum: 0, maximum: 40, default: 12 },
       refraction: { type: "number", minimum: 0, maximum: 1, default: 0.35 },
-      tint: { type: "string", enum: ["clear", "cool", "warm", "mint"], default: "clear" },
+      tintColor: { type: "string", pattern: COLOR_PATTERN.source, default: "#FFFFFF" },
       tintStrength: { type: "number", minimum: 0, maximum: 1, default: 0.18 },
       border: { type: "number", minimum: 0, maximum: 10, default: 1.5 },
       opacity: { type: "number", minimum: 0, maximum: 1, default: 0.72 }
@@ -60,9 +67,9 @@ export const GLASS_DEFINITION: EffectToolDefinition<GlassParams, AuthorizedEffec
   },
   defaults,
   presets: [
-    { presetId: "glass.clear", displayName: "清透玻璃", params: { blur: 7, refraction: 0.22, tint: "clear", tintStrength: 0.06, border: 1, opacity: 0.55 } },
-    { presetId: "glass.frosted", displayName: "磨砂玻璃", params: { blur: 24, refraction: 0.18, tint: "cool", tintStrength: 0.2, border: 2, opacity: 0.78 } },
-    { presetId: "glass.prism", displayName: "棱镜玻璃", params: { blur: 4, refraction: 0.72, tint: "mint", tintStrength: 0.3, border: 3.5, opacity: 0.68 } }
+    { presetId: "glass.clear", displayName: "清透玻璃", params: { blur: 7, refraction: 0.22, tintColor: "#FFFFFF", tintStrength: 0.06, border: 1, opacity: 0.55 } },
+    { presetId: "glass.frosted", displayName: "蓝色磨砂玻璃", params: { blur: 24, refraction: 0.18, tintColor: "#8BCBFF", tintStrength: 0.32, border: 2, opacity: 0.78 } },
+    { presetId: "glass.prism", displayName: "绿色棱镜玻璃", params: { blur: 4, refraction: 0.72, tintColor: "#ADFFDB", tintStrength: 0.3, border: 3.5, opacity: 0.68 } }
   ],
   inputSlots: [
     { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized image or video viewed through the glass material." },
@@ -72,12 +79,15 @@ export const GLASS_DEFINITION: EffectToolDefinition<GlassParams, AuthorizedEffec
   primaryBackend: GPU_BACKEND,
   fallbackStrategy: { kind: "reject", reason: "Glass transmission and refraction require the server GPU material path." },
   performanceGrade: "heavy",
-  normalizeParams: (params) => ({ blur: round(params.blur), refraction: round(params.refraction), tint: params.tint, tintStrength: round(params.tintStrength), border: round(params.border), opacity: round(params.opacity) }),
+  normalizeParams: (params) => ({ blur: round(params.blur), refraction: round(params.refraction),
+    tintColor: normalizeColor(params.tintColor), tintStrength: round(params.tintStrength),
+    border: round(params.border), opacity: round(params.opacity) }),
   validateParams: () => ({ valid: true }),
   render: (context, params) => {
     const surface = parseMaterialSurface(singleBinding(context, "target_layer"));
     const backdrop = parsePixelLayer(singleBinding(context, "backdrop_layer"));
-    const tint = TINTS[params.tint];
+    if (!COLOR_PATTERN.test(params.tintColor)) throw new TypeError("tintColor must be a #RRGGBB color.");
+    const tint = colorToRgb(params.tintColor);
     const fresnel = (1 - surface.facing) ** 5;
     const borderHighlight = clamp(params.border / 10 * 0.55 + fresnel * params.border / 3);
     const transmission = 1 - params.opacity;

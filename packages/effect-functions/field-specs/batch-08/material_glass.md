@@ -17,7 +17,7 @@
   "data": {
     "blur": 12,
     "refraction": 0.35,
-    "tint": "clear",
+    "tintColor": "#FFFFFF",
     "tintStrength": 0.18,
     "border": 1.5,
     "opacity": 0.72
@@ -31,7 +31,7 @@
 | --- | --- | --- | --- | --- |
 | `blur` | 是 | 0–40 | 12 | 背景模糊强度 |
 | `refraction` | 是 | 0–1 | 0.35 | 折射强度 |
-| `tint` | 是 | `clear` / `cool` / `warm` / `mint` | `clear` | 玻璃色调 |
+| `tintColor` | 是 | `#RRGGBB` | `#FFFFFF` | 玻璃颜色；白色为无偏色，按自然语言直接输出蓝、红、绿等颜色值 |
 | `tintStrength` | 否 | 0–1 | 0.18 | 色调混合强度 |
 | `border` | 否 | 0–10 | 1.5 | 边缘高光强度 |
 | `opacity` | 否 | 0–1 | 0.72 | 玻璃本体不透明度 |
@@ -46,11 +46,11 @@
 
 ## 选择策略
 
-“更透明”降低 `opacity` 和 `tintStrength`；“更磨砂”提高 `blur`；“更清晰”降低 `blur`；“折射更明显”提高 `refraction`；“更亮”提高 `border`；冷色科技感选 `cool`，温润选 `warm`。
+“更透明”降低 `opacity` 和 `tintStrength`；“更磨砂”提高 `blur`；“更清晰”降低 `blur`；“折射更明显”提高 `refraction`；“更亮”提高 `border`。颜色词直接转换为 `tintColor`，例如蓝色 `#3B82F6`、红色 `#EF4444`；明显彩色玻璃把 `tintStrength` 提高到 0.3–0.55。
 
 ## 参数优先级
 
-先决定清透或磨砂并设置 `blur`、`opacity`，再调 `refraction`，最后设置 `tint`、`tintStrength` 与 `border`。透明度和模糊决定主体观感。
+先决定清透或磨砂并设置 `blur`、`opacity`，再调 `refraction`，最后设置 `tintColor`、`tintStrength` 与 `border`。透明度和模糊决定主体观感。
 
 ## 自然语言示例
 
@@ -61,10 +61,12 @@
 5. 暖色玻璃，色调保持克制。
 6. 背景更清晰，玻璃边框更亮。
 7. 让上传的视频看起来像隔着清透玻璃观看，保留视频原本的运动。
+8. 透过蓝色磨砂玻璃观看，使用 `tintColor=#3B82F6`、较高 `blur` 和约 0.4 的 `tintStrength`。
+9. 透过红色玻璃观看，使用 `tintColor=#EF4444`；不要改成有限色调枚举。
 
 ## 推荐值、默认值和中性值
 
-默认及中性值为 `blur=12`、`refraction=0.35`、`tint=clear`、`tintStrength=0.18`、`border=1.5`、`opacity=0.72`。清透玻璃推荐 `blur` 4–9、`opacity` 0.45–0.65。
+默认及中性值为 `blur=12`、`refraction=0.35`、`tintColor=#FFFFFF`、`tintStrength=0.18`、`border=1.5`、`opacity=0.72`。清透玻璃推荐 `blur` 4–9、`opacity` 0.45–0.65；无偏色使用白色，任意彩色玻璃使用对应的六位十六进制色值。
 
 ## 非适用范围
 
