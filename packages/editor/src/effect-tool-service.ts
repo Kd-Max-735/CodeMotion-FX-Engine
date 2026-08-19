@@ -92,7 +92,8 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   lens_flare: "source_frame",
   marker_stroke: "source_image",
   chalk_stroke: "source_image",
-  neon_glow: "source_image"
+  neon_glow: "source_image",
+  neon_trace: "source_image"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
@@ -1084,9 +1085,6 @@ function previewDataBinding(
   }
   if (definition.toolName === "wave_path" && slot.name === "source_path") {
     return { points: derivedFeaturePath(pixels, render), closed: false };
-  }
-  if (definition.toolName === "neon_trace" && slot.name === "trace_path") {
-    return { points: pixelContour(pixels, render), closed: true };
   }
   if (definition.toolName === "paint_on" && slot.name === "stroke_plan") {
     return { strokes: derivedPaintStrokes(pixels, render) };

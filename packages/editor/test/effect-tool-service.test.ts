@@ -865,11 +865,17 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(7);
 
+    const neonTrace = EFFECT_TOOL_REGISTRY.getByToolName("neon_trace")!;
+    await expect(resolver.visionImage(principal, neonTrace, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(8);
+
     const filmGrain = EFFECT_TOOL_REGISTRY.getByToolName("film_grain")!;
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(7);
+    expect(resolveMedia).toHaveBeenCalledTimes(8);
   });
 
   it.each(["marker_stroke", "chalk_stroke", "neon_glow"])(
@@ -1180,8 +1186,7 @@ describe("server single effect-tool service", () => {
       ["lightning_trace", "guide_path", 11, false],
       ["shape_boolean_animate", "shape_a", 32, true],
       ["shape_boolean_animate", "shape_b", 32, true],
-      ["wave_path", "source_path", 11, false],
-      ["neon_trace", "trace_path", 32, true]
+      ["wave_path", "source_path", 11, false]
     ] as const;
     for (const [toolName, slotName, pointCount, closed] of geometryCases) {
       const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;

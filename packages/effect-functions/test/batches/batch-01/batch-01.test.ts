@@ -256,6 +256,24 @@ describe("batch-01 effect definitions", () => {
     expect(output.dabs.at(-1)!.center.x).toBeGreaterThan(output.dabs[0]!.center.x);
   });
 
+  it("builds the directed neon path from vision coordinates over one source image", async () => {
+    const neon = BATCH_01_DEFINITIONS.find((entry) => entry.toolName === "neon_trace")!;
+    expect(neon.version).toBe("2.0.0");
+    expect(neon.inputSlots.map((slot) => [slot.name, slot.kind])).toEqual([["source_image", "image"]]);
+    const result = await executeSelectedEffectTool(
+      neon,
+      neon.toolName,
+      { type: neon.toolName, data: {
+        ...neon.defaults, startX: 0.72, startY: 0.3, endX: 0.18, endY: 0.66, curve: -0.25, trailLength: 1
+      } },
+      contextFor(neon, 173, 1.4)
+    );
+    const points = (result.output as { points: readonly { x: number; y: number }[] }).points;
+    expect(points[0]!.x).toBeGreaterThan(points.at(-1)!.x);
+    expect(points[0]!.x).toBeCloseTo(0.72 * 159, 1);
+    expect(points.at(-1)!.x).toBeCloseTo(0.18 * 159, 1);
+  });
+
   it.each([
     ["shape_boolean_animate", "progress", 1.4],
     ["neon_trace", "revealProgress", 1.4],
