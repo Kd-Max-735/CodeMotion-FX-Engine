@@ -147,7 +147,7 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
     number("decay", 5, 0, 20, 0.1), choice("axis", "x", ["x", "y", "scale"])
   ], "light", 5),
   b("M07", "fx.motion.float", "Float", "motion", "Looping axial float.", [
-    choice("axis", "y", ["x", "y", "both"]), number("range", 0.04, 0, 1, 0.005, "canvas"),
+    choice("axis", "y", ["x", "y", "both", "diagonal_down", "diagonal_up"]), number("range", 0.04, 0, 1, 0.005, "canvas"),
     number("frequency", 1, 0, 20, 0.1, "hertz"), number("phase", 0, -6.283, 6.283, 0.01, "radians")
   ], "light", 5),
   b("M08", "fx.motion.shake", "Shake", "motion", "Seeded impact shake.", [

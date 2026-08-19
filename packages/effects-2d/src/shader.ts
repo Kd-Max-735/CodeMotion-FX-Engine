@@ -127,9 +127,12 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   c = sampleAt(uv - axis * displacement);`,
   M07: `
   float floatAngle = u_time * (u_p2 * 20.0) * 6.283 + (-6.283 + u_p3 * 12.566);
-  vec2 floatOffset = u_p0 < 0.34 ? vec2(sin(floatAngle), 0.0) * u_p1
-    : u_p0 < 0.67 ? vec2(0.0, sin(floatAngle)) * u_p1
-    : vec2(sin(floatAngle), cos(floatAngle)) * u_p1;
+  float floatWave = sin(floatAngle);
+  vec2 floatOffset = u_p0 < 0.125 ? vec2(floatWave, 0.0) * u_p1
+    : u_p0 < 0.375 ? vec2(0.0, floatWave) * u_p1
+    : u_p0 < 0.625 ? vec2(floatWave, cos(floatAngle)) * u_p1
+    : u_p0 < 0.875 ? vec2(floatWave, floatWave) * (u_p1 * 0.70710678)
+    : vec2(floatWave, -floatWave) * (u_p1 * 0.70710678);
   c = sampleAt(uv - floatOffset);`,
   M08: `
   float frequency = u_p1 * 60.0;

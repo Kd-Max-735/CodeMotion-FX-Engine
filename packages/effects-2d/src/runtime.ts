@@ -530,9 +530,12 @@ function renderMotion(
         const horizontal = Math.sin(angle) * range;
         const vertical = Math.cos(angle) * range;
         const axis = stringParam(params, "axis", "y");
+        const diagonal = range === 0 ? 0 : horizontal / Math.SQRT2;
         rgba = transformedSample(source, u, v, (su, sv) => [
-          su - (axis === "x" || axis === "both" ? horizontal : 0),
-          sv - (axis === "y" ? horizontal : axis === "both" ? vertical : 0)
+          su - (axis === "x" || axis === "both" ? horizontal
+            : axis === "diagonal_down" || axis === "diagonal_up" ? diagonal : 0),
+          sv - (axis === "y" ? horizontal : axis === "both" ? vertical
+            : axis === "diagonal_down" ? diagonal : axis === "diagonal_up" ? -diagonal : 0)
         ]);
       } else {
         rgba = transformedSample(
