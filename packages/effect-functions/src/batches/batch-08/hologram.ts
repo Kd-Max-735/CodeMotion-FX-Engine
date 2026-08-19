@@ -67,11 +67,11 @@ export const HOLOGRAM_DEFINITION: EffectToolDefinition<HologramParams, Authorize
     required: ["scanline", "flicker", "glitch", "depth"],
     properties: {
       scanline: { type: "number", minimum: 0, maximum: 1, default: 0.34 },
-      flicker: { type: "number", minimum: 0, maximum: 1, default: 0.18 },
+      flicker: { type: "number", minimum: 0, maximum: 1, default: 0.12 },
       glitch: { type: "number", minimum: 0, maximum: 1, default: 0.12 },
       depth: { type: "number", minimum: 0, maximum: 1, default: 0.4 },
-      brightness: { type: "number", minimum: 0, maximum: 3, default: 1.2 },
-      opacity: { type: "number", minimum: 0, maximum: 1, default: 0.72 },
+      brightness: { type: "number", minimum: 0, maximum: 3, default: 1.5 },
+      opacity: { type: "number", minimum: 0, maximum: 1, default: 0.78 },
       colorMode: { type: "string", enum: ["cyan", "green", "magenta"], default: "cyan" }
     }
   },
