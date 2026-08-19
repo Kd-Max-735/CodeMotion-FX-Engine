@@ -1101,14 +1101,25 @@ function renderLight(
       } else if (blueprint.sourceId === "L03") {
         const center = vectorParam(params, "source", [0.72, 0.28]);
         const distance = Math.hypot(u - center[0], v - center[1]);
-        const ghosts = Math.max(1, numberParam(params, "ghosts", 5));
-        const streak = numberParam(params, "streak", 0.45);
-        const chromatic = numberParam(params, "chromatic", 0.08);
-        const streakLight = Math.exp(-Math.abs(v - center[1]) * (30 / Math.max(0.05, streak)))
-          * Math.exp(-Math.abs(u - center[0]) * 2);
-        light = clamp((1 - smoothstep(0, 0.22, distance))
-          + Math.max(0, Math.sin(distance * ghosts * 35)) * 0.16 + streakLight * streak);
-        color = [1, clamp(0.72 - chromatic * 0.4), clamp(0.32 + chromatic * 0.8)];
+        const ghosts = Math.max(0, Math.round(numberParam(params, "ghosts", 2)));
+        const streak = numberParam(params, "streak", 0.18);
+        const chromatic = numberParam(params, "chromatic", 0.03);
+        const core = Math.exp(-(distance * distance) / (2 * 0.028 * 0.028)) * 0.82;
+        const bloom = Math.exp(-distance / 0.115) * 0.34;
+        const streakLight = Math.exp(-Math.abs(v - center[1]) * 90)
+          * Math.exp(-Math.abs(u - center[0]) * 3.2) * streak * 0.42;
+        let ghostLight = 0;
+        for (let ghost = 0; ghost < ghosts; ghost += 1) {
+          const t = (ghost + 1) / (ghosts + 1);
+          const ghostX = center[0] + (0.5 - center[0]) * t * 1.8;
+          const ghostY = center[1] + (0.5 - center[1]) * t * 1.8;
+          const ghostDistance = Math.hypot(u - ghostX, v - ghostY);
+          const radius = 0.025 + t * 0.018;
+          ghostLight += Math.exp(-(ghostDistance * ghostDistance) / (2 * radius * radius))
+            * (0.11 - t * 0.035);
+        }
+        light = clamp(core + bloom + streakLight + ghostLight);
+        color = [1, clamp(0.78 - chromatic * 0.25), clamp(0.48 + chromatic * 0.6)];
       } else {
         const center = vectorParam(params, "center", [0.5, 0.5]);
         const distance = Math.hypot(u - center[0], v - center[1]);

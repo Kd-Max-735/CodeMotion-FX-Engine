@@ -237,8 +237,8 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
     number("softness", 0.4, 0, 1, 0.01), number("speed", 0.8, -10, 10, 0.1, "cycles/s")
   ], "medium", 8),
   b("L03", "fx.light.lensFlare", "Lens Flare", "light", "Procedural flare ghosts and streak.", [
-    vector("source", [0.72, 0.28]), number("ghosts", 5, 0, 16, 1, "count", "high"),
-    number("streak", 0.45, 0, 2, 0.01), number("chromatic", 0.08, 0, 1, 0.01)
+    vector("source", [0.72, 0.28]), number("ghosts", 2, 0, 8, 1, "count", "high"),
+    number("streak", 0.18, 0, 1, 0.01), number("chromatic", 0.03, 0, 0.5, 0.01)
   ], "heavy", 13),
   b("L04", "fx.light.energyPulse", "Energy Pulse", "light", "Radial energy rings.", [
     vector("center", [0.5, 0.5]), number("radius", 0.34, 0, 2, 0.01, "canvas"),
