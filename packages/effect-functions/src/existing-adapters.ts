@@ -116,7 +116,8 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   D03: "1.1.0",
   D04: "1.1.0",
   L03: "1.1.0",
-  L04: "1.3.0"
+  L04: "1.3.0",
+  H01: "2.0.0"
 });
 
 function slot(
@@ -128,6 +129,19 @@ function slot(
 }
 
 function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlotDefinition[] {
+  if (effect.sourceId === "H01") {
+    return Object.freeze([
+      slot("source_frame", "image", "Owner-authorized bottom image or decoded video frame."),
+      slot("target_frame", "image", "Owner-authorized target image or decoded video frame."),
+      Object.freeze({
+        name: "mask_layer",
+        kind: "mask" as const,
+        required: false,
+        cardinality: "one" as const,
+        description: "Optional owner-authorized custom reveal mask."
+      })
+    ]);
+  }
   if (effect.sourceId === "T08") {
     return Object.freeze([slot("text_raster", "data", "Server-rasterized glyph geometry and pixels.")]);
   }
@@ -165,7 +179,6 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   }
   if (effect.sourceId === "T04") slots.push(slot("motion_path", "data", "Server-bound text motion path."));
   if (effect.sourceId === "V02") slots.push(slot("morph_paths", "data", "Server-bound source and target vector paths."));
-  if (effect.sourceId === "H01") slots.push(slot("mask_layer", "mask", "Owner-authorized reveal mask."));
   if (effect.sourceId === "H02") slots.push(slot("matte_layer", "mask", "Owner-authorized track matte."));
   if (effect.sourceId === "H03") slots.push(slot("overlay_layer", "image", "Owner-authorized overlay layer."));
   if (effect.sourceId === "H04") slots.push(slot("displacement_map", "texture", "Owner-authorized displacement map."));
@@ -178,6 +191,25 @@ function withoutResourceFields(effectId: string, value: Readonly<JsonObject>): J
 }
 
 function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
+  if (effect.sourceId === "H01") {
+    return {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      additionalProperties: false,
+      required: ["progress", "feather", "invert", "shape", "motion", "centerX", "centerY", "rotation", "size"],
+      properties: {
+        progress: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 1 },
+        feather: { type: "number", minimum: 0, maximum: 0.5, multipleOf: 0.005, default: 0.04 },
+        invert: { type: "boolean", default: false },
+        shape: { type: "string", enum: ["circle", "ellipse", "rectangle", "diamond", "custom"], default: "circle" },
+        motion: { type: "string", enum: ["expand", "left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top"], default: "expand" },
+        centerX: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 0.5 },
+        centerY: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 0.5 },
+        rotation: { type: "number", minimum: -180, maximum: 180, multipleOf: 1, default: 0 },
+        size: { type: "number", minimum: 0.1, maximum: 2, multipleOf: 0.01, default: 1 }
+      }
+    };
+  }
   const schema = structuredClone(effect.parameterSchema) as JsonObject;
   const properties = schema.properties as JsonObject;
   for (const name of RESOURCE_FIELDS[effect.effectId] ?? []) delete properties[name];
@@ -301,6 +333,110 @@ function internalParams(
   return output;
 }
 
+const MASK_REVEAL_DEFAULTS: Readonly<JsonObject> = Object.freeze({
+  progress: 1,
+  feather: 0.04,
+  invert: false,
+  shape: "circle",
+  motion: "expand",
+  centerX: 0.5,
+  centerY: 0.5,
+  rotation: 0,
+  size: 1
+});
+
+function directPixelSurface(context: ServerEffectRenderContext, name: string): PixelSurface {
+  const binding = singleBinding<Record<string, unknown>>(context, name);
+  const surface = binding.surface as PixelSurface | undefined;
+  if (surface !== undefined && surface.width === context.width && surface.height === context.height
+    && (surface.data instanceof Uint8Array || surface.data instanceof Uint8ClampedArray)) {
+    return surface;
+  }
+  const data = binding.data;
+  if (binding.width === context.width && binding.height === context.height
+    && (data instanceof Uint8Array || data instanceof Uint8ClampedArray)
+    && data.length === context.width * context.height * 4) {
+    return {
+      width: context.width,
+      height: context.height,
+      data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength),
+      colorSpace: "srgb",
+      alphaMode: "straight"
+    };
+  }
+  throw new TypeError(`${name} must contain one decoded RGBA frame.`);
+}
+
+function smoothUnit(edge0: number, edge1: number, value: number): number {
+  if (Math.abs(edge1 - edge0) <= Number.EPSILON) return value < edge0 ? 0 : 1;
+  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function maskRevealFrame(
+  context: ServerEffectRenderContext,
+  params: Readonly<JsonObject>
+): PixelSurface {
+  const source = directPixelSurface(context, "source_frame");
+  const target = directPixelSurface(context, "target_frame");
+  const limit = Math.min(1, Math.max(0, params.progress as number));
+  const reveal = Math.min(limit, Math.max(0, context.time) * limit);
+  if (reveal <= 0) return { ...source, data: new Uint8ClampedArray(source.data) };
+  if (reveal >= 1) return { ...target, data: new Uint8ClampedArray(target.data) };
+  const shape = params.shape as string;
+  const motion = params.motion as string;
+  const feather = params.feather as number;
+  const centerX = params.centerX as number;
+  const centerY = params.centerY as number;
+  const radians = (params.rotation as number) * Math.PI / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const size = params.size as number;
+  const custom = shape === "custom" ? directPixelSurface(context, "mask_layer") : undefined;
+  const output = new Uint8ClampedArray(source.data.length);
+  for (let y = 0; y < context.height; y += 1) for (let x = 0; x < context.width; x += 1) {
+    const u = x / Math.max(1, context.width - 1);
+    const v = y / Math.max(1, context.height - 1);
+    let metric: number;
+    if (custom !== undefined) {
+      const offset = (y * context.width + x) * 4;
+      const alpha = custom.data[offset + 3]! / 255;
+      const luminance = (custom.data[offset]! * 0.2126 + custom.data[offset + 1]! * 0.7152
+        + custom.data[offset + 2]! * 0.0722) / 255;
+      metric = 1 - (alpha < 0.999 ? alpha : luminance);
+    } else if (motion !== "expand") {
+      metric = motion === "right_to_left" ? 1 - u
+        : motion === "top_to_bottom" ? v
+          : motion === "bottom_to_top" ? 1 - v : u;
+    } else {
+      const dx = u - centerX;
+      const dy = v - centerY;
+      const rx = dx * cosine + dy * sine;
+      const ry = -dx * sine + dy * cosine;
+      const extent = Math.max(
+        Math.hypot(centerX, centerY),
+        Math.hypot(1 - centerX, centerY),
+        Math.hypot(centerX, 1 - centerY),
+        Math.hypot(1 - centerX, 1 - centerY),
+        0.001
+      ) * size;
+      metric = shape === "rectangle" ? Math.max(Math.abs(rx) / 0.82, Math.abs(ry) / 0.58) / extent
+        : shape === "diamond" ? (Math.abs(rx) + Math.abs(ry)) / (extent * 1.38)
+          : shape === "ellipse" ? Math.hypot(rx, ry / 0.62) / extent
+            : Math.hypot(rx, ry) / extent;
+    }
+    let coverage = 1 - smoothUnit(reveal - feather, reveal + feather, metric);
+    if (params.invert === true) coverage = 1 - coverage;
+    const offset = (y * context.width + x) * 4;
+    for (let channel = 0; channel < 4; channel += 1) {
+      output[offset + channel] = Math.round(
+        source.data[offset + channel]! * (1 - coverage) + target.data[offset + channel]! * coverage
+      );
+    }
+  }
+  return { ...source, data: output };
+}
+
 function effectTime(effectId: string, context: ServerEffectRenderContext) {
   return Object.freeze({
     contractVersion: "1.1.0" as const,
@@ -335,7 +471,9 @@ function grade(effect: P0CatalogEffectDefinition): EffectPerformanceGrade {
 function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDefinition {
   const identity = IDENTITIES[effect.effectId];
   if (identity === undefined) throw new TypeError(`Missing existing effect identity for ${effect.effectId}.`);
-  const defaults = Object.freeze(withoutResourceFields(effect.effectId, effect.defaultPreset));
+  const defaults = effect.sourceId === "H01"
+    ? MASK_REVEAL_DEFAULTS
+    : Object.freeze(withoutResourceFields(effect.effectId, effect.defaultPreset));
   return Object.freeze({
     effectId: effect.effectId,
     toolName: identity.toolName,
@@ -357,7 +495,9 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
     }),
     performanceGrade: grade(effect),
     normalizeParams(params: Readonly<JsonObject>): JsonObject {
-      const normalized = effect.sourceId === "T08"
+      const normalized = effect.sourceId === "H01"
+        ? { ...params }
+        : effect.sourceId === "T08"
         ? normalizeTextExtrude3DParams(params)
         : normalizeEffectParams(effect.effectId, params);
       return withoutResourceFields(effect.effectId, normalized as JsonObject);
@@ -367,7 +507,9 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
       const time = effectTime(effect.effectId, context);
       const resolved = internalParams(effect, context, params);
       let output: PixelSurface;
-      if (effect.sourceId === "T08") {
+      if (effect.sourceId === "H01") {
+        output = maskRevealFrame(context, params);
+      } else if (effect.sourceId === "T08") {
         const input = singleBinding<TextExtrude3DRasterInput>(context, "text_raster");
         output = effect.renderPixels(input, resolved, {
           time,

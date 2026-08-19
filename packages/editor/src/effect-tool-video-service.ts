@@ -643,14 +643,17 @@ export class EffectToolVideoService {
           if (task.prepared?.inputIds !== undefined) {
             const mutableInputs: Record<string, AuthorizedEffectInputs[string]> = { ...task.prepared.inputs };
             for (const slot of definition.inputSlots.filter((item) => item.kind === "video"
-              || definition.toolName === "glass" && item.name === "source_image")) {
+              || definition.toolName === "glass" && item.name === "source_image"
+              || definition.toolName === "mask_reveal"
+                && (item.name === "source_frame" || item.name === "target_frame"))) {
               const rawId = task.prepared.inputIds[slot.name];
               const assetId = typeof rawId === "string" ? rawId : rawId?.[0];
               if (assetId === undefined) continue;
               let media = preparedMedia.get(assetId);
               if (media === undefined) {
                 media = await this.options.media.resolve(task.owner, assetId, signal);
-                if (media.asset.type !== "video" && definition.toolName !== "glass") {
+                if (media.asset.type !== "video"
+                  && definition.toolName !== "glass" && definition.toolName !== "mask_reveal") {
                   throw new TypeError(`${slot.name} requires an authorized video asset.`);
                 }
                 preparedMedia.set(assetId, media);

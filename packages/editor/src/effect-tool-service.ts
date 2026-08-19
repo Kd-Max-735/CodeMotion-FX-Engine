@@ -407,7 +407,9 @@ function acceptsUploadedVideo(
 ): boolean {
   if (isServerDerivedInputSlot(definition, slot)) return false;
   return slot.kind === "video"
-    || definition.toolName === "glass" && slot.name === "source_image";
+    || definition.toolName === "glass" && slot.name === "source_image"
+    || definition.toolName === "mask_reveal"
+      && (slot.name === "source_frame" || slot.name === "target_frame");
 }
 
 function acceptsUploadedAudio(

@@ -143,10 +143,14 @@ const EXPECTED = Object.freeze({
   mask_reveal: {
     effectId: "fx.composite.maskReveal",
     properties: {
-      progress: number(0.5, 0, 1, 0.01), feather: number(0.04, 0, 0.5, 0.005),
-      invert: boolean(false)
+      progress: number(1, 0, 1, 0.01), feather: number(0.04, 0, 0.5, 0.005),
+      invert: boolean(false),
+      shape: choice("circle", ["circle", "ellipse", "rectangle", "diamond", "custom"]),
+      motion: choice("expand", ["expand", "left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top"]),
+      centerX: number(0.5, 0, 1, 0.01), centerY: number(0.5, 0, 1, 0.01),
+      rotation: number(0, -180, 180, 1), size: number(1, 0.1, 2, 0.01)
     },
-    slots: [["source_layer", "data"], ["mask_layer", "mask"]]
+    slots: [["source_frame", "image"], ["target_frame", "image"], ["mask_layer", "mask"]]
   },
   motion_blur: {
     effectId: "fx.post.motionBlur",
@@ -229,7 +233,7 @@ const DOC_INPUT_TERMS: Readonly<Record<string, readonly string[]>> = Object.free
   ink_spread: ["源图片由服务端绑定"],
   lens_flare: ["源画面由服务端绑定"],
   liquid_wipe: ["A、B 两路素材由服务端绑定"],
-  mask_reveal: ["遮罩与源画面由服务端绑定"],
+  mask_reveal: ["底层画面、目标画面与可选自定义遮罩由服务端绑定"],
   motion_blur: ["源画面和实际素材由服务端绑定"],
   neon_glow: ["源图片、文字或图形由服务端绑定"],
   pixel_dissolve: ["A、B 两路素材由服务端绑定"],
@@ -376,6 +380,112 @@ describe("existing-02 field specifications and adapter contracts", () => {
     ]);
   });
 
+  it("keeps the mask_reveal Schema, Markdown and input contract aligned", async () => {
+    const definition = definitions().get("mask_reveal")!;
+    const markdown = await loadEffectFieldSpec("mask_reveal");
+    const jsonBlock = markdown.match(/```json\s*([\s\S]*?)```/u)?.[1];
+
+    expect(definition.version).toBe("2.0.0");
+    expect(definition.inputSlots.map(({ name, kind, required }) => ({ name, kind, required }))).toEqual([
+      { name: "source_frame", kind: "image", required: true },
+      { name: "target_frame", kind: "image", required: true },
+      { name: "mask_layer", kind: "mask", required: false }
+    ]);
+    expect(jsonBlock).toBeDefined();
+    expect(JSON.parse(jsonBlock!)).toEqual({ type: "mask_reveal", data: definition.defaults });
+    expect(validateAndNormalizeEffectEnvelope(
+      definition,
+      "mask_reveal",
+      JSON.parse(jsonBlock!) as unknown
+    ).data).toEqual(definition.defaults);
+  });
+
+  it("composites mask_reveal from source to target and holds the completed target", async () => {
+    const definition = definitions().get("mask_reveal")!;
+    const surface = (rgba: readonly [number, number, number, number]) => ({
+      width: 4,
+      height: 2,
+      data: new Uint8ClampedArray(Array.from({ length: 8 }, () => rgba).flat()),
+      colorSpace: "srgb" as const,
+      alphaMode: "straight" as const
+    });
+    const source = surface([12, 24, 36, 255]);
+    const target = surface([210, 180, 150, 255]);
+    const input = (slotName: string, kind: EffectInputKind, binding: unknown) => ({
+      slot: slotName,
+      kind,
+      tenantId: "tenant-existing-02",
+      userId: "user-existing-02",
+      locked: true as const,
+      binding
+    });
+    const inputs = {
+      source_frame: input("source_frame", "image", { surface: source }),
+      target_frame: input("target_frame", "image", { surface: target })
+    };
+    const renderAt = async (time: number) => {
+      const result = await definition.render({
+        ...contextFor(definition, inputs),
+        time,
+        width: 4,
+        height: 2
+      }, {
+        ...definition.defaults,
+        motion: "left_to_right"
+      });
+      return result.output as typeof source;
+    };
+
+    expect(Array.from((await renderAt(0)).data)).toEqual(Array.from(source.data));
+    const middle = await renderAt(0.5);
+    expect(Array.from(middle.data)).not.toEqual(Array.from(source.data));
+    expect(Array.from(middle.data)).not.toEqual(Array.from(target.data));
+    expect(Array.from((await renderAt(1)).data)).toEqual(Array.from(target.data));
+    expect(Array.from((await renderAt(1.5)).data)).toEqual(Array.from(target.data));
+  });
+
+  it("uses an optional custom mask in mask_reveal without replacing uncovered source pixels", async () => {
+    const definition = definitions().get("mask_reveal")!;
+    const sourceData = new Uint8ClampedArray([
+      10, 20, 30, 255, 10, 20, 30, 255,
+      10, 20, 30, 255, 10, 20, 30, 255
+    ]);
+    const targetData = new Uint8ClampedArray([
+      200, 210, 220, 255, 200, 210, 220, 255,
+      200, 210, 220, 255, 200, 210, 220, 255
+    ]);
+    const maskData = new Uint8ClampedArray([
+      255, 255, 255, 255, 255, 255, 255, 255,
+      0, 0, 0, 255, 0, 0, 0, 255
+    ]);
+    const binding = (slotName: string, kind: EffectInputKind, data: Uint8ClampedArray) => ({
+      slot: slotName,
+      kind,
+      tenantId: "tenant-existing-02",
+      userId: "user-existing-02",
+      locked: true as const,
+      binding: { width: 2, height: 2, data }
+    });
+    const result = await definition.render({
+      ...contextFor(definition, {
+        source_frame: binding("source_frame", "image", sourceData),
+        target_frame: binding("target_frame", "image", targetData),
+        mask_layer: binding("mask_layer", "mask", maskData)
+      }),
+      time: 0.5,
+      width: 2,
+      height: 2
+    }, {
+      ...definition.defaults,
+      shape: "custom",
+      feather: 0
+    });
+    const output = result.output as { data: Uint8ClampedArray };
+
+    expect(Array.from(output.data.slice(0, 8))).toEqual(Array.from(targetData.slice(0, 8)));
+    expect(Array.from(output.data.slice(8))).toEqual(Array.from(sourceData.slice(8)));
+  });
+
   it("maps exactly the assigned 20 snake_case tools to one independent Markdown file", async () => {
     const byToolName = definitions();
     expect([...byToolName.keys()].sort()).toEqual(TOOL_NAMES);
@@ -409,8 +519,9 @@ describe("existing-02 field specifications and adapter contracts", () => {
       ));
       expect(definition.inputSlots.map((slot) => [slot.name, slot.kind]), toolName)
         .toEqual(expected.slots);
-      expect(definition.inputSlots.every((slot) => slot.required && slot.cardinality === "one"), toolName)
-        .toBe(true);
+      expect(definition.inputSlots.every((slot) => slot.cardinality === "one"), toolName).toBe(true);
+      expect(definition.inputSlots.filter((slot) => !slot.required).map((slot) => slot.name), toolName)
+        .toEqual(toolName === "mask_reveal" ? ["mask_layer"] : []);
       expect(Object.keys(schema.properties).some((name) => FORBIDDEN_RESOURCE_FIELDS.has(name)), toolName)
         .toBe(false);
 
@@ -473,7 +584,7 @@ describe("existing-02 field specifications and adapter contracts", () => {
 
   it("reports every missing required server resource instead of entering render", async () => {
     for (const definition of definitions().values()) {
-      for (const slot of definition.inputSlots) {
+      for (const slot of definition.inputSlots.filter((item) => item.required)) {
         const inputs = { ...inputsFor(definition) } as Record<string, unknown>;
         delete inputs[slot.name];
         const observed = observedDefinition(definition);

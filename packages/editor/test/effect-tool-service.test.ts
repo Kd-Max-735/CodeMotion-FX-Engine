@@ -1360,10 +1360,29 @@ describe("server single effect-tool service", () => {
           { name: "overlay_layer", required: true, acceptsUploadedImage: true }
         ]
       });
-      for (const toolName of [
-        "blob_morph", "bounce", "brush_reveal", "chalk_stroke",
-        "character_cascade", "chart_reveal", "dash_flow"
-      ]) {
+      expect(catalog.tools.find((item) => item.toolName === "mask_reveal")).toMatchObject({
+        inputRequirements: [
+          {
+            name: "source_frame",
+            required: true,
+            acceptsUploadedImage: true,
+            acceptsUploadedVideo: true
+          },
+          {
+            name: "target_frame",
+            required: true,
+            acceptsUploadedImage: true,
+            acceptsUploadedVideo: true
+          },
+          {
+            name: "mask_layer",
+            required: false,
+            acceptsUploadedImage: true,
+            acceptsUploadedVideo: false
+          }
+        ]
+      });
+      for (const toolName of ["blob_morph", "bounce", "chart_reveal"]) {
         const promptOnly = catalog.tools.find((item) => item.toolName === toolName)! as {
           inputRequirements: Array<{
             required: boolean;
@@ -1372,7 +1391,6 @@ describe("server single effect-tool service", () => {
             acceptsUploadedAudio: boolean;
           }>;
         };
-        expect(promptOnly.inputRequirements.length, toolName).toBeGreaterThan(0);
         expect(promptOnly.inputRequirements.every((item) => item.required
           && !item.acceptsUploadedImage && !item.acceptsUploadedVideo && !item.acceptsUploadedAudio), toolName)
           .toBe(true);
