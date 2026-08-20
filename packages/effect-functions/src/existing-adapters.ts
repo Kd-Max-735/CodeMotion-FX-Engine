@@ -139,6 +139,21 @@ function slot(
 }
 
 function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlotDefinition[] {
+  if (effect.sourceId === "V01") {
+    return Object.freeze([
+      slot("source_image", "image", "Owner-authorized image revealed along the SAM3.1-selected subject contour.",
+        ["image/png", "image/jpeg", "image/webp"]),
+      slot("subject_mask", "mask", "Server-derived SAM3.1 mask for the requested visible target.")
+    ]);
+  }
+  if (effect.sourceId === "V02") {
+    return Object.freeze([
+      slot("source_frame", "image", "Owner-authorized source image for the transition.",
+        ["image/png", "image/jpeg", "image/webp"]),
+      slot("target_frame", "image", "Owner-authorized target image for the transition.",
+        ["image/png", "image/jpeg", "image/webp"])
+    ]);
+  }
   if (effect.sourceId === "H01") {
     return Object.freeze([
       slot("source_frame", "image", "Owner-authorized bottom image or decoded video frame."),
@@ -210,7 +225,6 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
     slots.push(slot("target_frame", "image", "Owner-authorized decoded source frame B."));
   }
   if (effect.sourceId === "T04") slots.push(slot("motion_path", "data", "Server-bound text motion path."));
-  if (effect.sourceId === "V02") slots.push(slot("morph_paths", "data", "Server-bound source and target vector paths."));
   if (effect.sourceId === "H02") slots.push(slot("matte_layer", "mask", "Owner-authorized track matte."));
   if (effect.sourceId === "H03") slots.push(slot("overlay_layer", "image", "Owner-authorized overlay layer."));
   if (effect.sourceId === "H04") slots.push(slot("displacement_map", "texture", "Owner-authorized displacement map."));
@@ -223,6 +237,38 @@ function withoutResourceFields(effectId: string, value: Readonly<JsonObject>): J
 }
 
 function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
+  if (effect.sourceId === "V01") {
+    return {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      additionalProperties: false,
+      required: ["target", "mode", "duration", "direction", "strokeWidth", "strokeColor"],
+      properties: {
+        target: { type: "string", minLength: 1, maxLength: 80, pattern: "^[\\p{L}\\p{N}][\\p{L}\\p{N} ,.'()/-]{0,79}$", default: "main subject" },
+        mode: { type: "string", enum: ["reveal", "erase"], default: "reveal" },
+        duration: { type: "number", minimum: 0.2, maximum: 30, multipleOf: 0.1, default: 3 },
+        direction: { type: "string", enum: ["left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top", "clockwise", "counter_clockwise"], default: "left_to_right" },
+        strokeWidth: { type: "number", minimum: 0.001, maximum: 0.5, multipleOf: 0.001, default: 0.03 },
+        strokeColor: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$", default: "#f4f0df" }
+      }
+    };
+  }
+  if (effect.sourceId === "V02") {
+    return {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      additionalProperties: false,
+      required: ["normalize", "progress", "duration", "direction", "strength", "blur"],
+      properties: {
+        normalize: { type: "boolean", default: true },
+        progress: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 1 },
+        duration: { type: "number", minimum: 0.2, maximum: 30, multipleOf: 0.1, default: 2.5 },
+        direction: { type: "string", enum: ["left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top", "center_out", "edge_in"], default: "left_to_right" },
+        strength: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.01, default: 0.38 },
+        blur: { type: "number", minimum: 0, maximum: 24, multipleOf: 0.1, default: 5 }
+      }
+    };
+  }
   if (effect.sourceId === "H01") {
     return {
       $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -297,6 +343,8 @@ function rasterBinding(context: ServerEffectRenderContext, name: string): Existi
 }
 
 function primarySlotName(effect: P0CatalogEffectDefinition): string {
+  if (effect.sourceId === "V01") return "source_image";
+  if (effect.sourceId === "V02") return "source_frame";
   if (effect.sourceId === "T02") return "source_image";
   if (effect.sourceId === "D01") return "source_image";
   if (effect.sourceId === "T03") return "source_image";
@@ -542,6 +590,126 @@ function neonGlowFrame(context: ServerEffectRenderContext, params: Readonly<Json
   return { ...source, data: output };
 }
 
+function surfacePixel(surface: PixelSurface, x: number, y: number): readonly number[] {
+  const safeX = Math.max(0, Math.min(surface.width - 1, Math.round(x)));
+  const safeY = Math.max(0, Math.min(surface.height - 1, Math.round(y)));
+  const offset = (safeY * surface.width + safeX) * 4;
+  return [surface.data[offset]!, surface.data[offset + 1]!, surface.data[offset + 2]!, surface.data[offset + 3]!];
+}
+
+function sampleSurface(surface: PixelSurface, x: number, y: number, blur = 0): readonly number[] {
+  if (blur <= 0.01) return surfacePixel(surface, x, y);
+  const taps = [-1, -0.5, 0, 0.5, 1];
+  const result = [0, 0, 0, 0];
+  for (const tap of taps) {
+    const pixel = surfacePixel(surface, x + tap * blur, y + tap * blur * 0.62);
+    for (let channel = 0; channel < 4; channel += 1) result[channel]! += pixel[channel]! / taps.length;
+  }
+  return result;
+}
+
+function pathMorphFrame(context: ServerEffectRenderContext, params: Readonly<JsonObject>): PixelSurface {
+  const source = rasterBinding(context, "source_frame").surface;
+  const target = rasterBinding(context, "target_frame").surface;
+  const duration = Math.max(0.2, params.duration as number);
+  const limit = Math.min(1, Math.max(0, params.progress as number));
+  const progress = Math.min(limit, Math.max(0, context.time / duration) * limit);
+  if (progress <= 0) return { ...source, data: new Uint8ClampedArray(source.data) };
+  if (progress >= 1) return { ...target, data: new Uint8ClampedArray(target.data) };
+  const direction = params.direction as string;
+  const centerX = context.width * 0.5;
+  const centerY = context.height * 0.5;
+  const baseAngle = direction === "right_to_left" ? Math.PI
+    : direction === "top_to_bottom" ? Math.PI / 2
+      : direction === "bottom_to_top" ? -Math.PI / 2 : 0;
+  const smoothProgress = progress * progress * (3 - 2 * progress);
+  const waveStrength = Math.min(context.width, context.height) * Math.max(0, Math.min(1, params.strength as number))
+    * Math.sin(Math.PI * progress);
+  const blur = Math.max(0, Math.min(24, params.blur as number)) * Math.sin(Math.PI * progress);
+  const output = new Uint8ClampedArray(source.data.length);
+  for (let y = 0; y < context.height; y += 1) for (let x = 0; x < context.width; x += 1) {
+    const u = x - centerX;
+    const v = y - centerY;
+    let dx = Math.cos(baseAngle);
+    let dy = Math.sin(baseAngle);
+    if (direction === "center_out" || direction === "edge_in") {
+      const length = Math.max(1, Math.hypot(u, v));
+      dx = u / length;
+      dy = v / length;
+    }
+    const nx = -dy;
+    const ny = dx;
+    const wave = Math.sin((u * nx + v * ny) * 0.075 + context.time * 8 + context.seed * 0.0001) * waveStrength;
+    const sourceShift = direction === "edge_in" ? 1 - smoothProgress : smoothProgress;
+    const sourceX = x + dx * sourceShift * Math.min(context.width, context.height) * 0.32 + nx * wave;
+    const sourceY = y + dy * sourceShift * Math.min(context.width, context.height) * 0.32 + ny * wave;
+    const targetShift = direction === "edge_in" ? -smoothProgress : smoothProgress - 1;
+    const targetX = x + dx * targetShift * Math.min(context.width, context.height) * 0.32 - nx * wave;
+    const targetY = y + dy * targetShift * Math.min(context.width, context.height) * 0.32 - ny * wave;
+    const a = sampleSurface(source, sourceX, sourceY, blur);
+    const b = sampleSurface(target, targetX, targetY, blur);
+    const offset = (y * context.width + x) * 4;
+    for (let channel = 0; channel < 4; channel += 1) {
+      output[offset + channel] = Math.round(a[channel]! * (1 - smoothProgress) + b[channel]! * smoothProgress);
+    }
+  }
+  return { ...source, data: output };
+}
+
+function pathTrimFrame(context: ServerEffectRenderContext, params: Readonly<JsonObject>): PixelSurface {
+  const source = rasterBinding(context, "source_image").surface;
+  const mask = directMaskValues(context, "subject_mask");
+  const distances = maskBoundaryDistances(mask, context.width, context.height);
+  const duration = Math.max(0.2, params.duration as number);
+  const progress = Math.min(1, Math.max(0, context.time / duration));
+  const mode = params.mode as string;
+  const direction = params.direction as string;
+  const strokeWidth = Math.max(1, (params.strokeWidth as number) * Math.min(context.width, context.height));
+  const stroke = chalkColor(params.strokeColor as string);
+  let minX = context.width; let minY = context.height; let maxX = 0; let maxY = 0; let centerX = 0; let centerY = 0; let count = 0;
+  for (let index = 0; index < mask.length; index += 1) if (mask[index]! >= 128) {
+    const x = index % context.width; const y = Math.floor(index / context.width);
+    minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+    centerX += x; centerY += y; count += 1;
+  }
+  if (count === 0) throw new RangeError("subject_mask does not contain a visible target.");
+  centerX /= count; centerY /= count;
+  const output = new Uint8ClampedArray(source.data.length);
+  const sweepAt = (x: number, y: number): number => {
+    if (direction === "right_to_left") return 1 - (x - minX) / Math.max(1, maxX - minX);
+    if (direction === "top_to_bottom") return (y - minY) / Math.max(1, maxY - minY);
+    if (direction === "bottom_to_top") return 1 - (y - minY) / Math.max(1, maxY - minY);
+    if (direction === "clockwise" || direction === "counter_clockwise") {
+      const angle = Math.atan2(y - centerY, x - centerX);
+      const normalized = ((angle + Math.PI * 2.5) % (Math.PI * 2)) / (Math.PI * 2);
+      return direction === "clockwise" ? normalized : 1 - normalized;
+    }
+    return (x - minX) / Math.max(1, maxX - minX);
+  };
+  for (let y = 0; y < context.height; y += 1) for (let x = 0; x < context.width; x += 1) {
+    const index = y * context.width + x;
+    const inside = mask[index]! >= 128;
+    const sweep = sweepAt(x, y);
+    const edge = Math.min(1, Math.max(0, (progress - sweep + 0.055) / 0.11));
+    const reveal = mode === "erase" ? 1 - edge : edge;
+    const finalFrame = progress >= 1;
+    const coverage = finalFrame ? (mode === "erase" ? 0 : 1) : inside ? reveal : 0;
+    const offset = index * 4;
+    output[offset] = Math.round(source.data[offset]! * coverage);
+    output[offset + 1] = Math.round(source.data[offset + 1]! * coverage);
+    output[offset + 2] = Math.round(source.data[offset + 2]! * coverage);
+    output[offset + 3] = Math.round(source.data[offset + 3]! * coverage);
+    const outline = distances[index]! <= strokeWidth && Math.abs(sweep - progress) < 0.075;
+    if (outline && !finalFrame) {
+      output[offset] = stroke[0]!;
+      output[offset + 1] = stroke[1]!;
+      output[offset + 2] = stroke[2]!;
+      output[offset + 3] = 255;
+    }
+  }
+  return { ...source, data: output };
+}
+
 function directPixelSurface(context: ServerEffectRenderContext, name: string): PixelSurface {
   const binding = singleBinding<Record<string, unknown>>(context, name);
   const surface = binding.surface as PixelSurface | undefined;
@@ -658,6 +826,7 @@ function effectTime(effectId: string, context: ServerEffectRenderContext, durati
 }
 
 function secondarySlotName(effect: P0CatalogEffectDefinition): string | undefined {
+  if (effect.sourceId === "V02") return "target_frame";
   if (effect.sourceId === "D02") return "target_frame";
   if (effect.category === "transition") return "target_frame";
   if (effect.sourceId === "H01") return "mask_layer";
@@ -690,13 +859,17 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         })
     : effect.sourceId === "C03"
       ? Object.freeze({ ...withoutResourceFields(effect.effectId, effect.defaultPreset), duration: 2 })
+      : effect.sourceId === "V01"
+        ? Object.freeze({ target: "main subject", mode: "reveal", duration: 3, direction: "left_to_right", strokeWidth: 0.03, strokeColor: "#f4f0df" })
+        : effect.sourceId === "V02"
+          ? Object.freeze({ normalize: true, progress: 1, duration: 2.5, direction: "left_to_right", strength: 0.38, blur: 5 })
       : Object.freeze(withoutResourceFields(effect.effectId, effect.defaultPreset));
   return Object.freeze({
     effectId: effect.effectId,
     toolName: identity.toolName,
     displayName: identity.displayName,
     version: ADAPTER_VERSIONS[effect.sourceId] ?? "1.0.0",
-    category: effect.category,
+    category: effect.sourceId === "V02" ? "transition" : effect.category,
     parameterSchema: parameterSchema(effect),
     defaults,
     presets: Object.freeze([Object.freeze({
@@ -712,7 +885,9 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
     }),
     performanceGrade: grade(effect),
     normalizeParams(params: Readonly<JsonObject>): JsonObject {
-      const normalized = effect.sourceId === "H01"
+      const normalized = effect.sourceId === "V01" || effect.sourceId === "V02"
+        ? { ...params }
+        : effect.sourceId === "H01"
         ? { ...params }
         : effect.sourceId === "D04" || effect.sourceId === "L01"
           ? {
@@ -729,9 +904,14 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
     render(context: ServerEffectRenderContext, params: Readonly<JsonObject>) {
       const time = effectTime(effect.effectId, context,
         effect.sourceId === "C03" ? params.duration as number : 1);
-      const resolved = internalParams(effect, context, params);
+      const resolved = effect.sourceId === "V01" || effect.sourceId === "V02"
+        ? params : internalParams(effect, context, params);
       let output: PixelSurface;
-      if (effect.sourceId === "H01") {
+      if (effect.sourceId === "V01") {
+        output = pathTrimFrame(context, params);
+      } else if (effect.sourceId === "V02") {
+        output = pathMorphFrame(context, params);
+      } else if (effect.sourceId === "H01") {
         output = maskRevealFrame(context, params);
       } else if (effect.sourceId === "D04") {
         output = chalkStrokeFrame(context, params);

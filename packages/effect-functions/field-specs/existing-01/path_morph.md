@@ -1,6 +1,6 @@
 # 路径变形 `path_morph`
 
-在两条由服务端授权并绑定的矢量路径之间进行标准化插值。对应现有特效 `fx.vector.pathMorph`。
+在两张由服务端授权的图片 A、B 之间完成带方向性的路径变形转场。A 会沿不可见轨道被拉伸、扭曲并滑出，B 沿同一轨道滑入；中间阶段加入流动条纹和动态模糊，结束时稳定停在 B。
 
 需要调用时只输出以下 JSON，不要附加解释或代码块：
 
@@ -9,7 +9,11 @@
   "type": "path_morph",
   "data": {
     "normalize": true,
-    "progress": 0.5
+    "progress": 1,
+    "duration": 2.5,
+    "direction": "left_to_right",
+    "strength": 0.38,
+    "blur": 5
   }
 }
 ```
@@ -17,27 +21,29 @@
 | `data` 字段 | 必填 | 取值 | 选择策略 |
 | --- | --- | --- | --- |
 | `normalize` | 是 | 布尔值，默认 `true` | 通常保持 `true` 以归一化坐标；仅在用户明确要求保留原始宽高比例坐标时设 `false` |
-| `progress` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0.5` | `0` 为源路径，`1` 为目标路径，中间值为插值状态 |
+| `progress` | 是 | 数字 `0..1`，步长 `0.01`，默认 `1` | 转场最终完成比例；正常完整转场使用 `1` |
+| `duration` | 是 | 数字 `0.2..30` 秒，步长 `0.1`，默认 `2.5` | A 到 B 的转场时长 |
+| `direction` | 是 | `left_to_right/right_to_left/top_to_bottom/bottom_to_top/center_out/edge_in`，默认 `left_to_right` | 变形推进方向 |
+| `strength` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0.38` | 拉伸、撕裂和流动条纹强度 |
+| `blur` | 是 | 数字 `0..24` px，步长 `0.1`，默认 `5` | 过渡中动态模糊强度；结束帧自动恢复清晰 |
 
-历史 Schema 中的 `fromPath`、`toPath` 是矢量路径数据；按当前单工具架构，两条路径必须由服务端授权并绑定，不得出现在模型输出 `data` 中。
+`normalize` 仅保留为兼容字段，用于保持素材坐标归一化。图片资源 ID 不进入模型参数。
 
 ## 参数选择优先级
 
-先按用户描述设置 `progress`。`normalize` 只决定坐标解释方式，不代表变形强度；没有明确的原始比例要求时保持 `true`。
+先按自然语言设置 `direction`、`duration` 和 `strength`，再调 `blur`。除非用户明确要求不归一化，否则保持 `normalize=true`；完整转场保持 `progress=1`。
 
 | 用户提示词 | 应输出的 `data` 参数 |
 | --- | --- |
-| 两条路径变形到一半 | `normalize=true, progress=0.5` |
-| 刚开始变形 | `normalize=true, progress=0.2` |
-| 已经很接近目标路径 | `normalize=true, progress=0.85` |
-| 完全变成目标路径 | `normalize=true, progress=1` |
-| 保留原始坐标比例并变形六成 | `normalize=false, progress=0.6` |
+| 图 A 从左向右液态滑走，图 B 滑入 | `normalize=true, progress=1, duration=2.5, direction=left_to_right, strength=0.38, blur=5` |
+| 从中心向外融化并放大扭曲 | `normalize=true, progress=1, direction=center_out, strength=0.65, blur=8` |
+| 轻微流动转场 | `normalize=true, progress=1, strength=0.2, blur=3` |
 
-`progress` 推荐值：轻微 `0.2`，中等 `0.5`，明显 `0.75`，完成 `1`。默认启用归一化并变形到一半；`progress=0` 保持源路径，是中性起点。
+`strength` 推荐值：轻微 `0.2`，中等 `0.38`，明显 `0.65`；完整转场建议 `progress=1`。
 
-两条矢量路径和其他素材由服务端绑定。本工具不生成路径、不接受 SVG 字符串、不编辑节点、不处理文字变形或多路径编排，也不要输出资源 ID、路径、文件路径或 URL。
+两张图片由服务端绑定。本工具不生成 SVG、不接受路径字符串、不输出资源 ID、文件路径或 URL。
 
 ## 服务器输入槽（不进入模型 `data`）
 
-- `vector_source`（必需，`data`，单个）：优先使用服务端解析的真实矢量源及其栅格化结果。当前 AE Agent 的图片预览模式会在服务器内从已授权图片派生受控视觉轮廓；资源身份不会进入模型参数。缺失授权输入时必须停止执行。
-- `morph_paths`（必需，`data`，单个）：服务端绑定并校验的源路径与目标路径。模型不得输出路径字符串、资源身份或该槽；缺失时必须停止执行。
+- `source_frame`（必需，`image`，单个）：服务端授权的图 A。
+- `target_frame`（必需，`image`，单个）：服务端授权的图 B。

@@ -83,7 +83,8 @@ const SAM_DERIVED_MASK_SOURCES: Readonly<Record<string, Readonly<Record<string, 
     from_match_mask: "from_video",
     to_match_mask: "to_video"
   }),
-  particle_logo_assemble: Object.freeze({ subject_mask: "logo_image" })
+  particle_logo_assemble: Object.freeze({ subject_mask: "logo_image" }),
+  path_trim: Object.freeze({ subject_mask: "source_image" })
 });
 const SAM_DERIVED_MASK_TOOLS = new Set(Object.keys(SAM_DERIVED_MASK_SOURCES));
 const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -107,6 +108,7 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   particle_trail: "source_image",
   particle_emitter: "background_image",
   particle_logo_assemble: "logo_image",
+  path_trim: "source_image",
   object_match_cut: "from_video"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;

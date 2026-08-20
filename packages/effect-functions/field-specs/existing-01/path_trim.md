@@ -1,6 +1,6 @@
 # 路径修剪 `path_trim`
 
-按真实路径弧长显示服务端绑定矢量路径的一段描边，并可整体循环偏移该区段。对应现有特效 `fx.vector.pathTrim`。
+在服务端绑定的图片上，根据 SAM3.1 选定目标物体的真实轮廓进行逐笔描绘。显现模式从黑场开始，沿轮廓推进后逐步露出图片；擦除模式从完整图片开始，沿轮廓推进后逐步变黑。
 
 需要调用时只输出以下 JSON，不要附加解释或代码块：
 
@@ -8,37 +8,40 @@
 {
   "type": "path_trim",
   "data": {
-    "start": 0,
-    "end": 0.75,
-    "offset": 0,
-    "strokeWidth": 0.03
+    "target": "main subject",
+    "mode": "reveal",
+    "duration": 3,
+    "direction": "left_to_right",
+    "strokeWidth": 0.03,
+    "strokeColor": "#f4f0df"
   }
 }
 ```
 
 | `data` 字段 | 必填 | 取值 | 选择策略 |
 | --- | --- | --- | --- |
-| `start` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0` | 可见区段的起点；通常不大于 `end` |
-| `end` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0.75` | 可见区段终点，并受服务端时间进度推进 |
-| `offset` | 是 | 数字 `-1..1`，步长 `0.01`，默认 `0` | 沿闭合进度循环平移区段；正负值为相反方向 |
-| `strokeWidth` | 是 | 数字 `0.001..0.5` 画布比例，步长 `0.001`，默认 `0.03` | 控制程序化描边粗细 |
+| `target` | 是 | 1..80 字符目标描述，默认 `main subject` | SAM3.1 在图片中定位的物体 |
+| `mode` | 是 | `reveal` / `erase`，默认 `reveal` | 逐渐显现或逐渐擦除 |
+| `duration` | 是 | 数字 `0.2..30` 秒，步长 `0.1`，默认 `3` | 描绘完成时间 |
+| `direction` | 是 | `left_to_right/right_to_left/top_to_bottom/bottom_to_top/clockwise/counter_clockwise`，默认 `left_to_right` | 轮廓推进方向 |
+| `strokeWidth` | 是 | 数字 `0.001..0.5` 画布比例，步长 `0.001`，默认 `0.03` | 轮廓笔触粗细 |
+| `strokeColor` | 是 | `#RRGGBB`，默认 `#f4f0df` | 描边笔触颜色 |
 
 ## 参数选择优先级
 
-先用 `start`、`end` 定区段长度，再用 `offset` 移动该区段，最后调 `strokeWidth`。为保证有可见区段，应保持 `start≤end`；不要同时改起止点和偏移来表达单纯的“沿路径移动”。
+先选择 `mode`，再设置自然语言中的完成时间和推进方向，最后调整笔触宽度与颜色。`target` 必须对应图片中可见物体，不输出坐标或路径字符串。
 
 | 用户提示词 | 应输出的 `data` 参数 |
 | --- | --- |
-| 从路径开头显示四分之三 | `start=0, end=0.75, offset=0, strokeWidth=0.03` |
-| 只显示中间一半 | `start=0.25, end=0.75, offset=0, strokeWidth=0.03` |
-| 整条细线逐步画出 | `start=0, end=1, offset=0, strokeWidth=0.01` |
-| 区段向前偏移四分之一圈 | `start=0, end=0.5, offset=0.25, strokeWidth=0.03` |
-| 显示粗重的短线段 | `start=0.2, end=0.45, offset=0, strokeWidth=0.08` |
+| 3 秒完整描出汽车轮廓并显现 | `target=car, mode=reveal, duration=3, direction=left_to_right, strokeWidth=0.03` |
+| 2 秒沿顺时针轮廓擦除人物 | `target=person, mode=erase, duration=2, direction=clockwise, strokeWidth=0.025` |
+| 粉笔色粗描边 | `mode=reveal, direction=clockwise, strokeWidth=0.08, strokeColor=#f4f0df` |
 
-可见长度 `end-start` 推荐：轻微 `0.2`，中等 `0.5`，明显 `0.75`，完整 `1`。`strokeWidth` 推荐为细 `0.01`、中等 `0.03`、明显 `0.06`、强烈 `0.12`。默认从起点显示到 `0.75`；`start=end` 是无可见区段的中性设置。
+`duration` 推荐为 `1.5..6` 秒；`strokeWidth` 推荐为细 `0.01`、中等 `0.03`、明显 `0.06`、强烈 `0.12`。显现模式结束显示图片，擦除模式结束为黑场。
 
-矢量路径和素材由服务端绑定。本工具不生成路径、不修改路径节点、不做路径变形、填充动画或图片裁切，也不要输出路径数据、资源 ID、文件路径或 URL。
+图片和 SAM3.1 遮罩由服务端绑定。本工具不生成路径字符串、不输出坐标、资源 ID、文件路径或 URL。
 
 ## 服务器输入槽（不进入模型 `data`）
 
-- `vector_source`（必需，`data`，单个）：优先使用服务端解析的真实矢量路径及其栅格化结果。当前 AE Agent 的图片预览模式会在服务器内从已授权图片派生受控视觉轮廓，用于沿弧长修剪描边；资源身份不会进入模型参数。缺失授权输入时必须停止执行。
+- `source_image`（必需，`image`，单个）：服务端授权的图片素材。
+- `subject_mask`（必需，`mask`，单个）：服务端根据 `target` 调用 SAM3.1 派生的目标轮廓遮罩。
