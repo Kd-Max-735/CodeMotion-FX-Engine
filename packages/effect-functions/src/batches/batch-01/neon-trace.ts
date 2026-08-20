@@ -113,7 +113,7 @@ export const NEON_TRACE_DEFINITION: EffectToolDefinition<NeonTraceParams> = {
       hue: round(params.hue),
       glowLayers: layers,
       revealProgress: round(revealProgress),
-      dashLength: round(Math.max(8, params.coreWidth * 4)),
+      dashLength: round(Math.max(8, params.coreWidth * 4) * (0.5 + params.trailLength * 1.5)),
       dashGap: round(Math.max(6, params.coreWidth * 2.5)),
       dashOffset: round(-context.time * 70),
       trailLength: round(params.trailLength)

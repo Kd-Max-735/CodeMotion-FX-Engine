@@ -11,7 +11,7 @@
 | `progress` | 否 | `0..1`，默认 `1` | 路径头部的目标位置；视频前 1.4 秒自动追踪到该位置 |
 | `glowRadius` | 否 | `0..200` px，默认 `18` | 外围光晕半径 |
 | `intensity` | 否 | `0..10`，默认 `2` | 线性光强，可超过 1 |
-| `trailLength` | 否 | `0.01..1`，默认 `0.25` | 发光尾迹占总路径比例 |
+| `trailLength` | 否 | `0.01..1`，默认 `0.25` | 虚线段长度比例；不再裁剪或隐藏已经绘制的路径 |
 | `pulseRate` | 否 | `0..12` Hz，默认 `1.2` | 明暗脉冲频率；`0` 为稳定 |
 | `hue` | 否 | `0..360` 度，默认 `190` | 霓虹色相 |
 | `coreWidth` | 否 | `0.5..40` px，默认 `2.5` | 中心高亮线宽度 |
@@ -26,7 +26,7 @@
 1. 必须查看图片并分别定位用户明确的起点与终点。例如“从汽车车头到车尾”应把 `startX/startY` 放在车头中心，把 `endX/endY` 放在车尾中心；不得使用固定路线或整图轮廓。
 2. 坐标以完整图片左上角为 `(0,0)`、右下角为 `(1,1)`。路径方向严格从 `start` 指向 `end`，不得交换。
 3. 用户要求“沿车身弧线”等弯曲路径时设置 `curve`；未提弯曲保持 `0`。
-4. “走到哪里”用 `progress`，“尾巴多长”用 `trailLength`，两者含义不可互换；服务器会让追踪头在前 1.4 秒抵达目标位置。
+4. “走到哪里”用 `progress`；路径在前 1.4 秒完成显现，之后整条路径持续保留。`trailLength` 只控制虚线段长度，不会隐藏历史路径。
 5. 先调 `intensity` 再调 `glowRadius`；稳定招牌设 `pulseRate=0`，跳动灯光再提高频率。
 
 | 自然语言 | 参数对应 |
@@ -34,7 +34,7 @@
 | 稳定的青色细霓虹 | `hue=185, coreWidth=2, intensity=1.5, pulseRate=0` |
 | 只追踪到路径六成 | `progress=0.6` |
 | 像彗星一样短尾快速闪烁 | `trailLength=0.1, pulseRate=3, intensity=3` |
-| 整条路径持续发光 | `progress=1, trailLength=1, pulseRate=0` |
+| 整条路径持续发光并滚动虚线 | `progress=1, trailLength=0.35, pulseRate=0` |
 | 紫色宽光晕 | `hue=285, glowRadius=42, coreWidth=3.5` |
 | 微弱呼吸灯 | `intensity=0.8, pulseRate=0.5, glowRadius=10` |
 | 从汽车车头到车尾画青色霓虹路径 | 视觉定位车头写入 `startX/startY`，定位车尾写入 `endX/endY`，`hue=190` |
