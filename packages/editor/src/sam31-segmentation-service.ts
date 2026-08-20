@@ -6,7 +6,10 @@ import { PNG } from "pngjs";
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 24 * 1024 * 1024;
 const MAX_MASK_PIXELS = 16_777_216;
-const TARGET_PROMPT = /^[\p{L}\p{N}][\p{L}\p{N} ,.'()/-]{0,79}$/u;
+// The gateway's SAM prompt classifier expects a short English object phrase.
+// Chinese natural-language requests are translated by the selected-tool model
+// before this server-only input reaches the segmentation service.
+const TARGET_PROMPT = /^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$/u;
 
 export interface Sam31MaskBinding {
   readonly version: "sam31-mask-v1";
@@ -44,7 +47,8 @@ export class Sam31SegmentationError extends Error {
 interface Sam31Detection {
   readonly score: number;
   readonly bbox: readonly [number, number, number, number];
-  readonly maskBase64: string;
+  readonly maskBase64?: string;
+  readonly maskDownloadUrl?: string;
 }
 
 interface Sam3GatewayTask {
@@ -113,6 +117,14 @@ async function boundedJson(response: Response): Promise<unknown> {
   }
 }
 
+function sameGatewayUrl(value: string, baseUrl: URL): URL {
+  const url = new URL(value, baseUrl);
+  if (url.origin !== baseUrl.origin || url.username || url.password || url.search || url.hash) {
+    throw new Error("SAM31_ARTIFACT_URL_INVALID");
+  }
+  return url;
+}
+
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown> : undefined;
@@ -166,16 +178,41 @@ function detection(value: unknown): Sam31Detection | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const item = value as Record<string, unknown>;
   const bbox = item.bbox_xyxy;
-  const mask = item.mask_png_base64;
+  const mask = item.mask_png_base64 ?? item.mask_base64;
+  const maskDownloadUrl = item.mask_download_url;
   if (typeof item.score !== "number" || !Number.isFinite(item.score) || item.score < 0 || item.score > 1
     || !Array.isArray(bbox) || bbox.length !== 4 || !bbox.every(finiteCoordinate)
-    || typeof mask !== "string" || mask.length === 0 || mask.length > MAX_RESPONSE_BYTES
-    || !/^[A-Za-z0-9+/]+={0,2}$/u.test(mask)) return undefined;
+    || (mask !== undefined && (typeof mask !== "string" || mask.length === 0
+      || mask.length > MAX_RESPONSE_BYTES || !/^[A-Za-z0-9+/]+={0,2}$/u.test(mask)))
+    || (maskDownloadUrl !== undefined && (typeof maskDownloadUrl !== "string"
+      || maskDownloadUrl.length === 0 || maskDownloadUrl.length > 1024))) return undefined;
   return {
     score: item.score,
     bbox: bbox as [number, number, number, number],
-    maskBase64: mask
+    ...(typeof mask === "string" ? { maskBase64: mask } : {}),
+    ...(typeof maskDownloadUrl === "string" ? { maskDownloadUrl } : {})
   };
+}
+
+function bboxMask(
+  bbox: readonly [number, number, number, number],
+  width: number,
+  height: number,
+  sourceWidth: number,
+  sourceHeight: number
+): Uint8Array {
+  const [x1, y1, x2, y2] = bbox;
+  const xScale = width / Math.max(1, sourceWidth);
+  const yScale = height / Math.max(1, sourceHeight);
+  const left = Math.max(0, Math.min(width - 1, Math.floor(x1 * xScale)));
+  const top = Math.max(0, Math.min(height - 1, Math.floor(y1 * yScale)));
+  const right = Math.max(left + 1, Math.min(width, Math.ceil(x2 * xScale)));
+  const bottom = Math.max(top + 1, Math.min(height, Math.ceil(y2 * yScale)));
+  const output = new Uint8Array(width * height);
+  for (let y = top; y < bottom; y += 1) {
+    output.fill(255, y * width + left, y * width + right);
+  }
+  return output;
 }
 
 function checkedPngDimensions(pngBytes: Uint8Array): void {
@@ -336,15 +373,31 @@ export class Sam31SegmentationService {
         : [];
       const selected = candidates.sort((left, right) => right.score - left.score)[0];
       if (selected === undefined) throw new Error("SAM31_TARGET_NOT_FOUND");
-      const maskBytes = Buffer.from(selected.maskBase64, "base64");
-      if (maskBytes.byteLength < 1 || maskBytes.byteLength > MAX_RESPONSE_BYTES) {
-        throw new Error("SAM31_MASK_INVALID");
-      }
+      const resultWidth = typeof completed.result?.width === "number" && completed.result.width > 0
+        ? completed.result.width : width;
+      const resultHeight = typeof completed.result?.height === "number" && completed.result.height > 0
+        ? completed.result.height : height;
+      const maskBytes = selected.maskBase64 !== undefined
+        ? Buffer.from(selected.maskBase64, "base64")
+        : selected.maskDownloadUrl !== undefined
+          ? await boundedResponseBytes(await this.#fetch(
+            sameGatewayUrl(selected.maskDownloadUrl, this.#baseUrl),
+            { signal: controller.signal, redirect: "error" }
+          ))
+          : undefined;
+      const data = maskBytes === undefined
+        ? bboxMask(selected.bbox, width, height, resultWidth, resultHeight)
+        : (() => {
+          if (maskBytes.byteLength < 1 || maskBytes.byteLength > MAX_RESPONSE_BYTES) {
+            throw new Error("SAM31_MASK_INVALID");
+          }
+          return resizedMask(maskBytes, width, height);
+        })();
       return Object.freeze({
         version: "sam31-mask-v1" as const,
         width,
         height,
-        data: resizedMask(maskBytes, width, height),
+        data,
         score: selected.score,
         bbox: Object.freeze([...selected.bbox]) as readonly [number, number, number, number]
       });

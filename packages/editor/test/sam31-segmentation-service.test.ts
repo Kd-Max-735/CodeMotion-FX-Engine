@@ -151,6 +151,57 @@ describe("SAM3 segmentation service", () => {
       .rejects.toMatchObject({ code: "target_not_found" });
   });
 
+  it("accepts the gateway's bbox-only detections when masks are omitted", async () => {
+    let request = 0;
+    const service = new Sam31SegmentationService({
+      baseUrl: "http://127.0.0.1:9100",
+      fetchImpl: vi.fn(async () => {
+        request += 1;
+        if (request === 1) return new Response(JSON.stringify({ file_id: "upload_abcdefgh.png" }), { status: 200 });
+        if (request === 2) return new Response(JSON.stringify({ task_id: "task_abcdefgh" }), { status: 200 });
+        return new Response(JSON.stringify({
+          id: "task_abcdefgh",
+          status: "succeeded",
+          result: {
+            width: 8,
+            height: 4,
+            count: 1,
+            detections: [{ score: 0.91, bbox_xyxy: [2, 1, 6, 3] }]
+          }
+        }), { status: 200 });
+      }) as typeof fetch
+    });
+
+    const result = await service.segment(await sourceMedia(), "car", 4, 2);
+    expect(result.score).toBe(0.91);
+    expect(Array.from(result.data)).toEqual([0, 255, 255, 0, 0, 255, 255, 0]);
+  });
+
+  it("downloads a same-gateway mask artifact when the task returns a mask URL", async () => {
+    const mask = maskPng([0, 255], 2, 1);
+    let request = 0;
+    const service = new Sam31SegmentationService({
+      baseUrl: "http://127.0.0.1:9100",
+      fetchImpl: vi.fn(async (input: string | URL | Request) => {
+        request += 1;
+        if (request === 1) return new Response(JSON.stringify({ file_id: "upload_abcdefgh.png" }), { status: 200 });
+        if (request === 2) return new Response(JSON.stringify({ task_id: "task_abcdefgh" }), { status: 200 });
+        if (request === 3) return new Response(JSON.stringify({
+          id: "task_abcdefgh", status: "succeeded", result: {
+            width: 2, height: 1,
+            detections: [{ score: 0.95, bbox_xyxy: [0, 0, 2, 1], mask_download_url: "/api/artifacts/mask.png" }]
+          }
+        }), { status: 200 });
+        expect(String(input)).toBe("http://127.0.0.1:9100/api/artifacts/mask.png");
+        return new Response(mask, { status: 200, headers: { "content-type": "image/png" } });
+      }) as typeof fetch
+    });
+
+    const result = await service.segment(await sourceMedia(), "car", 2, 1);
+    expect(result.score).toBe(0.95);
+    expect(Array.from(result.data)).toEqual([0, 255]);
+  });
+
   it("configures the private SAM3 gateway without exposing it to model parameters", () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     expect(() => createSam31SegmentationService({
