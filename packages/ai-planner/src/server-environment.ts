@@ -39,18 +39,16 @@ export function loadServerEnvironment(options: {
   const merged: NodeJS.ProcessEnv = { ...processEnv };
   const processKey = processEnv.ARK_API_KEY?.trim();
   let source: ServerEnvironmentResult["source"] = processKey ? "process" : "missing";
-  if (!processKey) {
-    try {
-      const text = options.readText?.(resolve(repositoryRoot, ".env"))
-        ?? readFileSync(resolve(repositoryRoot, ".env"), "utf8");
-      const local = parseDotEnv(text);
-      for (const [key, value] of Object.entries(local)) {
-        if (merged[key] === undefined || merged[key] === "") merged[key] = value;
-      }
-      if (merged.ARK_API_KEY?.trim()) source = "root-env";
-    } catch (error) {
-      if (error instanceof Error && error.message === "SERVER_ENV_INVALID") throw error;
+  try {
+    const text = options.readText?.(resolve(repositoryRoot, ".env"))
+      ?? readFileSync(resolve(repositoryRoot, ".env"), "utf8");
+    const local = parseDotEnv(text);
+    for (const [key, value] of Object.entries(local)) {
+      if (merged[key] === undefined || merged[key] === "") merged[key] = value;
     }
+    if (!processKey && merged.ARK_API_KEY?.trim()) source = "root-env";
+  } catch (error) {
+    if (error instanceof Error && error.message === "SERVER_ENV_INVALID") throw error;
   }
   return Object.freeze({ env: merged, repositoryRoot,
     arkConfigured: Boolean(merged.ARK_API_KEY?.trim()), source });

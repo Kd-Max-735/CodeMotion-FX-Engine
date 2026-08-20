@@ -69,7 +69,7 @@ function checkedBaseUrl(value: string): URL {
     || isPrivateIpv4(hostname);
   if (url.protocol !== "http:" || !privateHost || url.username || url.password || url.search || url.hash
     || (url.pathname !== "/" && url.pathname !== "")) {
-    throw new TypeError("SAM31_API_BASE_URL must be a private or loopback HTTP origin.");
+    throw new TypeError("SAM3_API_BASE_URL must be a private or loopback HTTP origin.");
   }
   url.pathname = "/";
   return url;
@@ -227,7 +227,7 @@ export class Sam31SegmentationService {
     this.#baseUrl = checkedBaseUrl(options.baseUrl);
     this.#fetch = options.fetchImpl ?? fetch;
     this.#timeoutMs = Math.max(1_000, Math.min(600_000, options.timeoutMs ?? 300_000));
-    this.#pollIntervalMs = Math.max(100, Math.min(10_000, options.pollIntervalMs ?? 1_000));
+    this.#pollIntervalMs = Math.max(100, Math.min(10_000, options.pollIntervalMs ?? 250));
     this.#threshold = Math.max(0.1, Math.min(0.95, options.threshold ?? 0.3));
   }
 
@@ -341,13 +341,13 @@ export function createSam31SegmentationService(
 ): Sam31SegmentationService {
   const threshold = Number(env.SAM3_THRESHOLD ?? env.SAM31_THRESHOLD ?? 0.3);
   const timeoutMs = Number(env.SAM3_TIMEOUT_MS ?? 300_000);
-  const pollIntervalMs = Number(env.SAM3_POLL_INTERVAL_MS ?? 1_000);
+  const pollIntervalMs = Number(env.SAM3_POLL_INTERVAL_MS ?? 250);
   return new Sam31SegmentationService({
     baseUrl: env.SAM3_API_BASE_URL?.trim() || env.SAM31_API_BASE_URL?.trim()
       || "http://192.168.1.31:9100",
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
     threshold: Number.isFinite(threshold) ? threshold : 0.3,
     timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 300_000,
-    pollIntervalMs: Number.isFinite(pollIntervalMs) ? pollIntervalMs : 1_000
+    pollIntervalMs: Number.isFinite(pollIntervalMs) ? pollIntervalMs : 250
   });
 }
