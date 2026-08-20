@@ -604,7 +604,7 @@ export class EffectToolVideoService {
           task.controller.signal
         );
         const videoInImageSlot = ["live_binding", "particle_emitter", "particle_flow_field", "particle_orbit_field",
-          "particle_snow_rain", "particle_spark", "particle_trail"].includes(definition.toolName);
+          "particle_snow_rain", "particle_spark", "particle_trail", "object_match_cut"].includes(definition.toolName);
         if (media.asset.type !== "image" && media.asset.type !== "svg"
           && !(videoInImageSlot && media.asset.type === "video")) {
           throw new TypeError("The preview source must remain an authorized image.");
