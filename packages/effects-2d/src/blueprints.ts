@@ -131,11 +131,13 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "light", 5),
   b("M03", "fx.motion.scalePop", "Scale Pop", "motion", "Spring-like scale entrance.", [
     number("startScale", 0.2, 0, 4, 0.01), number("endScale", 1, 0, 4, 0.01),
-    number("spring", 0.65, 0, 2, 0.01), vector("pivot", [0.5, 0.5])
+    number("spring", 0.65, 0, 2, 0.01), vector("pivot", [0.5, 0.5]),
+    number("duration", 1.2, 0.05, 60, 0.05, "seconds")
   ], "light", 5),
   b("M04", "fx.motion.rotateIn", "Rotate In", "motion", "Pivoted rotational entrance.", [
     number("angle", -90, -720, 720, 1, "degrees"), vector("pivot", [0.5, 0.5]),
-    number("blur", 0.08, 0, 1, 0.01, "ratio", "medium"), number("turns", 0, -4, 4, 0.25, "turns")
+    number("blur", 0.08, 0, 1, 0.01, "ratio", "medium"), number("turns", 2, -4, 4, 0.25, "turns"),
+    number("duration", 1.2, 0.05, 60, 0.05, "seconds")
   ], "medium", 7),
   b("M05", "fx.motion.bounce", "Bounce", "motion", "Gravity-shaped repeated bounce.", [
     number("height", 0.25, 0, 2, 0.01, "canvas"), number("gravity", 9.8, 0.1, 40, 0.1, "m/s2"),

@@ -98,13 +98,19 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   shift += normalize(shift + 0.0001) * sin(p * 3.14159) * u_p2 * 0.12;
   c = sampleAt(uv - shift);`,
   M03: `
+  float durationSeconds = 0.05 + u_p5 * 59.95;
+  float motionProgress = clamp(u_time / durationSeconds, 0.0, 1.0);
   vec2 pivot = vec2(u_p3, u_p4);
-  float scale = max(0.03, mix(u_p0 * 2.0, u_p1 * 2.0, p)
-    + sin(p * 9.4248) * u_p2 * (1.0 - p) * 0.35);
+  float scale = max(0.03, mix(u_p0 * 4.0, u_p1 * 4.0, motionProgress)
+    + sin(motionProgress * 9.4248) * u_p2 * (1.0 - motionProgress) * 0.35);
   c = sampleAt(pivot + (uv - pivot) / scale);`,
   M04: `
+  float durationSeconds = 0.05 + u_p5 * 59.95;
+  float motionProgress = clamp(u_time / durationSeconds, 0.0, 1.0);
   vec2 pivot = vec2(u_p1, u_p2);
-  float angle = ((u_p0 - 0.5) * 12.566 + (u_p4 - 0.5) * 25.132) * (1.0 - p);
+  float angleDegrees = -720.0 + u_p0 * 1440.0;
+  float turns = -4.0 + u_p4 * 8.0;
+  float angle = radians(angleDegrees + turns * 360.0) * (1.0 - motionProgress);
   mat2 rotation = mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
   vec2 rotated = pivot + rotation * (uv - pivot);
   c = mix(sampleAt(rotated), sampleAt(rotated + vec2(u_p3 * 0.03, 0.0)), u_p3);`,

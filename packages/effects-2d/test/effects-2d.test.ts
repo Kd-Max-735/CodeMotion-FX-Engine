@@ -722,6 +722,44 @@ describe("Group 2 P0 catalog", () => {
     expect(hashPixelSurface(fast)).not.toBe(hashPixelSurface(slow));
   });
 
+  it("uses rotate-in duration to control speed without changing the configured turns", () => {
+    const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "M04")!;
+    const fixture = realFixture(effect, "test.rotate-in.duration", 0.5, 48, 32, "srgb", 20260820, "final", 0, 30, 4);
+    const slow = effect.renderPixels(fixture.source.surface, {
+      ...effect.defaultPreset,
+      angle: 0,
+      turns: 2,
+      duration: 4
+    }, fixture.options);
+    const quick = effect.renderPixels(fixture.source.surface, {
+      ...effect.defaultPreset,
+      angle: 0,
+      turns: 2,
+      duration: 1
+    }, fixture.options);
+    expect(hashPixelSurface(slow)).not.toBe(hashPixelSurface(quick));
+  });
+
+  it("uses scale-pop duration independently from its spring amplitude", () => {
+    const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "M03")!;
+    const fixture = realFixture(effect, "test.scale-pop.duration", 0.5, 48, 32, "srgb", 20260820, "final", 0, 30, 4);
+    const slow = effect.renderPixels(fixture.source.surface, {
+      ...effect.defaultPreset,
+      startScale: 0.2,
+      endScale: 1,
+      spring: 0.65,
+      duration: 4
+    }, fixture.options);
+    const quick = effect.renderPixels(fixture.source.surface, {
+      ...effect.defaultPreset,
+      startScale: 0.2,
+      endScale: 1,
+      spring: 0.65,
+      duration: 1
+    }, fixture.options);
+    expect(hashPixelSurface(slow)).not.toBe(hashPixelSurface(quick));
+  });
+
   it("limits kinetic typography jumping to jumpDuration and settles afterward", () => {
     const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "T03")!;
     const params = {

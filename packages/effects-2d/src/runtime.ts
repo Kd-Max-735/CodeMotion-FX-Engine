@@ -445,8 +445,11 @@ function renderMotion(
   options: EffectRuntimeOptions
 ): PixelSurface {
   const output = emptyLike(source);
-  const p = eased(effectProgress(blueprint, params, options));
   const seconds = elapsedSeconds(options);
+  const duration = Math.max(0.05, numberParam(params, "duration", 1.2));
+  const p = eased(blueprint.sourceId === "M03" || blueprint.sourceId === "M04"
+    ? clamp(seconds / duration)
+    : effectProgress(blueprint, params, options));
   const shakeOffset = blueprint.sourceId === "M08" ? (() => {
     const intensity = numberParam(params, "intensity", 0.04);
     const frequency = numberParam(params, "frequency", 12);
