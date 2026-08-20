@@ -394,6 +394,48 @@ function drawPolyline(
   }
 }
 
+function drawDashedPolyline(
+  output: Uint8ClampedArray,
+  points: readonly { readonly x: number; readonly y: number }[],
+  request: FrameRequest,
+  color: readonly number[],
+  opacity: number,
+  thickness: number,
+  dashLength: number,
+  gapLength: number,
+  offset = 0
+): void {
+  if (points.length < 2 || dashLength <= 0) return;
+  const pixels = pixelPoints(points, request);
+  const lengths: number[] = [0];
+  for (let i = 1; i < pixels.length; i += 1) lengths.push(lengths[i - 1]! + Math.hypot(pixels[i]![0] - pixels[i - 1]![0], pixels[i]![1] - pixels[i - 1]![1]));
+  const total = lengths[lengths.length - 1]!;
+  const cycle = dashLength + Math.max(0.1, gapLength);
+  const drawSegment = (a: number, b: number) => {
+    let index = 1;
+    while (index < lengths.length && lengths[index]! < a) index += 1;
+    let cursor = a;
+    while (cursor < b && index < lengths.length) {
+      const startLength = Math.max(cursor, lengths[index - 1]!);
+      const endLength = Math.min(b, lengths[index]!);
+      if (endLength > startLength) {
+        const ratioA = (startLength - lengths[index - 1]!) / Math.max(0.0001, lengths[index]! - lengths[index - 1]!);
+        const ratioB = (endLength - lengths[index - 1]!) / Math.max(0.0001, lengths[index]! - lengths[index - 1]!);
+        drawLine(output, request.width, request.height,
+          pixels[index - 1]![0] + (pixels[index]![0] - pixels[index - 1]![0]) * ratioA,
+          pixels[index - 1]![1] + (pixels[index]![1] - pixels[index - 1]![1]) * ratioA,
+          pixels[index - 1]![0] + (pixels[index]![0] - pixels[index - 1]![0]) * ratioB,
+          pixels[index - 1]![1] + (pixels[index]![1] - pixels[index - 1]![1]) * ratioB,
+          color, opacity, thickness);
+      }
+      cursor = endLength;
+      index += 1;
+    }
+  };
+  const normalizedOffset = ((offset % cycle) + cycle) % cycle;
+  for (let start = -normalizedOffset; start < total; start += cycle) drawSegment(Math.max(0, start), Math.min(total, start + dashLength));
+}
+
 function drawElectricPath(
   output: Uint8ClampedArray,
   points: readonly { readonly x: number; readonly y: number }[],
@@ -1934,22 +1976,20 @@ function polishedStructuredFrame(
     const hue = typeof value.hue === "number" ? value.hue : 190;
     const color = hueColor(hue);
     const glowLayers = Array.isArray(value.glowLayers) ? value.glowLayers : [];
+    const dashLength = typeof value.dashLength === "number" ? Math.max(1, value.dashLength) : 14;
+    const dashGap = typeof value.dashGap === "number" ? Math.max(1, value.dashGap) : 10;
+    const dashOffset = typeof value.dashOffset === "number" ? value.dashOffset : -request.time * 70;
     glowLayers.forEach((entry) => {
       const layer = record(entry);
       const radius = typeof layer?.radius === "number" ? Math.max(0, layer.radius) : 0;
       const intensity = typeof layer?.intensity === "number" ? Math.max(0, layer.intensity) : 0;
       if (radius > 0 && intensity > 0) {
-        drawPolyline(output, points, request, color, Math.min(0.42, intensity * 0.12), Math.max(1.5, radius * 0.56));
+        drawDashedPolyline(output, points, request, color, Math.min(0.42, intensity * 0.12), Math.max(1.5, radius * 0.56), dashLength, dashGap, dashOffset);
       }
     });
     const coreWidth = typeof value.coreWidth === "number" ? Math.max(0.5, value.coreWidth) : 2;
-    drawPolyline(output, points, request, color, Math.min(0.92, coreIntensity * 0.28), coreWidth * 2.2);
-    drawPolyline(output, points, request, [248, 255, 255, 255], Math.min(1, coreIntensity * 0.48), coreWidth * 0.62);
-    const head = points[points.length - 1]!;
-    const pixel = pointToPixel(head, request.width, request.height);
-    const outerRadius = Math.max(6, Math.min(28, coreWidth * 3.5));
-    drawDisc(output, request.width, request.height, pixel[0], pixel[1], outerRadius, color, 0.34);
-    drawDisc(output, request.width, request.height, pixel[0], pixel[1], 2.4, [255, 255, 255, 255], 1);
+    drawDashedPolyline(output, points, request, color, Math.min(0.92, coreIntensity * 0.28), coreWidth * 2.2, dashLength, dashGap, dashOffset);
+    drawDashedPolyline(output, points, request, [248, 255, 255, 255], Math.min(1, coreIntensity * 0.48), coreWidth * 0.62, dashLength, dashGap, dashOffset);
     return true;
   }
 

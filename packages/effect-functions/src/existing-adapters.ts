@@ -251,7 +251,7 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
       type: "string",
       minLength: 1,
       maxLength: 80,
-      pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$",
+      pattern: "^[\\p{L}\\p{N}][\\p{L}\\p{N} ,.'()/-]{0,79}$",
       default: "main subject"
     };
     properties.placement = { type: "string", enum: ["outline", "inside"], default: "outline" };
@@ -261,7 +261,7 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
       type: "string",
       minLength: 1,
       maxLength: 80,
-      pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$",
+      pattern: "^[\\p{L}\\p{N}][\\p{L}\\p{N} ,.'()/-]{0,79}$",
       default: "main subject"
     };
   }
@@ -478,7 +478,7 @@ function chalkStrokeFrame(context: ServerEffectRenderContext, params: Readonly<J
   const opacity = params.opacity as number;
   const grain = params.grain as number;
   const scatter = params.scatter as number;
-  const progress = Math.min(1, Math.max(0, context.time)) * (params.progress as number);
+  const progress = Math.min(1, Math.max(0, context.time / 1.4));
   const placement = params.placement as string;
   const radius = Math.max(1, (params.strokeWidth as number) * Math.min(context.width, context.height));
   const output = new Uint8ClampedArray(source.data);
@@ -756,20 +756,25 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         const secondary = secondaryName === undefined ? undefined : rasterBinding(context, secondaryName);
         const brush = effect.sourceId === "D02"
           ? singleBinding<ExistingBrushBinding>(context, "brush_texture") : undefined;
-        output = effect.renderPixels(primary.surface, resolved, {
-          time,
-          seed: context.seed,
-          quality: context.quality,
-          rasterInput: primary.rasterInput,
-          ...(secondary === undefined ? {} : {
-            secondary: secondary.surface,
-            secondaryRasterInput: secondary.rasterInput
-          }),
-          ...(brush === undefined ? {} : {
-            brushCoverage: brush.coverage,
-            brushAssetId: brush.reference
-          })
-        });
+        if (effect.sourceId === "C03" && secondary !== undefined
+          && context.time >= (params.duration as number)) {
+          output = { ...secondary.surface, data: new Uint8ClampedArray(secondary.surface.data) };
+        } else {
+          output = effect.renderPixels(primary.surface, resolved, {
+            time,
+            seed: context.seed,
+            quality: context.quality,
+            rasterInput: primary.rasterInput,
+            ...(secondary === undefined ? {} : {
+              secondary: secondary.surface,
+              secondaryRasterInput: secondary.rasterInput
+            }),
+            ...(brush === undefined ? {} : {
+              brushCoverage: brush.coverage,
+              brushAssetId: brush.reference
+            })
+          });
+        }
       }
       return {
         kind: "frame" as const,

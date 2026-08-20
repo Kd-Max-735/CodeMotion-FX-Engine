@@ -82,7 +82,8 @@ const SAM_DERIVED_MASK_SOURCES: Readonly<Record<string, Readonly<Record<string, 
   object_match_cut: Object.freeze({
     from_match_mask: "from_video",
     to_match_mask: "to_video"
-  })
+  }),
+  particle_logo_assemble: Object.freeze({ subject_mask: "logo_image" })
 });
 const SAM_DERIVED_MASK_TOOLS = new Set(Object.keys(SAM_DERIVED_MASK_SOURCES));
 const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -104,6 +105,8 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   live_binding: "source_image",
   particle_spark: "background_image",
   particle_trail: "source_image",
+  particle_emitter: "background_image",
+  particle_logo_assemble: "logo_image",
   object_match_cut: "from_video"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -1496,6 +1499,17 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
       const target = effectParams?.target;
       if (this.segmentation === undefined || typeof target !== "string") {
         throw new Error("SAM3.1 segmentation is unavailable for this effect.");
+      }
+      if (media.asset.type === "video") {
+        const frame = await this.decodeFrame(media, {
+          frame: 0,
+          time: 0,
+          deltaTime: 1 / render.fps,
+          fps: render.fps,
+          width: render.width,
+          height: render.height
+        }, signal === undefined ? {} : { signal });
+        return this.segmentation.segmentRgbaFrame(frame, render.width, render.height, target, signal);
       }
       return this.segmentation.segment(media, target, render.width, render.height, signal);
     }

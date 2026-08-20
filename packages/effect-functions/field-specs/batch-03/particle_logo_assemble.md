@@ -2,20 +2,21 @@
 
 ## 工具作用
 
-画面从空背景开始，散布粒子逐渐显现并沿旋涡和吸引场聚合到用户上传图片的可见轮廓；后段粒子稳定后才逐渐补足原图细节，结束时完整显示上传图片。
+画面从空背景开始，散布粒子逐渐显现并沿旋涡和吸引场聚合到用户上传图片中由自然语言指定的目标物体；后段粒子稳定后显示该目标区域，结束时不再残留漂浮粒子。
 
 ## JSON 输出格式
 
 只输出以下结构的 JSON，不附加解释或代码块：
 
 ```json
-{"type":"particle_logo_assemble","data":{"particleCount":2200,"duration":2.4,"scatterRadius":0.8,"swirl":0.45,"attraction":0.72,"damping":0.8,"particleSize":3}}
+{"type":"particle_logo_assemble","data":{"target":"main subject","particleCount":2200,"duration":2.4,"scatterRadius":0.8,"swirl":0.45,"attraction":0.72,"damping":0.8,"particleSize":3}}
 ```
 
 ## 完整参数表
 
 | 字段 | 类型与范围 | 默认值 | 含义 |
 | --- | --- | ---: | --- |
+| `target` | 英文短语 `1..80` 字符 | `main subject` | SAM3.1 在图片中选择的目标物体。 |
 | `particleCount` | 整数 `100..50000` | `2200` | 采样 Logo 轮廓的粒子数。 |
 | `duration` | 数字 `0.2..15` | `2.4` | 完成聚合所需时间（秒）。 |
 | `scatterRadius` | 数字 `0.05..3` | `0.8` | 初始散布半径（画面比例）。 |
@@ -48,7 +49,7 @@
 
 ## 服务器输入行为
 
-`logo_image` 是必需的服务器授权 RGBA 图像。缺失、未锁定、所有者不匹配、尺寸不匹配或没有非透明像素时拒绝；粒子目标点和颜色只从该绑定采样，聚合起始帧不显示原图，结束帧完整显示原图。
+`logo_image` 是必需的服务器授权 RGBA 图像；服务端使用 SAM3.1 根据 `target` 派生 `subject_mask`，粒子目标点和颜色只从该遮罩区域采样。聚合起始帧不显示目标图，结束帧显示目标区域且粒子透明度为零。素材身份和 mask 不进入模型参数。
 
 ## 不适用范围
 

@@ -2,14 +2,14 @@
 
 ## 工具作用
 
-在用户上传的图片或视频素材中心持续生成带柔光和高亮核心的粒子，控制速率、初速度、方向、扩散角、生命周期、重力和阻力。粒子纹理由服务端可选绑定；不会把素材替换成黑色背景。
+在用户上传的图片或视频素材上，从自然语言指定的位置持续生成带柔光和高亮核心的粒子，控制速率、初速度、方向、持续时间、强度和颜色。粒子纹理由服务端可选绑定；不会把素材替换成黑色背景。
 
 ## JSON 输出格式
 
 只输出以下结构的 JSON，不附加解释或代码块：
 
 ```json
-{"type":"particle_emitter","data":{"rate":120,"speed":260,"direction":-90,"spread":35,"lifetime":2.2,"size":8,"gravity":180,"drag":0.08}}
+{"type":"particle_emitter","data":{"rate":120,"speed":260,"direction":-90,"spread":35,"lifetime":2.2,"size":8,"gravity":180,"drag":0.08,"positionX":0.5,"positionY":0.5,"emissionDuration":3,"intensity":1,"color":"#74d6ff"}}
 ```
 
 ## 完整参数表
@@ -24,6 +24,10 @@
 | `size` | 数字 `0.5..200` | `8` | 粒子尺寸（像素）。 |
 | `gravity` | 数字 `-2000..2000` | `180` | 垂直加速度；负值向上。 |
 | `drag` | 数字 `0..1` | `0.08` | 速度阻尼。 |
+| `positionX` / `positionY` | 数字 `0..1` | `0.5 / 0.5` | 发射中心位置；需要定位物体时由视觉理解确定。 |
+| `emissionDuration` | 数字 `0.1..30` | `3` | 持续重复发射的时间；不是拉长单次粒子寿命。 |
+| `intensity` | 数字 `0.1..3` | `1` | 发射剧烈程度，影响密度。 |
+| `color` | `#RRGGBB` | `#74d6ff` | 粒子颜色。 |
 
 ## 表达映射与选择顺序
 
@@ -31,6 +35,8 @@
 - “更散”增大 `spread`；“持续更久”增大 `lifetime`；“更大颗”增大 `size`。
 - “下坠更明显”增大 `gravity`；“更轻、更飘”减小 `gravity` 并适度提高 `drag`。
 - `rate` 和 `lifetime` 都增加同屏粒子数：说生成更多改 `rate`，说停留更久改 `lifetime`。
+- “从汽车车头发射”一类表达先由视觉理解确定 `positionX/positionY`；方向使用角度制 `direction`。
+- “持续发射 5 秒”设置 `emissionDuration=5`，到时停止新粒子但保留已出生粒子直到各自寿命结束。
 - `speed` 和 `spread` 都扩大覆盖范围：说喷远改 `speed`，说扇面更开改 `spread`。
 
 ## 自然语言示例

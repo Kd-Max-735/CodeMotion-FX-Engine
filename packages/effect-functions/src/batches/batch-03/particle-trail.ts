@@ -100,13 +100,6 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
     const originY = params.startY * context.height;
     const direction = params.direction * Math.PI / 180;
     const minimumDimension = Math.min(context.width, context.height);
-    const reflect = (value: number, size: number): number => {
-      const maximum = Math.max(0, size - 1);
-      if (maximum === 0) return 0;
-      const period = maximum * 2;
-      const wrapped = ((value % period) + period) % period;
-      return wrapped <= maximum ? wrapped : period - wrapped;
-    };
     const headAt = (time: number): readonly [number, number] => {
       const travel = params.speed * Math.max(0, time);
       if (params.trajectory === "orbit") {
@@ -121,10 +114,10 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
       if (params.trajectory === "wave") {
         const wave = Math.sin(travel / Math.max(12, minimumDimension * 0.12))
           * params.waviness * minimumDimension * 0.18;
-        return [reflect(originX + alongX - Math.sin(direction) * wave, context.width),
-          reflect(originY + alongY + Math.cos(direction) * wave, context.height)];
+        return [originX + alongX - Math.sin(direction) * wave,
+          originY + alongY + Math.cos(direction) * wave];
       }
-      return [reflect(originX + alongX, context.width), reflect(originY + alongY, context.height)];
+      return [originX + alongX, originY + alongY];
     };
     const color = hsvColor(params.hue, params.saturation);
     for (let index = 0; index < count; index += 1) {

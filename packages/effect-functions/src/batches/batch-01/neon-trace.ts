@@ -2,7 +2,7 @@ import type { JsonObject } from "@codemotion/core";
 import type { EffectToolDefinition } from "../../types.js";
 import {
   SERVER_CPU_BACKEND, SERVER_CPU_FALLBACK, VALID_PARAMS, clamp, effectResult,
-  numberField, parameterSchema, readImageDimensions, round, slicePath
+  numberField, parameterSchema, readImageDimensions, round
 } from "./common.js";
 
 export interface NeonTraceParams extends JsonObject {
@@ -98,9 +98,7 @@ export const NEON_TRACE_DEFINITION: EffectToolDefinition<NeonTraceParams> = {
       })
     };
     const revealProgress = clamp(context.time / 1.4, 0, 1);
-    const traceProgress = params.progress * revealProgress;
-    const start = clamp(traceProgress - params.trailLength, 0, 1);
-    const points = traceProgress <= Number.EPSILON ? [] : slicePath(path, start, traceProgress, 4);
+    const points = revealProgress <= Number.EPSILON ? [] : path.points;
     const pulse = params.pulseRate === 0 ? 1 : 0.82 + 0.18 * Math.sin(context.time * params.pulseRate * Math.PI * 2);
     const layers = [1, 0.5, 0.22].map((scale, index) => ({
       radius: round(params.glowRadius * scale),
@@ -108,13 +106,17 @@ export const NEON_TRACE_DEFINITION: EffectToolDefinition<NeonTraceParams> = {
       linearLight: true
     }));
     return effectResult("metadata", {
-      algorithm: "trimmed_multiscale_neon",
+      algorithm: "persistent_dashed_neon",
       points,
       coreWidth: round(params.coreWidth),
       coreIntensity: round(params.intensity * pulse),
       hue: round(params.hue),
       glowLayers: layers,
-      revealProgress: round(revealProgress)
+      revealProgress: round(revealProgress),
+      dashLength: round(Math.max(8, params.coreWidth * 4)),
+      dashGap: round(Math.max(6, params.coreWidth * 2.5)),
+      dashOffset: round(-context.time * 70),
+      trailLength: round(params.trailLength)
     });
   }
 };

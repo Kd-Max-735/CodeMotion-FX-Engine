@@ -6,7 +6,7 @@ import { PNG } from "pngjs";
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 24 * 1024 * 1024;
 const MAX_MASK_PIXELS = 16_777_216;
-const TARGET_PROMPT = /^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$/u;
+const TARGET_PROMPT = /^[\p{L}\p{N}][\p{L}\p{N} ,.'()/-]{0,79}$/u;
 
 export interface Sam31MaskBinding {
   readonly version: "sam31-mask-v1";
@@ -238,10 +238,7 @@ export class Sam31SegmentationService {
     height: number,
     signal?: AbortSignal
   ): Promise<Sam31MaskBinding> {
-    if (!TARGET_PROMPT.test(target) || !Number.isInteger(width) || !Number.isInteger(height)
-      || width < 1 || height < 1 || width * height > MAX_MASK_PIXELS) {
-      throw new Sam31SegmentationError("invalid_input", "SAM3 segmentation input is invalid.");
-    }
+    this.validateInput(target, width, height);
     const mime = media.asset.metadata.mime;
     if (media.asset.type !== "image" || typeof mime !== "string"
       || !["image/png", "image/jpeg", "image/webp"].includes(mime)) {
@@ -254,13 +251,49 @@ export class Sam31SegmentationService {
     if (bytes.byteLength < 1 || bytes.byteLength > MAX_SOURCE_BYTES) {
       throw new Sam31SegmentationError("invalid_input", "SAM3 source image size is invalid.");
     }
+    return this.segmentBytes(bytes, mime, basename(media.storedPath), target, width, height, signal);
+  }
+
+  async segmentRgbaFrame(
+    pixels: Uint8Array,
+    width: number,
+    height: number,
+    target: string,
+    signal?: AbortSignal
+  ): Promise<Sam31MaskBinding> {
+    this.validateInput(target, width, height);
+    if (pixels.byteLength !== width * height * 4 || pixels.byteLength > MAX_SOURCE_BYTES) {
+      throw new Sam31SegmentationError("invalid_input", "SAM3 decoded frame size is invalid.");
+    }
+    const png = new PNG({ width, height });
+    png.data = Buffer.from(pixels);
+    const bytes = PNG.sync.write(png);
+    return this.segmentBytes(bytes, "image/png", "frame.png", target, width, height, signal);
+  }
+
+  private validateInput(target: string, width: number, height: number): void {
+    if (!TARGET_PROMPT.test(target) || !Number.isInteger(width) || !Number.isInteger(height)
+      || width < 1 || height < 1 || width * height > MAX_MASK_PIXELS) {
+      throw new Sam31SegmentationError("invalid_input", "SAM3 segmentation input is invalid.");
+    }
+  }
+
+  private async segmentBytes(
+    bytes: Uint8Array,
+    mime: string,
+    filename: string,
+    target: string,
+    width: number,
+    height: number,
+    signal?: AbortSignal
+  ): Promise<Sam31MaskBinding> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new Error("SAM31_TIMEOUT")), this.#timeoutMs);
     const abort = () => controller.abort(signal?.reason);
     signal?.addEventListener("abort", abort, { once: true });
     try {
       const uploadBody = new FormData();
-      uploadBody.append("file", new Blob([new Uint8Array(bytes)], { type: mime }), basename(media.storedPath));
+      uploadBody.append("file", new Blob([new Uint8Array(bytes)], { type: mime }), filename);
       const upload = objectValue(await boundedJson(await this.#fetch(new URL("api/uploads", this.#baseUrl), {
         method: "POST",
         body: uploadBody,

@@ -66,7 +66,7 @@ export const OBJECT_MATCH_CUT_DEFINITION: EffectToolDefinition<ObjectMatchCutPar
         type: "string",
         minLength: 1,
         maxLength: 80,
-        pattern: "^[A-Za-z0-9][A-Za-z0-9 ,.'()/-]{0,79}$",
+        pattern: "^[\\p{L}\\p{N}][\\p{L}\\p{N} ,.'()/-]{0,79}$",
         default: "main subject"
       },
       duration: { type: "number", minimum: 0.2, maximum: 5, default: 1 },
