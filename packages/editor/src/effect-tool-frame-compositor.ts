@@ -844,8 +844,13 @@ function particleFrame(
     const mask = sourceComposite.mask instanceof Uint8Array
       && sourceComposite.mask.length === request.width * request.height
       ? sourceComposite.mask : undefined;
+    const excludeMask = sourceComposite.excludeMask instanceof Uint8Array
+      && sourceComposite.excludeMask.length === request.width * request.height
+      ? sourceComposite.excludeMask : undefined;
     for (let pixelIndex = 0; pixelIndex < request.width * request.height; pixelIndex += 1) {
-      const amount = opacity * (mask === undefined ? 1 : mask[pixelIndex]! / 255);
+      const maskAmount = mask === undefined ? 1 : mask[pixelIndex]! / 255;
+      const excludeAmount = excludeMask === undefined ? 1 : 1 - excludeMask[pixelIndex]! / 255;
+      const amount = opacity * maskAmount * excludeAmount;
       const offset = pixelIndex * 4;
       output[offset] = clampByte(output[offset]! * amount);
       output[offset + 1] = clampByte(output[offset + 1]! * amount);

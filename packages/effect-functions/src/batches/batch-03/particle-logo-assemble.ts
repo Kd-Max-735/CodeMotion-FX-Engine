@@ -82,7 +82,9 @@ export const PARTICLE_LOGO_ASSEMBLE_DEFINITION: EffectToolDefinition<ParticleLog
     const attracted = 1 - (1 - visible) ** (1 + params.attraction * 2);
     const settled = attracted * (0.6 + params.damping * 0.4) + progress * (0.4 - params.damping * 0.4);
     const buffer = createParticleBuffer(context, params.particleCount, "disc", {
-      sourceComposite: { slot: "logo_image", opacity: progress >= 1 ? 1 : progress ** 4, ...(mask === undefined ? {} : { mask }) },
+      sourceComposite: progress >= 1
+        ? { slot: "logo_image", opacity: 1 }
+        : { slot: "logo_image", opacity: 1, ...(mask === undefined ? {} : { excludeMask: mask }) },
       glow: 0.55
     });
     const scatterPixels = params.scatterRadius * Math.min(context.width, context.height);

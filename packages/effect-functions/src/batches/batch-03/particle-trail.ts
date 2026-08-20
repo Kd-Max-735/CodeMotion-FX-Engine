@@ -26,6 +26,7 @@ export interface ParticleTrailParams extends JsonObject {
   direction: number;
   hue: number;
   saturation: number;
+  duration: number;
   emissionDuration: number;
   intensity: number;
 }
@@ -34,6 +35,7 @@ const defaults: ParticleTrailParams = {
   emissionRate: 180, trailLength: 1.2, speed: 220, width: 3, fade: 0.72,
   waviness: 0.18, lifetime: 1.6, startX: 0.5, startY: 0.5,
   trajectory: "linear", direction: -20, hue: 195, saturation: 0.78,
+  duration: 3,
   emissionDuration: 3, intensity: 1
 };
 
@@ -70,6 +72,7 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
       direction: { type: "number", minimum: -180, maximum: 180, default: -20 },
       hue: { type: "number", minimum: 0, maximum: 360, default: 195 },
       saturation: { type: "number", minimum: 0, maximum: 1, default: 0.78 },
+      duration: { type: "number", minimum: 0.1, maximum: 30, default: 3 },
       emissionDuration: { type: "number", minimum: 0.1, maximum: 30, default: 3 },
       intensity: { type: "number", minimum: 0.1, maximum: 3, default: 1 }
     }
@@ -84,11 +87,16 @@ export const PARTICLE_TRAIL_DEFINITION: EffectToolDefinition<ParticleTrailParams
   primaryBackend: BATCH_03_BACKEND,
   fallbackStrategy: BATCH_03_REJECT_FALLBACK,
   performanceGrade: "heavy",
-  normalizeParams: (params) => ({ ...params }),
+  normalizeParams: (params) => ({ ...params, duration: params.duration, emissionDuration: params.emissionDuration }),
   validateParams: () => VALID_PARAMS,
   render: (context, params) => {
     rgbaInput(context, "source_image", true);
-    const emissionEnd = Math.min(context.time, params.emissionDuration);
+    // `duration` is the current field name; retain emissionDuration for envelopes
+    // issued before the field was added.
+    const activeDuration = params.duration === defaults.duration
+      ? params.emissionDuration
+      : params.duration;
+    const emissionEnd = Math.min(Math.max(0, context.time), activeDuration);
     const historyStart = Math.max(0, context.time - params.trailLength, context.time - params.lifetime);
     const historyWindow = Math.max(0, emissionEnd - historyStart);
     const effectiveRate = params.emissionRate * params.intensity;

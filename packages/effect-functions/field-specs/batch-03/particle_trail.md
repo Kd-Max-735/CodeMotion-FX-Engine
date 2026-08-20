@@ -9,7 +9,7 @@
 只输出以下结构的 JSON，不附加解释或代码块：
 
 ```json
-{"type":"particle_trail","data":{"emissionRate":180,"trailLength":1.2,"speed":220,"width":3,"fade":0.72,"waviness":0.18,"lifetime":1.6,"startX":0.5,"startY":0.5,"trajectory":"linear","direction":-20,"hue":195,"saturation":0.78,"emissionDuration":3,"intensity":1}}
+{"type":"particle_trail","data":{"emissionRate":180,"trailLength":1.2,"speed":220,"width":3,"fade":0.72,"waviness":0.18,"lifetime":1.6,"startX":0.5,"startY":0.5,"trajectory":"linear","direction":-20,"hue":195,"saturation":0.78,"duration":3,"intensity":1}}
 ```
 
 ## 完整参数表
@@ -29,7 +29,8 @@
 | `direction` | 数字 `-180..180` | `-20` | 直线/波浪前进方向或环绕初始角度。 |
 | `hue` | 数字 `0..360` | `195` | 粒子色相角。 |
 | `saturation` | 数字 `0..1` | `0.78` | 粒子颜色饱和度；`0` 为白色。 |
-| `emissionDuration` | 数字 `0.1..30` | `3` | 重复生成拖尾粒子的持续时间（秒）。 |
+| `duration` | 数字 `0.1..30` | `3` | 重复生成拖尾粒子的持续时间（秒）；自然语言中的“拖尾持续/发射 N 秒”优先映射到此字段。 |
+| `emissionDuration` | 数字 `0.1..30` | `3` | 旧版参数别名；当 `duration` 保持默认值时仍可控制重复发射时长。 |
 | `intensity` | 数字 `0.1..3` | `1` | 拖尾剧烈程度，影响密度和粒子尺寸。 |
 
 ## 表达映射与选择顺序
@@ -41,7 +42,7 @@
 - `emissionRate` 与 `width` 都让拖尾更厚：密度请求改前者，粗细请求改后者。
 - 位置先用 `startX/startY`，轨迹形态用 `trajectory`，运动朝向用 `direction`；三者不可互相代替。
 - 颜色名称映射到 `hue`，柔和或接近白色时降低 `saturation`。
-- “持续拖尾几秒”设置 `emissionDuration`，期间持续补充粒子，而不是拉长一轮动画；“更剧烈”提高 `intensity`。
+- “持续拖尾几秒”设置 `duration`，期间持续补充粒子，而不是拉长一轮动画；兼容旧请求时可使用 `emissionDuration`；“更剧烈”提高 `intensity`。
 
 ## 自然语言示例
 

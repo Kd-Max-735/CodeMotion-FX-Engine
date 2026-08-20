@@ -390,6 +390,42 @@ describe("existing-02 field specifications and adapter contracts", () => {
     ]);
   });
 
+  it("holds liquid_wipe on A at the start and B after its duration", async () => {
+    const definition = definitions().get("liquid_wipe")!;
+    const width = 24;
+    const height = 16;
+    const surface = (value: readonly [number, number, number, number]) => ({
+      width,
+      height,
+      data: new Uint8ClampedArray(Array.from({ length: width * height }, () => value).flat()),
+      colorSpace: "srgb" as const,
+      alphaMode: "straight" as const
+    });
+    const source = surface([12, 24, 36, 255]);
+    const target = surface([210, 180, 150, 255]);
+    const bind = (slot: string, binding: unknown) => ({
+      slot,
+      kind: "image" as const,
+      tenantId: "tenant-existing-02",
+      userId: "user-existing-02",
+      locked: true as const,
+      binding
+    });
+    const inputs = {
+      source_frame: bind("source_frame", { surface: source, rasterInput: {} }),
+      target_frame: bind("target_frame", { surface: target, rasterInput: {} })
+    };
+    const renderAt = async (time: number) => (await definition.render({
+      ...contextFor(definition, inputs),
+      time,
+      width,
+      height
+    }, definition.defaults)).output as typeof source;
+    expect(Array.from((await renderAt(0)).data)).toEqual(Array.from(source.data));
+    expect(Array.from((await renderAt(2)).data)).toEqual(Array.from(target.data));
+    expect(Array.from((await renderAt(4)).data)).toEqual(Array.from(target.data));
+  });
+
   it("keeps chalk_stroke Schema, Markdown, source image, and server-derived mask aligned", async () => {
     const definition = definitions().get("chalk_stroke")!;
     const markdown = await loadEffectFieldSpec("chalk_stroke");

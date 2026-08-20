@@ -902,8 +902,22 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
     },
     validateParams: () => ({ valid: true as const }),
     render(context: ServerEffectRenderContext, params: Readonly<JsonObject>) {
-      const time = effectTime(effect.effectId, context,
-        effect.sourceId === "C03" ? params.duration as number : 1);
+      const duration = effect.sourceId === "C03"
+        ? Math.max(0.2, params.duration as number)
+        : 1;
+      const boundedTime = effect.sourceId === "C03"
+        ? Math.min(duration, Math.max(0, Number.isFinite(context.time) ? context.time : 0))
+        : context.time;
+      const time = effectTime(effect.effectId, context, duration);
+      const renderTime = effect.sourceId === "C03"
+        ? Object.freeze({
+            ...time,
+            projectTime: boundedTime,
+            layerTime: boundedTime,
+            effectTime: boundedTime,
+            progress: boundedTime / duration
+          })
+        : time;
       const resolved = effect.sourceId === "V01" || effect.sourceId === "V02"
         ? params : internalParams(effect, context, params);
       let output: PixelSurface;
@@ -936,12 +950,13 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         const secondary = secondaryName === undefined ? undefined : rasterBinding(context, secondaryName);
         const brush = effect.sourceId === "D02"
           ? singleBinding<ExistingBrushBinding>(context, "brush_texture") : undefined;
-        if (effect.sourceId === "C03" && secondary !== undefined
-          && context.time >= (params.duration as number)) {
+        if (effect.sourceId === "C03" && secondary !== undefined && boundedTime >= duration) {
           output = { ...secondary.surface, data: new Uint8ClampedArray(secondary.surface.data) };
+        } else if (effect.sourceId === "C03" && secondary !== undefined && boundedTime <= 0) {
+          output = { ...primary.surface, data: new Uint8ClampedArray(primary.surface.data) };
         } else {
           output = effect.renderPixels(primary.surface, resolved, {
-            time,
+            time: renderTime,
             seed: context.seed,
             quality: context.quality,
             rasterInput: primary.rasterInput,

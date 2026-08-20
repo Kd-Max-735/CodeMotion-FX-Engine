@@ -233,7 +233,7 @@ describe("batch-03 definitions", () => {
       definition.inputSlots.map((slot) => slot.name)));
     expect(slotNames).toEqual(new Set([
       "primary_image", "flow_map", "particle_texture", "logo_image", "target_image", "source_image",
-      "background_image"
+      "background_image", "subject_mask"
     ]));
     for (const definition of BATCH_03_DEFINITIONS) {
       expect(() => validateAndNormalizeEffectEnvelope(
@@ -355,7 +355,8 @@ describe("batch-03 definitions", () => {
       time: logo.defaults.duration as number
     })).output);
     expect([...logoStart.opacities].every((opacity) => opacity === 0)).toBe(true);
-    expect(logoStart.sourceComposite?.opacity).toBe(0);
+    expect(logoStart.sourceComposite?.opacity).toBe(1);
+    expect(logoStart.sourceComposite?.excludeMask).toBeInstanceOf(Uint8Array);
     expect([...logoLater.opacities].some((opacity) => opacity > 0)).toBe(true);
     expect(logoComplete.sourceComposite?.opacity).toBe(1);
 
@@ -380,8 +381,10 @@ describe("batch-03 definitions", () => {
     const blueOrbit = await renderParams({ ...trail.defaults });
     const redLine = await renderParams({ ...trail.defaults, startX: 0.1, startY: 0.8,
       trajectory: "linear", direction: 0, hue: 0, saturation: 1 });
+    const shortDuration = await renderParams({ ...trail.defaults, duration: 0.2 });
     expect(redLine.positions).not.toEqual(blueOrbit.positions);
     expect(redLine.colors).not.toEqual(blueOrbit.colors);
+    expect(shortDuration.count).toBeLessThan(blueOrbit.count);
   });
 
   it("uses only the server seed for stochastic distortion and particle state", async () => {

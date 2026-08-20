@@ -316,8 +316,10 @@ describe("effect tool frame compositor", () => {
     expect(changedPixelCount(source, output)).toBeGreaterThan(mask.length / 2);
   });
 
-  it("starts logo particles on a blank canvas without the generic logo wipe", () => {
+  it("keeps the uploaded background while cutting out the logo subject", () => {
     const source = solidSource();
+    const excludeMask = new Uint8Array(detailedRequest.width * detailedRequest.height).fill(0);
+    excludeMask.fill(255, 0, Math.floor(excludeMask.length / 2));
     const output = composeEffectToolFrame(metadata({
       format: "codemotion-particle-buffer/v1",
       width: detailedRequest.width,
@@ -330,11 +332,11 @@ describe("effect tool frame compositor", () => {
       sizes: new Float32Array(),
       opacities: new Float32Array(),
       colors: new Uint8ClampedArray(),
+      sourceComposite: { slot: "logo_image", opacity: 1, excludeMask },
       glow: 0.5
     }), detailedRequest, "particle_logo_assemble", source);
-    expect([...output.slice(0, 4)]).toEqual([5, 8, 14, 255]);
-    expect(new Set(Array.from({ length: output.length / 4 }, (_, index) =>
-      output.slice(index * 4, index * 4 + 4).join(",")))).toEqual(new Set(["5,8,14,255"]));
+    expect([...output.slice(0, 4)]).toEqual([0, 0, 0, 0]);
+    expect([...output.slice(output.length - 4)]).toEqual([...source.slice(source.length - 4)]);
   });
 
   it.each([

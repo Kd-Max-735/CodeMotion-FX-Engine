@@ -52,6 +52,8 @@ export interface ParticleTextureBuffer {
     readonly slot: string;
     readonly opacity: number;
     readonly mask?: Uint8Array;
+    /** Remove this mask from the source instead of limiting it to the mask. */
+    readonly excludeMask?: Uint8Array;
   };
   readonly spriteSlot?: string;
   readonly glow?: number;
