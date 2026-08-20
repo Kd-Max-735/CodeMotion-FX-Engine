@@ -314,6 +314,10 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
   if (effect.sourceId === "C03") {
     properties.duration = { type: "number", minimum: 0.2, maximum: 30, multipleOf: 0.1, default: 2 };
   }
+  if (effect.sourceId === "C02" || effect.sourceId === "C04") {
+    properties.duration = { type: "number", minimum: 0.2, maximum: 30, multipleOf: 0.1, default: 2 };
+    (properties.progress as JsonObject).default = 1;
+  }
   if (effect.sourceId === "T02" || effect.sourceId === "T03" || effect.sourceId === "D01") {
     (properties.text as JsonObject).minLength = 1;
     (properties.color as JsonObject).pattern = "^#[0-9A-Fa-f]{6}$";
@@ -322,6 +326,7 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
     schema.required = schema.required.filter((name) => typeof name === "string" && name in properties);
     if (effect.sourceId === "D04") schema.required.push("target", "placement");
     if (effect.sourceId === "L01") schema.required.push("target");
+    if (effect.sourceId === "C02" || effect.sourceId === "C04") schema.required.push("duration");
   }
   return schema as JsonSchema;
 }
@@ -859,6 +864,8 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         })
     : effect.sourceId === "C03"
       ? Object.freeze({ ...withoutResourceFields(effect.effectId, effect.defaultPreset), duration: 2 })
+      : effect.sourceId === "C02" || effect.sourceId === "C04"
+        ? Object.freeze({ ...withoutResourceFields(effect.effectId, effect.defaultPreset), progress: 1, duration: 2 })
       : effect.sourceId === "V01"
         ? Object.freeze({ target: "main subject", mode: "reveal", duration: 3, direction: "left_to_right", strokeWidth: 0.03, strokeColor: "#f4f0df" })
         : effect.sourceId === "V02"
@@ -898,18 +905,24 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         : effect.sourceId === "T08"
         ? normalizeTextExtrude3DParams(params)
         : normalizeEffectParams(effect.effectId, params);
-      return withoutResourceFields(effect.effectId, normalized as JsonObject);
+      const withDuration = effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04"
+        ? { ...(normalized as JsonObject), duration: params.duration as number }
+        : normalized as JsonObject;
+      return withoutResourceFields(effect.effectId,
+        effect.sourceId === "C02" || effect.sourceId === "C04"
+          ? { ...withDuration, progress: 1 }
+          : withDuration);
     },
     validateParams: () => ({ valid: true as const }),
     render(context: ServerEffectRenderContext, params: Readonly<JsonObject>) {
-      const duration = effect.sourceId === "C03"
+      const duration = effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04"
         ? Math.max(0.2, params.duration as number)
         : 1;
-      const boundedTime = effect.sourceId === "C03"
+      const boundedTime = effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04"
         ? Math.min(duration, Math.max(0, Number.isFinite(context.time) ? context.time : 0))
         : context.time;
       const time = effectTime(effect.effectId, context, duration);
-      const renderTime = effect.sourceId === "C03"
+      const renderTime = effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04"
         ? Object.freeze({
             ...time,
             projectTime: boundedTime,
@@ -950,9 +963,11 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         const secondary = secondaryName === undefined ? undefined : rasterBinding(context, secondaryName);
         const brush = effect.sourceId === "D02"
           ? singleBinding<ExistingBrushBinding>(context, "brush_texture") : undefined;
-        if (effect.sourceId === "C03" && secondary !== undefined && boundedTime >= duration) {
+        if ((effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04")
+          && secondary !== undefined && boundedTime >= duration) {
           output = { ...secondary.surface, data: new Uint8ClampedArray(secondary.surface.data) };
-        } else if (effect.sourceId === "C03" && secondary !== undefined && boundedTime <= 0) {
+        } else if ((effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04")
+          && secondary !== undefined && boundedTime <= 0) {
           output = { ...primary.surface, data: new Uint8ClampedArray(primary.surface.data) };
         } else {
           output = effect.renderPixels(primary.surface, resolved, {

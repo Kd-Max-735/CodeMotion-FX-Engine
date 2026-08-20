@@ -182,7 +182,8 @@ const EXPECTED = Object.freeze({
     effectId: "fx.transition.pixelDissolve",
     properties: {
       grid: number(20, 2, 128, 1), order: choice("random", ["random", "linear", "radial"]),
-      seed: number(1, 0, 100000, 1), progress: number(0.5, 0, 1, 0.01)
+      seed: number(1, 0, 100000, 1), progress: number(1, 0, 1, 0.01),
+      duration: number(2, 0.2, 30, 0.1)
     },
     slots: [["source_frame", "image"], ["target_frame", "image"]]
   },
@@ -198,7 +199,7 @@ const EXPECTED = Object.freeze({
     effectId: "fx.transition.radialWipe",
     properties: {
       center: vector([0.5, 0.5]), startAngle: number(-90, -360, 360, 1),
-      clockwise: boolean(true), progress: number(0.5, 0, 1, 0.01)
+      clockwise: boolean(true), progress: number(1, 0, 1, 0.01), duration: number(2, 0.2, 30, 0.1)
     },
     slots: [["source_frame", "image"], ["target_frame", "image"]]
   },
@@ -425,6 +426,47 @@ describe("existing-02 field specifications and adapter contracts", () => {
     expect(Array.from((await renderAt(2)).data)).toEqual(Array.from(target.data));
     expect(Array.from((await renderAt(4)).data)).toEqual(Array.from(target.data));
   });
+
+  it.each(["pixel_dissolve", "radial_wipe"] as const)(
+    "completes %s from A to B using its configured duration",
+    async (toolName) => {
+      const definition = definitions().get(toolName)!;
+      const width = 24;
+      const height = 16;
+      const surface = (value: readonly [number, number, number, number]) => ({
+        width,
+        height,
+        data: new Uint8ClampedArray(Array.from({ length: width * height }, () => value).flat()),
+        colorSpace: "srgb" as const,
+        alphaMode: "straight" as const
+      });
+      const source = surface([12, 24, 36, 255]);
+      const target = surface([210, 180, 150, 255]);
+      const bind = (slot: string, binding: unknown) => ({
+        slot,
+        kind: "image" as const,
+        tenantId: "tenant-existing-02",
+        userId: "user-existing-02",
+        locked: true as const,
+        binding
+      });
+      const inputs = {
+        source_frame: bind("source_frame", { surface: source, rasterInput: {} }),
+        target_frame: bind("target_frame", { surface: target, rasterInput: {} })
+      };
+      const renderAt = async (time: number) => (await definition.render({
+        ...contextFor(definition, inputs),
+        time,
+        width,
+        height
+      }, definition.defaults)).output as typeof source;
+      expect(Array.from((await renderAt(0)).data)).toEqual(Array.from(source.data));
+      expect(Array.from((await renderAt(definition.defaults.duration as number)).data))
+        .toEqual(Array.from(target.data));
+      expect(Array.from((await renderAt((definition.defaults.duration as number) + 2)).data))
+        .toEqual(Array.from(target.data));
+    }
+  );
 
   it("keeps chalk_stroke Schema, Markdown, source image, and server-derived mask aligned", async () => {
     const definition = definitions().get("chalk_stroke")!;
