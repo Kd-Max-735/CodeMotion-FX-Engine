@@ -24,6 +24,22 @@ export interface Sam31SegmentationOptions {
   readonly threshold?: number;
 }
 
+export type Sam31SegmentationErrorCode =
+  | "invalid_input"
+  | "unsupported_media"
+  | "target_not_found"
+  | "unavailable";
+
+export class Sam31SegmentationError extends Error {
+  constructor(
+    readonly code: Sam31SegmentationErrorCode,
+    message: string
+  ) {
+    super(message);
+    this.name = "Sam31SegmentationError";
+  }
+}
+
 interface Sam31Detection {
   readonly score: number;
   readonly bbox: readonly [number, number, number, number];
@@ -160,16 +176,19 @@ export class Sam31SegmentationService {
   ): Promise<Sam31MaskBinding> {
     if (!TARGET_PROMPT.test(target) || !Number.isInteger(width) || !Number.isInteger(height)
       || width < 1 || height < 1 || width * height > MAX_MASK_PIXELS) {
-      throw new TypeError("SAM3.1 segmentation input is invalid.");
+      throw new Sam31SegmentationError("invalid_input", "SAM3.1 segmentation input is invalid.");
     }
     const mime = media.asset.metadata.mime;
     if (media.asset.type !== "image" || typeof mime !== "string"
       || !["image/png", "image/jpeg", "image/webp"].includes(mime)) {
-      throw new TypeError("SAM3.1 requires an authorized PNG, JPEG, or WebP image.");
+      throw new Sam31SegmentationError(
+        "unsupported_media",
+        "SAM3.1 requires an authorized PNG, JPEG, or WebP image."
+      );
     }
     const bytes = await readFile(media.storedPath, signal === undefined ? undefined : { signal });
     if (bytes.byteLength < 1 || bytes.byteLength > MAX_SOURCE_BYTES) {
-      throw new TypeError("SAM3.1 source image size is invalid.");
+      throw new Sam31SegmentationError("invalid_input", "SAM3.1 source image size is invalid.");
     }
     const body = new FormData();
     body.append("image", new Blob([new Uint8Array(bytes)], { type: mime }), basename(media.storedPath));
@@ -219,8 +238,17 @@ export class Sam31SegmentationService {
       });
     } catch (error) {
       if (signal?.aborted === true) throw signal.reason;
-      if (error instanceof TypeError && error.message.startsWith("SAM3.1")) throw error;
-      throw new Error("SAM3.1 could not segment the requested visible target.");
+      if (error instanceof Sam31SegmentationError) throw error;
+      if (error instanceof Error && error.message === "SAM31_TARGET_NOT_FOUND") {
+        throw new Sam31SegmentationError(
+          "target_not_found",
+          "SAM3.1 could not find the requested visible target."
+        );
+      }
+      throw new Sam31SegmentationError(
+        "unavailable",
+        "SAM3.1 segmentation service is unavailable or returned an invalid response."
+      );
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);

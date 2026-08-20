@@ -150,7 +150,7 @@ describe("120-tool selector helpers", () => {
     expect(turnInputIds(promptOnly, [])).toEqual({});
   });
 
-  it.each(["marker_stroke", "chalk_stroke"])(
+  it.each(["marker_stroke", "chalk_stroke", "neon_glow"])(
     "requires one image for %s without exposing its server-derived subject mask as an upload",
     (toolName) => {
       const segmented = tool({
@@ -166,6 +166,32 @@ describe("120-tool selector helpers", () => {
         .toEqual({ source_image: "asset_imageabcdefgh" });
     }
   );
+
+  it("binds only SAM-compatible raster images for segmented subject effects", () => {
+    const segmented = tool({
+      toolName: "neon_glow",
+      inputRequirements: [{
+        ...input("source_image", "image"),
+        acceptedMimeTypes: ["image/png", "image/jpeg", "image/webp"]
+      }, input("subject_mask", "mask", true, false)]
+    });
+    const asset = (assetId: string, kind: "image" | "svg", mime: string): BrowserAssetSummaryV1 => ({
+      assetId,
+      kind,
+      mime,
+      displayName: assetId,
+      codec: kind === "svg" ? "svg" : "png",
+      bytes: 100,
+      uploadedAt: new Date(0).toISOString(),
+      allowedPurposes: ["reference-image"]
+    });
+    const svg = asset("asset_svg00000000", "svg", "image/svg+xml");
+    const png = asset("asset_png00000000", "image", "image/png");
+
+    expect(assetBindingsForAssets(segmented, [svg, png]).map(({ asset: item }) => item.assetId))
+      .toEqual([png.assetId]);
+    expect(turnInputIdsForAssets(segmented, [svg])).toEqual({});
+  });
 
   it("binds one uploaded video without counting server-derived analysis as a second asset", () => {
     const smartCrop = tool({

@@ -1562,7 +1562,10 @@ describe("server single effect-tool service", () => {
       for (const toolName of ["marker_stroke", "chalk_stroke", "neon_glow"]) {
         expect(catalog.tools.find((item) => item.toolName === toolName)).toMatchObject({
           inputRequirements: [
-            { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },
+            {
+              name: "source_image", kind: "image", required: true, acceptsUploadedImage: true,
+              acceptedMimeTypes: ["image/png", "image/jpeg", "image/webp"]
+            },
             {
               name: "subject_mask", kind: "mask", required: true,
               acceptsUploadedImage: false, acceptsUploadedVideo: false, acceptsUploadedAudio: false

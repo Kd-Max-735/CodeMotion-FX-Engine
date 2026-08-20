@@ -37,6 +37,10 @@ function errorMessage(error: unknown): string {
   }
   if (error instanceof BrowserApiError) {
     if (error.code === "ARK_PROVIDER_UNAVAILABLE") return "Ark 尚未配置，请检查服务器 ARK_API_KEY。";
+    if (error.code === "SAM31_UNAVAILABLE") return "SAM 3.1 分割服务未运行或响应异常，请先检查服务器的 SAM31_API_BASE_URL。";
+    if (error.code === "SAM31_TARGET_NOT_FOUND") return "SAM 3.1 未在图片中找到指定对象，请换一个更明确的对象描述。";
+    if (error.code === "SAM31_UNSUPPORTED_MEDIA") return "SAM 3.1 仅支持 PNG、JPEG 或 WebP 图片。";
+    if (error.code === "SAM31_INPUT_INVALID") return "SAM 3.1 的目标描述或图片输入无效，请重新描述要处理的对象。";
     if (error.code === "MISSING_REQUIRED_INPUTS") return "当前工具还需要此界面未提供的输入资源，已安全停止执行。";
     if (error.code === "EFFECT_TOOL_REQUEST_INVALID") return "工具输入不满足要求，已安全停止执行。";
     return `${error.message} (${error.code})`;
@@ -76,6 +80,7 @@ function uploadAccept(tool: SelectedEffectToolView): string {
 }
 
 function assetMatchesSlot(asset: BrowserAssetSummaryV1, slot: SelectedEffectToolView["inputRequirements"][number]): boolean {
+  if (slot.acceptedMimeTypes.length > 0 && !slot.acceptedMimeTypes.includes(asset.mime)) return false;
   if (asset.kind === "audio") return slot.acceptsUploadedAudio || slot.kind === "audio";
   if (asset.kind === "video") return slot.acceptsUploadedVideo || slot.kind === "video";
   return (asset.kind === "image" || asset.kind === "svg") && slot.acceptsUploadedImage;

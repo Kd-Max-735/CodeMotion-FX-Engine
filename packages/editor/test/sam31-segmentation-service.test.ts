@@ -4,7 +4,10 @@ import { join } from "node:path";
 import type { VerifiedStoredMedia } from "@codemotion/exporter";
 import { PNG } from "pngjs";
 import { describe, expect, it, vi } from "vitest";
-import { Sam31SegmentationService } from "../src/sam31-segmentation-service.js";
+import {
+  Sam31SegmentationError,
+  Sam31SegmentationService
+} from "../src/sam31-segmentation-service.js";
 
 function maskPng(values: readonly number[], width: number, height: number): Buffer {
   const png = new PNG({ width, height });
@@ -93,6 +96,22 @@ describe("SAM3.1 segmentation service", () => {
     });
 
     await expect(service.segment(await sourceMedia(), "main subject", 2, 2))
-      .rejects.toThrow("SAM3.1 could not segment the requested visible target.");
+      .rejects.toMatchObject({
+        name: "Sam31SegmentationError",
+        code: "unavailable",
+        message: "SAM3.1 segmentation service is unavailable or returned an invalid response."
+      } satisfies Partial<Sam31SegmentationError>);
+  });
+
+  it("separates invalid targets and missing detections from service availability failures", async () => {
+    const service = new Sam31SegmentationService({
+      baseUrl: "http://127.0.0.1:8001",
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ detections: [] }), { status: 200 })) as typeof fetch
+    });
+
+    await expect(service.segment(await sourceMedia(), "图片中的汽车", 2, 2))
+      .rejects.toMatchObject({ code: "invalid_input" });
+    await expect(service.segment(await sourceMedia(), "car", 2, 2))
+      .rejects.toMatchObject({ code: "target_not_found" });
   });
 });

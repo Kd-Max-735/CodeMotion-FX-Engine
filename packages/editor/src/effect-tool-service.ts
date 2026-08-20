@@ -54,6 +54,7 @@ import {
   type EffectToolVideoFile
 } from "./effect-tool-video-service.js";
 import {
+  Sam31SegmentationError,
   Sam31SegmentationService,
   createSam31SegmentationService
 } from "./sam31-segmentation-service.js";
@@ -2172,6 +2173,12 @@ function safeError(error: unknown): {
   if (error instanceof AuthHttpError) return { status: error.status, code: error.code };
   if (error instanceof MissingEffectToolInputError) {
     return { status: 422, code: "MISSING_REQUIRED_INPUTS", requirements: error.requirements };
+  }
+  if (error instanceof Sam31SegmentationError) {
+    if (error.code === "target_not_found") return { status: 422, code: "SAM31_TARGET_NOT_FOUND" };
+    if (error.code === "unsupported_media") return { status: 422, code: "SAM31_UNSUPPORTED_MEDIA" };
+    if (error.code === "invalid_input") return { status: 422, code: "SAM31_INPUT_INVALID" };
+    return { status: 503, code: "SAM31_UNAVAILABLE" };
   }
   if (error instanceof EffectToolContractError) return { status: 422, code: error.code };
   if (error instanceof ProviderError) {

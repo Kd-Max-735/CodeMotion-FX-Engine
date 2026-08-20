@@ -125,9 +125,17 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
 function slot(
   name: string,
   kind: EffectInputSlotDefinition["kind"],
-  description: string
+  description: string,
+  acceptedMimeTypes?: readonly string[]
 ): EffectInputSlotDefinition {
-  return Object.freeze({ name, kind, required: true, cardinality: "one", description });
+  return Object.freeze({
+    name,
+    kind,
+    required: true,
+    cardinality: "one",
+    description,
+    ...(acceptedMimeTypes === undefined ? {} : { acceptedMimeTypes: Object.freeze([...acceptedMimeTypes]) })
+  });
 }
 
 function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlotDefinition[] {
@@ -146,13 +154,23 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   }
   if (effect.sourceId === "D04") {
     return Object.freeze([
-      slot("source_image", "image", "Owner-authorized image receiving the chalk effect."),
+      slot(
+        "source_image",
+        "image",
+        "Owner-authorized image receiving the chalk effect.",
+        ["image/png", "image/jpeg", "image/webp"]
+      ),
       slot("subject_mask", "mask", "Server-derived SAM3.1 mask for the requested visible target.")
     ]);
   }
   if (effect.sourceId === "L01") {
     return Object.freeze([
-      slot("source_image", "image", "Owner-authorized image receiving object-scoped neon glow."),
+      slot(
+        "source_image",
+        "image",
+        "Owner-authorized image receiving object-scoped neon glow.",
+        ["image/png", "image/jpeg", "image/webp"]
+      ),
       slot("subject_mask", "mask", "Server-derived SAM3.1 mask for the requested visible target.")
     ]);
   }

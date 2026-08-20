@@ -65,7 +65,8 @@ export const MARKER_STROKE_DEFINITION: EffectToolDefinition<MarkerStrokeParams> 
       kind: "image",
       required: true,
       cardinality: "one",
-      description: "Owner-authorized image receiving the semantically positioned marker stroke."
+      description: "Owner-authorized image receiving the semantically positioned marker stroke.",
+      acceptedMimeTypes: ["image/png", "image/jpeg", "image/webp"]
     },
     {
       name: "subject_mask",
