@@ -184,9 +184,12 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
     text("sourceText", "CODE"), text("targetText", "MOTION"), choice("matchMode", "glyph", ["glyph", "outline", "position"]),
     number("progress", 0.5, 0, 1, 0.01)
   ], "heavy", 10),
-  b("T06", "fx.text.scrambleDecode", "Scramble Decode", "text", "Seeded scramble-to-target decode.", [
+  b("T06", "fx.text.scrambleDecode", "Scramble Decode", "text", "Seeded scramble-to-target decode over an authorized image.", [
     text("charset", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 256), number("speed", 24, 0.1, 240, 0.1, "glyphs/s"),
-    choice("lockDirection", "left-to-right", ["left-to-right", "right-to-left", "random"]), number("progress", 0.5, 0, 1, 0.01)
+    choice("lockDirection", "left-to-right", ["left-to-right", "right-to-left", "random"]), number("progress", 0.5, 0, 1, 0.01),
+    text("text", "DECODE", 80), choice("fontFamily", "sans", ["song", "kai", "sans"]),
+    number("fontSize", 72, 12, 240, 1, "pixels"), number("positionX", 0.5, 0, 1, 0.01, "canvas"),
+    number("positionY", 0.5, 0, 1, 0.01, "canvas"), text("color", "#ffffff", 16)
   ], "medium", 7),
   b("T07", "fx.text.wordExplode", "Word Explode", "text", "Cell-based word explosion with depth fade.", [
     number("force", 0.45, 0, 4, 0.01), number("rotation", 35, -720, 720, 1, "degrees"),

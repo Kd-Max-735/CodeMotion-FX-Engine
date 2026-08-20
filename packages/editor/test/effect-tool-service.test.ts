@@ -1221,7 +1221,7 @@ describe("server single effect-tool service", () => {
     const cases = [
       ["character_cascade", "text_raster", "text", true],
       ["kinetic_typography", "text_raster", "text", true],
-      ["scramble_decode", "text_raster", "text", true],
+      ["scramble_decode", "source_image", "image", true],
       ["text_morph", "text_raster", "text", true],
       ["text_path_reveal", "text_raster", "text", true],
       ["typewriter", "text_raster", "text", true],

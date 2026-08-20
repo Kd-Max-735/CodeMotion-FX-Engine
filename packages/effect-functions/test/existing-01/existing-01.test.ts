@@ -55,7 +55,7 @@ const EXPECTED_INPUT_SLOTS: Readonly<Record<Existing01ToolName, readonly string[
   radial_burst: ["vector_source"],
   rotate_in: ["source_layer"],
   scale_pop: ["source_layer"],
-  scramble_decode: ["text_raster"],
+  scramble_decode: ["source_image"],
   shake: ["source_layer"],
   shape_repeater: ["vector_source"],
   slide: ["source_layer"],
