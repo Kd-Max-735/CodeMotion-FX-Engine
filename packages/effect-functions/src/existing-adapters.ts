@@ -665,8 +665,14 @@ function pathTrimFrame(context: ServerEffectRenderContext, params: Readonly<Json
   const source = rasterBinding(context, "source_image").surface;
   const mask = directMaskValues(context, "subject_mask");
   const distances = maskBoundaryDistances(mask, context.width, context.height);
-  const duration = Math.max(0.2, params.duration as number);
+  const durationValue = Number(params.duration);
+  const duration = Math.max(0.2, Number.isFinite(durationValue) ? durationValue : 3);
   const progress = Math.min(1, Math.max(0, context.time / duration));
+  // Finish the selected contour before fading the rest of the image. Keeping
+  // these phases separate prevents a completed frame from popping in/out.
+  const outlinePhase = 0.72;
+  const outlineProgress = Math.min(1, progress / outlinePhase);
+  const globalProgress = Math.min(1, Math.max(0, (progress - outlinePhase) / (1 - outlinePhase)));
   const mode = params.mode as string;
   const direction = params.direction as string;
   const strokeWidth = Math.max(1, (params.strokeWidth as number) * Math.min(context.width, context.height));
@@ -695,17 +701,18 @@ function pathTrimFrame(context: ServerEffectRenderContext, params: Readonly<Json
     const index = y * context.width + x;
     const inside = mask[index]! >= 128;
     const sweep = sweepAt(x, y);
-    const edge = Math.min(1, Math.max(0, (progress - sweep + 0.055) / 0.11));
-    const reveal = mode === "erase" ? 1 - edge : edge;
-    const finalFrame = progress >= 1;
-    const coverage = finalFrame ? (mode === "erase" ? 0 : 1) : inside ? reveal : 0;
+    const edge = Math.min(1, Math.max(0, (outlineProgress - sweep) / 0.11));
+    const selectedCoverage = mode === "erase" ? 1 - edge : edge;
+    const coverage = mode === "erase"
+      ? (inside ? selectedCoverage : 1) * (progress <= outlinePhase ? 1 : 1 - globalProgress)
+      : inside ? (progress <= outlinePhase ? selectedCoverage : 1) : globalProgress;
     const offset = index * 4;
     output[offset] = Math.round(source.data[offset]! * coverage);
     output[offset + 1] = Math.round(source.data[offset + 1]! * coverage);
     output[offset + 2] = Math.round(source.data[offset + 2]! * coverage);
     output[offset + 3] = Math.round(source.data[offset + 3]! * coverage);
-    const outline = distances[index]! <= strokeWidth && Math.abs(sweep - progress) < 0.075;
-    if (outline && !finalFrame) {
+    const outline = distances[index]! <= strokeWidth && Math.abs(sweep - outlineProgress) < 0.075;
+    if (outline && progress > 0 && progress < outlinePhase) {
       output[offset] = stroke[0]!;
       output[offset + 1] = stroke[1]!;
       output[offset + 2] = stroke[2]!;

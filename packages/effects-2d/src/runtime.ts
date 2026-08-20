@@ -1346,15 +1346,35 @@ function transitionCoverage(
     const viscosity = numberParam(params, "viscosity", 0.6);
     const activity = 1 - viscosity;
     const flow = progress * (0.7 + activity * 1.8);
-    const broad = smoothValueNoise(options, "C03.liquid-broad", v * (2.2 + activity * 2.4), flow);
-    const medium = smoothValueNoise(options, "C03.liquid-medium", v * (5 + activity * 6), flow * 1.7, 17);
-    const fine = smoothValueNoise(options, "C03.liquid-fine", v * (11 + activity * 18), flow * 3.1, 43);
+    // Sample a moving two-dimensional field so the boundary forms connected
+    // lobes and fingers instead of a mostly horizontal one-dimensional wave.
+    const broad = smoothValueNoise(
+      options,
+      "C03.liquid-broad",
+      u * (2.2 + activity * 2.4) + flow * 0.42,
+      v * (2.2 + activity * 2.4) - flow * 0.28
+    );
+    const medium = smoothValueNoise(
+      options,
+      "C03.liquid-medium",
+      u * (5 + activity * 6) + flow * 0.85,
+      v * (5 + activity * 6) - flow * 0.6,
+      17
+    );
+    const fine = smoothValueNoise(
+      options,
+      "C03.liquid-fine",
+      u * (11 + activity * 18) + flow * 1.25,
+      v * (11 + activity * 18) - flow * 0.95,
+      43
+    );
     const coherent = (broad - 0.5) * 1.05
       + (medium - 0.5) * (0.5 + activity * 0.18)
       + (fine - 0.5) * activity * 0.28;
     const viscousFold = Math.sin(v * Math.PI * (3 + activity * 4) + flow * Math.PI * 1.4)
       * (0.08 + viscosity * 0.08);
-    const edge = u + (coherent + viscousFold) * noise;
+    const displacement = noise * (0.9 + activity * 0.45);
+    const edge = u + (coherent + viscousFold) * displacement;
     const softness = 0.018 + viscosity * 0.035 + activity * noise * 0.025;
     return smoothstep(progress - softness, progress + softness, 1 - edge);
   }

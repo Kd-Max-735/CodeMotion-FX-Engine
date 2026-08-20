@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   EXISTING_EFFECT_TOOL_DEFINITIONS
 } from "../../src/existing-adapters.js";
+import { makeEffectTimeSample, makeRealInputFixture } from "@codemotion/effects-2d";
 import {
   getEffectFieldSpec,
   loadEffectFieldSpec
@@ -404,6 +405,13 @@ describe("existing-02 field specifications and adapter contracts", () => {
     });
     const source = surface([12, 24, 36, 255]);
     const target = surface([210, 180, 150, 255]);
+    const fixtureTime = makeEffectTimeSample(definition.effectId, "liquid-wipe-test", 0.5);
+    const sourceRasterInput = makeRealInputFixture(
+      definition.effectId, "media", width, height, false, "srgb", fixtureTime
+    ).input;
+    const targetRasterInput = makeRealInputFixture(
+      definition.effectId, "media", width, height, true, "srgb", fixtureTime
+    ).input;
     const bind = (slot: string, binding: unknown) => ({
       slot,
       kind: "image" as const,
@@ -413,8 +421,8 @@ describe("existing-02 field specifications and adapter contracts", () => {
       binding
     });
     const inputs = {
-      source_frame: bind("source_frame", { surface: source, rasterInput: {} }),
-      target_frame: bind("target_frame", { surface: target, rasterInput: {} })
+      source_frame: bind("source_frame", { surface: source, rasterInput: sourceRasterInput }),
+      target_frame: bind("target_frame", { surface: target, rasterInput: targetRasterInput })
     };
     const renderAt = async (time: number) => (await definition.render({
       ...contextFor(definition, inputs),
@@ -423,6 +431,9 @@ describe("existing-02 field specifications and adapter contracts", () => {
       height
     }, definition.defaults)).output as typeof source;
     expect(Array.from((await renderAt(0)).data)).toEqual(Array.from(source.data));
+    const midpoint = await renderAt(1);
+    expect(Array.from(midpoint.data)).not.toEqual(Array.from(source.data));
+    expect(Array.from(midpoint.data)).not.toEqual(Array.from(target.data));
     expect(Array.from((await renderAt(2)).data)).toEqual(Array.from(target.data));
     expect(Array.from((await renderAt(4)).data)).toEqual(Array.from(target.data));
   });
