@@ -6,7 +6,8 @@ import { PNG } from "pngjs";
 import { describe, expect, it, vi } from "vitest";
 import {
   Sam31SegmentationError,
-  Sam31SegmentationService
+  Sam31SegmentationService,
+  createSam31SegmentationService
 } from "../src/sam31-segmentation-service.js";
 
 function maskPng(values: readonly number[], width: number, height: number): Buffer {
@@ -40,7 +41,7 @@ async function sourceMedia(): Promise<VerifiedStoredMedia> {
   };
 }
 
-describe("SAM3.1 segmentation service", () => {
+describe("SAM3 segmentation service", () => {
   it("rejects public, authenticated, and non-HTTP endpoints", () => {
     for (const baseUrl of [
       "https://127.0.0.1:8001",
@@ -55,27 +56,54 @@ describe("SAM3.1 segmentation service", () => {
   it("sends the authorized image and English target, selects the best mask, and resizes it", async () => {
     const lowMask = maskPng([255, 255], 2, 1).toString("base64");
     const highMask = maskPng([0, 255], 2, 1).toString("base64");
+    let request = 0;
     const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(String(input)).toBe("http://127.0.0.1:8001/v1/segment");
-      expect(init?.method).toBe("POST");
-      expect(init?.redirect).toBe("error");
-      const form = init?.body as FormData;
-      expect(form).toBeInstanceOf(FormData);
-      expect(form.get("prompt")).toBe("car license plate");
-      expect(form.get("threshold")).toBe("0.65");
-      expect(form.get("include_masks")).toBe("true");
-      const image = form.get("image") as Blob;
-      expect(image.type).toBe("image/png");
-      expect(new Uint8Array(await image.arrayBuffer())).toEqual(Uint8Array.from([137, 80, 78, 71]));
-      return new Response(JSON.stringify({ detections: [
-        { score: 0.4, bbox_xyxy: [0, 0, 2, 1], mask_png_base64: lowMask },
-        { score: 0.93, bbox_xyxy: [1, 0, 2, 1], mask_png_base64: highMask }
-      ] }), { status: 200, headers: { "content-type": "application/json" } });
+      request += 1;
+      if (request === 1) {
+        expect(String(input)).toBe("http://192.168.1.31:9100/api/uploads");
+        expect(init?.method).toBe("POST");
+        expect(init?.redirect).toBe("error");
+        const form = init?.body as FormData;
+        expect(form).toBeInstanceOf(FormData);
+        const image = form.get("file") as Blob;
+        expect(image.type).toBe("image/png");
+        expect(new Uint8Array(await image.arrayBuffer())).toEqual(Uint8Array.from([137, 80, 78, 71]));
+        return new Response(JSON.stringify({ file_id: "upload_abcdefgh.png" }), { status: 200 });
+      }
+      if (request === 2) {
+        expect(String(input)).toBe("http://192.168.1.31:9100/api/tasks");
+        expect(init?.method).toBe("POST");
+        expect(init?.headers).toEqual({ "content-type": "application/json" });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          model: "sam3",
+          operation: "segment",
+          inputs: {
+            file_id: "upload_abcdefgh.png",
+            prompt: "car license plate",
+            threshold: 0.65,
+            include_masks: true
+          }
+        });
+        return new Response(JSON.stringify({ task_id: "task_abcdefgh", status: "queued" }), { status: 200 });
+      }
+      expect(String(input)).toBe("http://192.168.1.31:9100/api/tasks/task_abcdefgh");
+      if (request === 3) {
+        return new Response(JSON.stringify({ id: "task_abcdefgh", status: "provisioning" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        id: "task_abcdefgh",
+        status: "succeeded",
+        result: { detections: [
+          { score: 0.4, bbox_xyxy: [0, 0, 2, 1], mask_png_base64: lowMask },
+          { score: 0.93, bbox_xyxy: [1, 0, 2, 1], mask_png_base64: highMask }
+        ] }
+      }), { status: 200 });
     });
     const service = new Sam31SegmentationService({
-      baseUrl: "http://127.0.0.1:8001",
+      baseUrl: "http://192.168.1.31:9100",
       fetchImpl: fetchImpl as typeof fetch,
-      threshold: 0.65
+      threshold: 0.65,
+      pollIntervalMs: 100
     });
 
     await expect(service.segment(await sourceMedia(), "car license plate", 4, 2)).resolves.toEqual({
@@ -86,12 +114,12 @@ describe("SAM3.1 segmentation service", () => {
       score: 0.93,
       bbox: [1, 0, 2, 1]
     });
-    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 
   it("does not leak malformed remote response details", async () => {
     const service = new Sam31SegmentationService({
-      baseUrl: "http://192.168.1.20:8001",
+      baseUrl: "http://192.168.1.20:9100",
       fetchImpl: vi.fn(async () => new Response("not-json", { status: 200 })) as typeof fetch
     });
 
@@ -99,19 +127,37 @@ describe("SAM3.1 segmentation service", () => {
       .rejects.toMatchObject({
         name: "Sam31SegmentationError",
         code: "unavailable",
-        message: "SAM3.1 segmentation service is unavailable or returned an invalid response."
+        message: "SAM3 segmentation service is unavailable or returned an invalid response."
       } satisfies Partial<Sam31SegmentationError>);
   });
 
   it("separates invalid targets and missing detections from service availability failures", async () => {
+    let request = 0;
     const service = new Sam31SegmentationService({
-      baseUrl: "http://127.0.0.1:8001",
-      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ detections: [] }), { status: 200 })) as typeof fetch
+      baseUrl: "http://127.0.0.1:9100",
+      fetchImpl: vi.fn(async () => {
+        request += 1;
+        if (request === 1) return new Response(JSON.stringify({ file_id: "upload_abcdefgh.png" }), { status: 200 });
+        if (request === 2) return new Response(JSON.stringify({ task_id: "task_abcdefgh" }), { status: 200 });
+        return new Response(JSON.stringify({
+          id: "task_abcdefgh", status: "succeeded", result: { detections: [] }
+        }), { status: 200 });
+      }) as typeof fetch
     });
 
     await expect(service.segment(await sourceMedia(), "图片中的汽车", 2, 2))
       .rejects.toMatchObject({ code: "invalid_input" });
     await expect(service.segment(await sourceMedia(), "car", 2, 2))
       .rejects.toMatchObject({ code: "target_not_found" });
+  });
+
+  it("configures the private SAM3 gateway without exposing it to model parameters", () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    expect(() => createSam31SegmentationService({
+      SAM3_API_BASE_URL: "http://192.168.1.31:9100",
+      SAM3_THRESHOLD: "0.3",
+      SAM3_TIMEOUT_MS: "300000",
+      SAM3_POLL_INTERVAL_MS: "1000"
+    }, fetchImpl)).not.toThrow();
   });
 });

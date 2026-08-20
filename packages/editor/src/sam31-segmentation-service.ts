@@ -21,6 +21,7 @@ export interface Sam31SegmentationOptions {
   readonly baseUrl: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
+  readonly pollIntervalMs?: number;
   readonly threshold?: number;
 }
 
@@ -44,6 +45,12 @@ interface Sam31Detection {
   readonly score: number;
   readonly bbox: readonly [number, number, number, number];
   readonly maskBase64: string;
+}
+
+interface Sam3GatewayTask {
+  readonly taskId: string;
+  readonly status: "queued" | "provisioning" | "running" | "succeeded" | "failed";
+  readonly result?: Record<string, unknown>;
 }
 
 function isPrivateIpv4(hostname: string): boolean {
@@ -94,6 +101,61 @@ async function boundedResponseBytes(response: Response): Promise<Uint8Array> {
     offset += chunk.byteLength;
   }
   return output;
+}
+
+async function boundedJson(response: Response): Promise<unknown> {
+  if (!response.ok) throw new Error("SAM3_GATEWAY_REQUEST_FAILED");
+  const bytes = await boundedResponseBytes(response);
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    throw new Error("SAM3_GATEWAY_RESPONSE_INVALID");
+  }
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined;
+}
+
+function taskId(value: unknown): string | undefined {
+  const record = objectValue(value);
+  const id = record?.task_id;
+  return typeof id === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(id) ? id : undefined;
+}
+
+function gatewayTask(value: unknown, expectedTaskId: string): Sam3GatewayTask | undefined {
+  const record = objectValue(value);
+  if (record === undefined) return undefined;
+  const id = typeof record.id === "string"
+    ? record.id
+    : typeof record.task_id === "string" ? record.task_id : undefined;
+  const status = record?.status;
+  if (id !== expectedTaskId || typeof status !== "string"
+    || !["queued", "provisioning", "running", "succeeded", "failed"].includes(status)) return undefined;
+  const result = objectValue(record.result);
+  return {
+    taskId: id,
+    status: status as Sam3GatewayTask["status"],
+    ...(result === undefined ? {} : { result })
+  };
+}
+
+async function waitForPoll(milliseconds: number, signal: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const complete = () => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(complete, milliseconds);
+    const abort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
 }
 
 function finiteCoordinate(value: unknown): value is number {
@@ -158,13 +220,15 @@ export class Sam31SegmentationService {
   readonly #baseUrl: URL;
   readonly #fetch: typeof fetch;
   readonly #timeoutMs: number;
+  readonly #pollIntervalMs: number;
   readonly #threshold: number;
 
   constructor(options: Sam31SegmentationOptions) {
     this.#baseUrl = checkedBaseUrl(options.baseUrl);
     this.#fetch = options.fetchImpl ?? fetch;
-    this.#timeoutMs = Math.max(1_000, Math.min(180_000, options.timeoutMs ?? 180_000));
-    this.#threshold = Math.max(0.1, Math.min(0.95, options.threshold ?? 0.5));
+    this.#timeoutMs = Math.max(1_000, Math.min(600_000, options.timeoutMs ?? 300_000));
+    this.#pollIntervalMs = Math.max(100, Math.min(10_000, options.pollIntervalMs ?? 1_000));
+    this.#threshold = Math.max(0.1, Math.min(0.95, options.threshold ?? 0.3));
   }
 
   async segment(
@@ -176,50 +240,65 @@ export class Sam31SegmentationService {
   ): Promise<Sam31MaskBinding> {
     if (!TARGET_PROMPT.test(target) || !Number.isInteger(width) || !Number.isInteger(height)
       || width < 1 || height < 1 || width * height > MAX_MASK_PIXELS) {
-      throw new Sam31SegmentationError("invalid_input", "SAM3.1 segmentation input is invalid.");
+      throw new Sam31SegmentationError("invalid_input", "SAM3 segmentation input is invalid.");
     }
     const mime = media.asset.metadata.mime;
     if (media.asset.type !== "image" || typeof mime !== "string"
       || !["image/png", "image/jpeg", "image/webp"].includes(mime)) {
       throw new Sam31SegmentationError(
         "unsupported_media",
-        "SAM3.1 requires an authorized PNG, JPEG, or WebP image."
+        "SAM3 requires an authorized PNG, JPEG, or WebP image."
       );
     }
     const bytes = await readFile(media.storedPath, signal === undefined ? undefined : { signal });
     if (bytes.byteLength < 1 || bytes.byteLength > MAX_SOURCE_BYTES) {
-      throw new Sam31SegmentationError("invalid_input", "SAM3.1 source image size is invalid.");
+      throw new Sam31SegmentationError("invalid_input", "SAM3 source image size is invalid.");
     }
-    const body = new FormData();
-    body.append("image", new Blob([new Uint8Array(bytes)], { type: mime }), basename(media.storedPath));
-    body.append("prompt", target);
-    body.append("threshold", String(this.#threshold));
-    body.append("include_masks", "true");
-
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new Error("SAM31_TIMEOUT")), this.#timeoutMs);
     const abort = () => controller.abort(signal?.reason);
     signal?.addEventListener("abort", abort, { once: true });
     try {
-      const response = await this.#fetch(new URL("v1/segment", this.#baseUrl), {
+      const uploadBody = new FormData();
+      uploadBody.append("file", new Blob([new Uint8Array(bytes)], { type: mime }), basename(media.storedPath));
+      const upload = objectValue(await boundedJson(await this.#fetch(new URL("api/uploads", this.#baseUrl), {
         method: "POST",
-        body,
+        body: uploadBody,
         signal: controller.signal,
         redirect: "error"
-      });
-      if (!response.ok) throw new Error("SAM31_REQUEST_FAILED");
-      const responseBytes = await boundedResponseBytes(response);
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(new TextDecoder().decode(responseBytes));
-      } catch {
-        throw new Error("SAM31_RESPONSE_INVALID");
+      })));
+      const fileId = upload?.file_id;
+      if (typeof fileId !== "string" || !/^[A-Za-z0-9._-]{8,192}$/u.test(fileId)) {
+        throw new Error("SAM3_UPLOAD_RESPONSE_INVALID");
       }
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        throw new Error("SAM31_RESPONSE_INVALID");
+      const submitted = await boundedJson(await this.#fetch(new URL("api/tasks", this.#baseUrl), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "sam3",
+          operation: "segment",
+          inputs: { file_id: fileId, prompt: target, threshold: this.#threshold, include_masks: true }
+        }),
+        signal: controller.signal,
+        redirect: "error"
+      }));
+      const submittedTaskId = taskId(submitted);
+      if (submittedTaskId === undefined) throw new Error("SAM3_TASK_RESPONSE_INVALID");
+
+      let completed: Sam3GatewayTask | undefined;
+      while (completed === undefined) {
+        const task = gatewayTask(await boundedJson(await this.#fetch(
+          new URL(`api/tasks/${encodeURIComponent(submittedTaskId)}`, this.#baseUrl),
+          { signal: controller.signal, redirect: "error" }
+        )), submittedTaskId);
+        if (task === undefined) throw new Error("SAM3_TASK_RESPONSE_INVALID");
+        if (task.status === "failed") throw new Error("SAM3_TASK_FAILED");
+        if (task.status === "succeeded") completed = task;
+        else await waitForPoll(this.#pollIntervalMs, controller.signal);
       }
-      const candidates = Array.isArray((parsed as Record<string, unknown>).detections)
-        ? ((parsed as Record<string, unknown>).detections as unknown[]).map(detection)
+      const detections = completed.result?.detections;
+      const candidates = Array.isArray(detections)
+        ? detections.map(detection)
           .filter((item): item is Sam31Detection => item !== undefined)
         : [];
       const selected = candidates.sort((left, right) => right.score - left.score)[0];
@@ -242,12 +321,12 @@ export class Sam31SegmentationService {
       if (error instanceof Error && error.message === "SAM31_TARGET_NOT_FOUND") {
         throw new Sam31SegmentationError(
           "target_not_found",
-          "SAM3.1 could not find the requested visible target."
+          "SAM3 could not find the requested visible target."
         );
       }
       throw new Sam31SegmentationError(
         "unavailable",
-        "SAM3.1 segmentation service is unavailable or returned an invalid response."
+        "SAM3 segmentation service is unavailable or returned an invalid response."
       );
     } finally {
       clearTimeout(timeout);
@@ -260,10 +339,15 @@ export function createSam31SegmentationService(
   env: NodeJS.ProcessEnv,
   fetchImpl?: typeof fetch
 ): Sam31SegmentationService {
-  const threshold = Number(env.SAM31_THRESHOLD ?? 0.5);
+  const threshold = Number(env.SAM3_THRESHOLD ?? env.SAM31_THRESHOLD ?? 0.3);
+  const timeoutMs = Number(env.SAM3_TIMEOUT_MS ?? 300_000);
+  const pollIntervalMs = Number(env.SAM3_POLL_INTERVAL_MS ?? 1_000);
   return new Sam31SegmentationService({
-    baseUrl: env.SAM31_API_BASE_URL?.trim() || "http://127.0.0.1:8001",
+    baseUrl: env.SAM3_API_BASE_URL?.trim() || env.SAM31_API_BASE_URL?.trim()
+      || "http://192.168.1.31:9100",
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
-    threshold: Number.isFinite(threshold) ? threshold : 0.5
+    threshold: Number.isFinite(threshold) ? threshold : 0.3,
+    timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 300_000,
+    pollIntervalMs: Number.isFinite(pollIntervalMs) ? pollIntervalMs : 1_000
   });
 }
