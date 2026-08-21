@@ -19,7 +19,7 @@
 
 | `data` 字段 | 必填 | 取值 | 选择策略 |
 | --- | --- | --- | --- |
-| `direction` | 是 | `left` / `right` / `up` / `down` | 按擦除推进方向选择精确枚举 |
+| `direction` | 是 | `left` / `right` / `up` / `down` / `left_top_to_right_bottom` / `left_bottom_to_right_top` / `right_top_to_left_bottom` / `right_bottom_to_left_top` | 按擦除推进方向选择精确枚举；名称严格表示起点到终点 |
 | `softness` | 是 | 数字 `0..0.5`，步长 `0.005` | `0` 为硬边，越大过渡带越柔和 |
 | `angle` | 是 | 数字 `-180..180` 度，步长 `1` | 在基础方向上旋转擦除边界 |
 | `progress` | 是 | 数字 `0..1`，步长 `0.01` | `0` 完全为 A，`1` 完全为 B |
@@ -28,7 +28,8 @@
 ## 参数选择规则
 
 - “从左向右”映射 `left`，“从右向左”映射 `right`，“从上到下”映射 `up`，“从下到上”映射 `down`。
-- “斜着擦”才调整 `angle`；未指定斜率时使用 `0`。
+- “左上到右下”映射 `left_top_to_right_bottom`；“左下到右上”映射 `left_bottom_to_right_top`；反向分别使用 `right_bottom_to_left_top` 和 `right_top_to_left_bottom`，不得交换起终点。
+- 八个基础方向都使用 `angle=0`。只有用户要求在基础方向上继续旋转边界时才调整 `angle`；画布坐标中正角度为顺时针。
 - “硬切边”使用 `softness=0`；“柔和羽化”提高 `softness`。
 - 导出转场必须完整完成，`progress` 固定输出 `1`；使用 `duration` 控制实际推进时间。
 - 不用 `angle` 代替四个基础方向；先定 `direction`，再叠加小角度倾斜。
@@ -41,6 +42,8 @@
 | 从右侧柔和擦入四分之一 | `{"direction":"right","softness":0.1,"angle":0,"progress":0.25}` |
 | 从上方斜 20 度擦到七成 | `{"direction":"up","softness":0.04,"angle":20,"progress":0.7}` |
 | 从下方宽柔边开始转场 | `{"direction":"down","softness":0.25,"angle":0,"progress":0.1}` |
+| 从左下到右上完成擦除 | `{"direction":"left_bottom_to_right_top","softness":0.04,"angle":0,"progress":1,"duration":2}` |
+| 从左上到右下完成擦除 | `{"direction":"left_top_to_right_bottom","softness":0.04,"angle":0,"progress":1,"duration":2}` |
 | 保持默认样式并完成转场 | `{"direction":"left","softness":0.04,"angle":0,"progress":1}` |
 
 ## 推荐档位

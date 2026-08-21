@@ -655,12 +655,105 @@ function kineticTextScaleLimit(options: EffectRuntimeOptions): number {
   return Math.max(1, Math.min(4, ...limits) * 0.96);
 }
 
+function alphaSplat(output: PixelSurface, x: number, y: number, color: Rgba, opacity: number): void {
+  const left = Math.floor(x);
+  const top = Math.floor(y);
+  const fractionX = x - left;
+  const fractionY = y - top;
+  const samples = [
+    [left, top, (1 - fractionX) * (1 - fractionY)],
+    [left + 1, top, fractionX * (1 - fractionY)],
+    [left, top + 1, (1 - fractionX) * fractionY],
+    [left + 1, top + 1, fractionX * fractionY]
+  ] as const;
+  for (const [targetX, targetY, weight] of samples) {
+    if (targetX < 0 || targetY < 0 || targetX >= output.width || targetY >= output.height || weight <= 0) continue;
+    const sourceAlpha = clamp(color[3] * opacity * weight);
+    if (sourceAlpha <= 0) continue;
+    const destination = read(output, targetX, targetY);
+    const outputAlpha = sourceAlpha + destination[3] * (1 - sourceAlpha);
+    const mixed: Rgba = outputAlpha <= Number.EPSILON ? [0, 0, 0, 0] : [
+      (color[0] * sourceAlpha + destination[0] * destination[3] * (1 - sourceAlpha)) / outputAlpha,
+      (color[1] * sourceAlpha + destination[1] * destination[3] * (1 - sourceAlpha)) / outputAlpha,
+      (color[2] * sourceAlpha + destination[2] * destination[3] * (1 - sourceAlpha)) / outputAlpha,
+      outputAlpha
+    ];
+    write(output, targetX, targetY, mixed);
+  }
+}
+
+function renderWordExplode(
+  blueprint: EffectBlueprint,
+  source: PixelSurface,
+  params: Readonly<Record<string, unknown>>,
+  options: EffectRuntimeOptions
+): PixelSurface {
+  const progress = effectProgress(blueprint, params, options);
+  if (progress <= 0) return cloneSurface(source);
+  const raster = options.rasterInput.source;
+  if (raster.kind !== "text" || raster.glyphs.length === 0) return emptyLike(source);
+  const glyphs = raster.glyphs.filter((glyph) => glyph.bounds.width > 0 && glyph.bounds.height > 0);
+  if (glyphs.length === 0) return emptyLike(source);
+  const left = Math.min(...glyphs.map((glyph) => glyph.bounds.x + glyph.offsetX));
+  const top = Math.min(...glyphs.map((glyph) => glyph.bounds.y + glyph.offsetY));
+  const right = Math.max(...glyphs.map((glyph) => glyph.bounds.x + glyph.offsetX + glyph.bounds.width));
+  const bottom = Math.max(...glyphs.map((glyph) => glyph.bounds.y + glyph.offsetY + glyph.bounds.height));
+  const textCenterX = (left + right) / 2;
+  const textCenterY = (top + bottom) / 2;
+  const eased = progress * progress * (3 - 2 * progress);
+  const distance = numberParam(params, "force", 0.45) * Math.min(source.width, source.height) * eased;
+  const rotation = numberParam(params, "rotation", 35) * Math.PI / 180 * eased;
+  const opacity = clamp(1 - progress * numberParam(params, "depth", 0.3));
+  const output = emptyLike(source);
+  glyphs.forEach((glyph, glyphIndex) => {
+    const glyphLeft = glyph.bounds.x + glyph.offsetX;
+    const glyphTop = glyph.bounds.y + glyph.offsetY;
+    const centerX = glyphLeft + glyph.bounds.width / 2;
+    const centerY = glyphTop + glyph.bounds.height / 2;
+    const radialX = centerX - textCenterX;
+    const radialY = centerY - textCenterY;
+    const fallbackAngle = glyphIndex / Math.max(1, glyphs.length) * TAU;
+    const radialAngle = Math.hypot(radialX, radialY) > 0.5
+      ? Math.atan2(radialY, radialX) : fallbackAngle;
+    const jitter = (effectRandom(options, "T07.character-direction", glyphIndex, 0, 1, 0, false) - 0.5)
+      * Math.PI / 5;
+    const travelAngle = radialAngle + jitter;
+    const travelScale = 0.82 + effectRandom(
+      options, "T07.character-distance", glyphIndex, 0, 1, 0, false
+    ) * 0.36;
+    const targetCenterX = centerX + Math.cos(travelAngle) * distance * travelScale;
+    const targetCenterY = centerY + Math.sin(travelAngle) * distance * travelScale;
+    const spinDirection = effectRandom(options, "T07.character-spin", glyphIndex, 0, 1, 0, false) < 0.5 ? -1 : 1;
+    const cosine = Math.cos(rotation * spinDirection);
+    const sine = Math.sin(rotation * spinDirection);
+    for (let sourceY = Math.max(0, Math.floor(glyphTop));
+      sourceY < Math.min(source.height, Math.ceil(glyphTop + glyph.bounds.height)); sourceY += 1) {
+      for (let sourceX = Math.max(0, Math.floor(glyphLeft));
+        sourceX < Math.min(source.width, Math.ceil(glyphLeft + glyph.bounds.width)); sourceX += 1) {
+        const color = read(source, sourceX, sourceY);
+        if (color[3] <= 0) continue;
+        const localX = sourceX - centerX;
+        const localY = sourceY - centerY;
+        alphaSplat(
+          output,
+          targetCenterX + localX * cosine - localY * sine,
+          targetCenterY + localX * sine + localY * cosine,
+          color,
+          opacity
+        );
+      }
+    }
+  });
+  return output;
+}
+
 function renderText(
   blueprint: EffectBlueprint,
   source: PixelSurface,
   params: Readonly<Record<string, unknown>>,
   options: EffectRuntimeOptions
 ): PixelSurface {
+  if (blueprint.sourceId === "T07") return renderWordExplode(blueprint, source, params, options);
   const output = emptyLike(source);
   const p = effectProgress(blueprint, params, options);
   const seconds = elapsedSeconds(options);
@@ -776,23 +869,6 @@ function renderText(
           const codeTone = character.codePointAt(0)! / 0x10ffff;
           sample = [noise, 1 - noise * 0.5, 0.65 + codeTone * 0.35, sample[3] * 0.8];
         }
-      } else {
-        const force = numberParam(params, "force", 0.45) * p;
-        const selector = stringParam(params, "selector", "word");
-        const selectedIndex = selector === "word" ? Math.floor(cell.index / 5) * 5 : cell.index;
-        const rotation = numberParam(params, "rotation", 35) * Math.PI / 180;
-        const angle = effectRandom(options, "T07.word", selectedIndex, 3, 1, 0, false)
-          * TAU + rotation * p;
-        const dx = Math.cos(angle) * force * p;
-        const dy = Math.sin(angle) * force * p;
-        const cosine = Math.cos(rotation * p);
-        const sine = Math.sin(rotation * p);
-        sample = transformedSample(source, u, v, (su, sv) => {
-          const localU = su - 0.5 - dx;
-          const localV = sv - 0.5 - dy;
-          return [0.5 + localU * cosine - localV * sine, 0.5 + localU * sine + localV * cosine];
-        });
-        visibility = 1 - p * numberParam(params, "depth", 0.3);
       }
       sample[3] *= clamp(visibility);
       write(output, x, y, sample);
@@ -1329,12 +1405,18 @@ function transitionCoverage(
   if (sourceId === "C01") {
     const direction = stringParam(params, "direction", "left");
     const angle = numberParam(params, "angle", 0) * Math.PI / 180;
-    const horizontal = (u - 0.5) * Math.cos(angle) + (v - 0.5) * Math.sin(angle) + 0.5;
-    const vertical = (v - 0.5) * Math.cos(angle) - (u - 0.5) * Math.sin(angle) + 0.5;
-    const coordinate = direction === "right" ? 1 - horizontal
-      : direction === "up" ? vertical
-        : direction === "down" ? 1 - vertical
-          : horizontal;
+    const base = direction === "right" ? [-1, 0]
+      : direction === "up" ? [0, 1]
+        : direction === "down" ? [0, -1]
+          : direction === "left_top_to_right_bottom" ? [1, 1]
+            : direction === "left_bottom_to_right_top" ? [1, -1]
+              : direction === "right_top_to_left_bottom" ? [-1, 1]
+                : direction === "right_bottom_to_left_top" ? [-1, -1]
+                  : [1, 0];
+    const directionX = base[0]! * Math.cos(angle) - base[1]! * Math.sin(angle);
+    const directionY = base[0]! * Math.sin(angle) + base[1]! * Math.cos(angle);
+    const extent = Math.max(Number.EPSILON, Math.abs(directionX) + Math.abs(directionY));
+    const coordinate = ((u - 0.5) * directionX + (v - 0.5) * directionY) / extent + 0.5;
     const softness = numberParam(params, "softness", 0.04);
     return 1 - smoothstep(progress - softness, progress + softness, coordinate);
   }

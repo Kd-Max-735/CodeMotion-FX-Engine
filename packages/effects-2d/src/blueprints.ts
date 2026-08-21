@@ -205,7 +205,7 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "medium", 7),
   b("T07", "fx.text.wordExplode", "Word Explode", "text", "Cell-based word explosion with depth fade.", [
     number("force", 0.45, 0, 4, 0.01), number("rotation", 35, -720, 720, 1, "degrees"),
-    number("depth", 0.3, 0, 2, 0.01, "canvas"), choice("selector", "word", ["character", "word"]),
+    number("depth", 0.3, 0, 2, 0.01, "canvas"), choice("selector", "character", ["character"]),
     text("text", "文字爆散", 80), choice("fontFamily", "song", ["song", "kai", "sans"]),
     number("fontSize", 72, 12, 240, 1, "pixels"), number("positionX", 0.5, 0, 1, 0.01, "canvas"),
     number("positionY", 0.5, 0, 1, 0.01, "canvas"), text("color", "#ffffff", 16)
@@ -286,7 +286,11 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "heavy", 15),
 
   b("C01", "fx.transition.wipe", "Wipe", "transition", "A/B linear wipe.", [
-    choice("direction", "left", ["left", "right", "up", "down"]), number("softness", 0.04, 0, 0.5, 0.005),
+    choice("direction", "left", [
+      "left", "right", "up", "down",
+      "left_top_to_right_bottom", "left_bottom_to_right_top",
+      "right_top_to_left_bottom", "right_bottom_to_left_top"
+    ]), number("softness", 0.04, 0, 0.5, 0.005),
     number("angle", 0, -180, 180, 1, "degrees"), number("progress", 1, 0, 1, 0.01),
     number("duration", 2, 0.2, 30, 0.1, "seconds")
   ], "light", 6),

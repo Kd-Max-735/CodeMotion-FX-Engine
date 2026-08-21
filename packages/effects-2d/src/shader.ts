@@ -374,8 +374,18 @@ const BODIES: Readonly<Record<P0SourceId, string>> = Object.freeze({
   }
   c = sum / (count + 1.0);`,
   C01: `
-  float angle = (u_p2 - 0.5) * 6.283 + u_p0 * 6.283;
-  float coordinate = dot(uv - 0.5, vec2(cos(angle), sin(angle))) + 0.5;
+  float directionCode = floor(u_p0 * 7.0 + 0.5);
+  vec2 direction = directionCode == 1.0 ? vec2(-1.0, 0.0)
+    : directionCode == 2.0 ? vec2(0.0, 1.0)
+    : directionCode == 3.0 ? vec2(0.0, -1.0)
+    : directionCode == 4.0 ? vec2(1.0, 1.0)
+    : directionCode == 5.0 ? vec2(1.0, -1.0)
+    : directionCode == 6.0 ? vec2(-1.0, 1.0)
+    : directionCode == 7.0 ? vec2(-1.0, -1.0)
+    : vec2(1.0, 0.0);
+  float angle = (u_p2 - 0.5) * 6.283;
+  direction = mat2(cos(angle), sin(angle), -sin(angle), cos(angle)) * direction;
+  float coordinate = dot(uv - 0.5, direction) / max(0.0001, abs(direction.x) + abs(direction.y)) + 0.5;
   float wipe = 1.0 - smoothstep(u_p3 - u_p1 * 0.25, u_p3 + u_p1 * 0.25, coordinate);
   c.rgb *= 0.65 + wipe * 0.35;
   c.a *= wipe;`,

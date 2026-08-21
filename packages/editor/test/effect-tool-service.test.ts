@@ -756,7 +756,7 @@ describe("server single effect-tool service", () => {
       { type: freeze.toolName, data: { ...freeze.defaults, freezeAt: 2, freezeDuration: 1 } },
       { source_video: input("source_video", "video") },
       ["asset_freezeabcdefgh"], 7, 1, 2, 2, undefined, 2,
-      { source_video: "asset_freezeabcdefgh" }
+      { source_video: "asset_freezeabcdefgh" }, true
     );
     expect(freezeTask.video.durationSeconds).toBe(6);
 
@@ -766,10 +766,106 @@ describe("server single effect-tool service", () => {
       { type: tunnel.toolName, data: { ...tunnel.defaults, transitionStart: 2, duration: 1 } },
       { from_video: input("from_video", "video"), to_video: input("to_video", "video") },
       ["asset_fromabcdefghij", "asset_toabcdefghijkl"], 7, 1, 2, 2, undefined, 2,
-      { from_video: "asset_fromabcdefghij", to_video: "asset_toabcdefghijkl" }
+      { from_video: "asset_fromabcdefghij", to_video: "asset_toabcdefghijkl" }, true
     );
     expect(tunnelTask.video.durationSeconds).toBe(5);
+    const explicitFreeze = await service.createPrepared(
+      principal, freeze,
+      { type: freeze.toolName, data: { ...freeze.defaults, freezeAt: 2, freezeDuration: 1 } },
+      { source_video: input("source_video", "video") },
+      ["asset_freezeabcdefgh"], 7, 3, 2, 2, undefined, 2,
+      { source_video: "asset_freezeabcdefgh" }, false
+    );
+    expect(explicitFreeze.video.durationSeconds).toBe(3);
+    const explicitTunnel = await service.createPrepared(
+      principal, tunnel,
+      { type: tunnel.toolName, data: { ...tunnel.defaults, transitionStart: 2, duration: 1 } },
+      { from_video: input("from_video", "video"), to_video: input("to_video", "video") },
+      ["asset_fromabcdefghij", "asset_toabcdefghijkl"], 7, 4, 2, 2, undefined, 2,
+      { from_video: "asset_fromabcdefghij", to_video: "asset_toabcdefghijkl" }, false
+    );
+    expect(explicitTunnel.video.durationSeconds).toBe(4);
     await waitFor(() => service.get(principal, tunnelTask.id).status === "completed");
+    await service.close();
+  });
+
+  it("uses explicit natural-language output duration before adaptive video metadata", async () => {
+    const provider = new NativeRecordingProvider();
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("video_freeze_frame")!;
+    provider.turn = {
+      reasoningContent: "用户要求视频定格。",
+      content: "准备执行视频定格。",
+      toolCall: {
+        id: "call-freeze-duration-policy",
+        name: definition.toolName,
+        arguments: {
+          effectParams: { ...definition.defaults, freezeAt: 2, freezeDuration: 1 },
+          output: { durationSeconds: 5, generationMode: "standard" }
+        }
+      }
+    };
+    const inputs: EffectToolInputResolver = {
+      resolve: async () => Object.freeze({
+        source_video: Object.freeze({
+          slot: "source_video",
+          kind: "video" as const,
+          tenantId: principal.tenantId,
+          userId: principal.userId,
+          locked: true as const,
+          binding: { version: "rgba8-frame-v1", width: 2, height: 2, data: new Uint8Array(16) }
+        })
+      }),
+      outputDimensions: async () => ({ width: 2, height: 2 })
+    };
+    const video = await testVideoService();
+    const view = (durationSeconds: number) => ({
+      id: `video-duration-${durationSeconds}`,
+      status: "queued" as const,
+      toolName: definition.toolName,
+      createdAt: "2026-08-21T00:00:00.000Z",
+      updatedAt: "2026-08-21T00:00:00.000Z",
+      video: {
+        format: "mp4" as const,
+        mime: "video/mp4" as const,
+        width: 2,
+        height: 2,
+        durationSeconds,
+        fps: 30,
+        frameCount: Math.ceil(durationSeconds * 30),
+        audio: false as const,
+        completedFrames: 0,
+        progress: 0
+      },
+      gpu: { available: false as const, message: "queued" }
+    });
+    const createPrepared = vi.spyOn(video.service, "createPrepared")
+      .mockResolvedValueOnce(view(6))
+      .mockResolvedValueOnce(view(4));
+    const service = new EffectToolService(provider, inputs, EFFECT_TOOL_REGISTRY, video.service);
+
+    const adaptive = await service.selectedTurn(principal, {
+      toolName: definition.toolName,
+      prompt: "第 2 秒定格 1 秒",
+      inputIds: { source_video: "asset_videoabcdefgh" }
+    });
+    expect(createPrepared.mock.calls[0]![6]).toBe(5);
+    expect(createPrepared.mock.calls[0]![12]).toBe(true);
+    expect(adaptive).toMatchObject({
+      toolCall: { function: { arguments: { output: { durationSeconds: 6 } } } },
+      executionInput: { output: { durationSeconds: 6 } }
+    });
+
+    const explicit = await service.selectedTurn(principal, {
+      toolName: definition.toolName,
+      prompt: "第 2 秒定格 1 秒，导出 4 秒视频",
+      inputIds: { source_video: "asset_videoabcdefgh" }
+    });
+    expect(createPrepared.mock.calls[1]![6]).toBe(4);
+    expect(createPrepared.mock.calls[1]![12]).toBe(false);
+    expect(explicit).toMatchObject({
+      toolCall: { function: { arguments: { output: { durationSeconds: 4 } } } },
+      executionInput: { output: { durationSeconds: 4 } }
+    });
     await service.close();
   });
 
@@ -981,6 +1077,7 @@ describe("server single effect-tool service", () => {
     const additionalPositioning = [
       ["particle_logo_assemble", "logo_image"],
       ["path_trim", "source_image"],
+      ["text_morph", "source_image"],
       ["typewriter", "source_image"],
       ["word_explode", "source_image"],
       ["wave_path", "source_image"],
@@ -992,7 +1089,7 @@ describe("server single effect-tool service", () => {
         [sourceSlot]: media.asset.id
       })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     }
-    expect(resolveMedia).toHaveBeenCalledTimes(23);
+    expect(resolveMedia).toHaveBeenCalledTimes(24);
 
     const videoMedia: VerifiedStoredMedia = {
       ...media,
@@ -1024,7 +1121,7 @@ describe("server single effect-tool service", () => {
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(23);
+    expect(resolveMedia).toHaveBeenCalledTimes(24);
   });
 
   it.each([

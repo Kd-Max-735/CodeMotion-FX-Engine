@@ -351,6 +351,72 @@ describe("existing-01 execution safety", () => {
     expect(alphaCount(revealed.data)).toBeGreaterThan(0);
   }, 20_000);
 
+  it("moves every word_explode glyph independently away from the text center", async () => {
+    const definition = definitionFor("word_explode");
+    const width = 320;
+    const height = 180;
+    const surface = {
+      width,
+      height,
+      data: new Uint8ClampedArray(width * height * 4),
+      colorSpace: "srgb" as const,
+      alphaMode: "straight" as const
+    };
+    const rasterInput = makeRealInputFixture(
+      definition.effectId,
+      "media",
+      width,
+      height,
+      false,
+      "srgb",
+      makeEffectTimeSample(definition.effectId, "word-explode-characters", 0)
+    ).input;
+    const inputs = {
+      source_image: {
+        slot: "source_image",
+        kind: "image" as const,
+        tenantId: "tenant-existing-01",
+        userId: "user-existing-01",
+        locked: true as const,
+        binding: { surface, rasterInput }
+      }
+    };
+    const renderAt = async (time: number) => (await definition.render({
+      ...contextFor(definition),
+      time,
+      width,
+      height,
+      inputs
+    }, {
+      ...definition.defaults,
+      text: "ABCD",
+      selector: "character",
+      force: 0.45,
+      rotation: 0,
+      depth: 0
+    })).output as typeof surface;
+    const alphaBounds = (frame: typeof surface) => {
+      let left = width;
+      let right = -1;
+      for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+        if (frame.data[(y * width + x) * 4 + 3]! < 24) continue;
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+      }
+      return { left, right, width: right >= left ? right - left + 1 : 0 };
+    };
+    const initial = alphaBounds(await renderAt(0));
+    const explodedFrame = await renderAt(0.65);
+    const exploded = alphaBounds(explodedFrame);
+    expect(initial.width).toBeGreaterThan(0);
+    expect(exploded.left).toBeLessThan(initial.left);
+    expect(exploded.right).toBeGreaterThan(initial.right);
+    expect(exploded.width).toBeGreaterThan(initial.width + 20);
+    expect(Buffer.from((await renderAt(0.65)).data)).toEqual(Buffer.from(explodedFrame.data));
+    const selector = ((definition.parameterSchema as { properties: Record<string, unknown> }).properties.selector);
+    expect(selector).toMatchObject({ default: "character", enum: ["character"] });
+  }, 20_000);
+
   it("rejects unknown model parameters and resource identities for every tool", () => {
     for (const toolName of TOOL_NAMES) {
       const definition = definitionFor(toolName);

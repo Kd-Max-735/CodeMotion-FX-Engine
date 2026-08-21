@@ -113,7 +113,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   T02: "1.2.0",
   T03: "1.2.0",
   T01: "2.0.0",
-  T07: "2.0.0",
+  T07: "2.1.0",
   D02: "1.3.0",
   D01: "1.1.0",
   D03: "1.1.0",
@@ -126,7 +126,7 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   L04: "1.3.0",
   H01: "2.0.0",
   C03: "2.0.0",
-  C01: "2.0.0"
+  C01: "2.1.0"
 });
 
 function slot(

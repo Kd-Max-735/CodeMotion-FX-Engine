@@ -21,6 +21,7 @@ import {
 import {
   DEFAULT_VIDEO_GENERATION_MODE,
   ProviderError,
+  parseExplicitOutputDuration,
   SELECTED_TOOL_MAX_DURATION_SECONDS,
   SELECTED_TOOL_MIN_DURATION_SECONDS,
   VIDEO_GENERATION_MODE_FPS,
@@ -98,6 +99,7 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   dash_flow: "source_image",
   ken_burns: "source_image",
   kinetic_typography: "source_image",
+  text_morph: "source_image",
   typewriter: "source_image",
   word_explode: "source_image",
   lens_flare: "source_frame",
@@ -1919,6 +1921,16 @@ export class EffectToolService {
         throw new ProviderError("security", "Ark attempted an unexpected tool call.");
       }
       const nativeArguments = nativeConversationArguments(modelTurn.toolCall.arguments);
+      const explicitOutputDuration = parseExplicitOutputDuration(request.prompt);
+      if (explicitOutputDuration.kind === "invalid") {
+        throw new RangeError(`Explicit output duration is invalid: ${explicitOutputDuration.code}.`);
+      }
+      const requestedDuration = explicitOutputDuration.kind === "valid"
+        ? explicitOutputDuration.seconds : nativeArguments.durationSeconds;
+      if (requestedDuration < SELECTED_TOOL_MIN_DURATION_SECONDS
+        || requestedDuration > SELECTED_TOOL_MAX_DURATION_SECONDS) {
+        throw new RangeError("Explicit output duration is outside the selected-tool limits.");
+      }
       const envelope = validateAndNormalizeEffectEnvelope(definition, definition.toolName, {
         type: definition.toolName,
         data: nativeArguments.effectParams
@@ -1956,17 +1968,18 @@ export class EffectToolService {
         authorizedInputs,
         assetIds,
         20260814,
-        nativeArguments.durationSeconds,
+        requestedDuration,
         render.width,
         render.height,
         sourceImageId,
         VIDEO_GENERATION_MODE_FPS[nativeArguments.generationMode],
-        rawInputIds
+        rawInputIds,
+        explicitOutputDuration.kind === "none"
       );
       const normalizedArguments = Object.freeze({
         effectParams: structuredClone(envelope.data),
         output: Object.freeze({
-          durationSeconds: nativeArguments.durationSeconds,
+          durationSeconds: execution.video.durationSeconds,
           generationMode: nativeArguments.generationMode
         })
       });

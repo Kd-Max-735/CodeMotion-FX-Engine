@@ -227,7 +227,11 @@ const EXPECTED = Object.freeze({
   wipe: {
     effectId: "fx.transition.wipe",
     properties: {
-      direction: choice("left", ["left", "right", "up", "down"]),
+      direction: choice("left", [
+        "left", "right", "up", "down",
+        "left_top_to_right_bottom", "left_bottom_to_right_top",
+        "right_top_to_left_bottom", "right_bottom_to_left_top"
+      ]),
       softness: number(0.04, 0, 0.5, 0.005), angle: number(0, -180, 180, 1),
       progress: number(1, 0, 1, 0.01), duration: number(2, 0.2, 30, 0.1)
     },
@@ -444,6 +448,12 @@ describe("existing-02 field specifications and adapter contracts", () => {
 
   it("reveals wipe target from each requested edge and completes at duration", async () => {
     const definition = definitions().get("wipe")!;
+    expect(((definition.parameterSchema as { properties: Record<string, unknown> }).properties.direction))
+      .toMatchObject({ enum: [
+        "left", "right", "up", "down",
+        "left_top_to_right_bottom", "left_bottom_to_right_top",
+        "right_top_to_left_bottom", "right_bottom_to_left_top"
+      ] });
     const width = 8;
     const height = 8;
     const surface = (red: number) => ({
@@ -470,7 +480,10 @@ describe("existing-02 field specifications and adapter contracts", () => {
       source_frame: bind("source_frame", { surface: source, rasterInput: sourceRasterInput }),
       target_frame: bind("target_frame", { surface: target, rasterInput: targetRasterInput })
     };
-    const render = async (direction: "left" | "right" | "up" | "down", time: number) =>
+    type WipeDirection = "left" | "right" | "up" | "down"
+      | "left_top_to_right_bottom" | "left_bottom_to_right_top"
+      | "right_top_to_left_bottom" | "right_bottom_to_left_top";
+    const render = async (direction: WipeDirection, time: number) =>
       (await definition.render({ ...contextFor(definition, inputs), time, width, height }, {
         ...definition.defaults, direction, softness: 0, duration: 2
       })).output as typeof source;
@@ -487,6 +500,18 @@ describe("existing-02 field specifications and adapter contracts", () => {
     expect(redAt(up, 4, 7)).toBe(10);
     expect(redAt(down, 4, 7)).toBe(240);
     expect(redAt(down, 4, 0)).toBe(10);
+    const leftTop = await render("left_top_to_right_bottom", 0.5);
+    const leftBottom = await render("left_bottom_to_right_top", 0.5);
+    const rightTop = await render("right_top_to_left_bottom", 0.5);
+    const rightBottom = await render("right_bottom_to_left_top", 0.5);
+    expect(redAt(leftTop, 0, 0)).toBe(240);
+    expect(redAt(leftTop, 7, 7)).toBe(10);
+    expect(redAt(leftBottom, 0, 7)).toBe(240);
+    expect(redAt(leftBottom, 7, 0)).toBe(10);
+    expect(redAt(rightTop, 7, 0)).toBe(240);
+    expect(redAt(rightTop, 0, 7)).toBe(10);
+    expect(redAt(rightBottom, 7, 7)).toBe(240);
+    expect(redAt(rightBottom, 0, 0)).toBe(10);
     expect(Array.from((await render("left", 0)).data)).toEqual(Array.from(source.data));
     expect(Array.from((await render("left", 2)).data)).toEqual(Array.from(target.data));
   });

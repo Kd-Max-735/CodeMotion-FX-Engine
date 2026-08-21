@@ -124,6 +124,8 @@ describe("selected-tool Ark Provider", () => {
     expect(body.tool_choice).toBe("auto");
     expect(body.messages[0]!.content).toContain("生成快一点");
     expect(body.messages[0]!.content).toContain("generationMode");
+    expect(body.messages[0]!.content).toContain("freezeDuration");
+    expect(body.messages[0]!.content).toContain("导出总时长");
     expect(body.messages[0]!.content).toContain("笔唯思");
     expect(body.messages[0]!.content).toContain("sourceText=penvis");
     expect(body.messages[0]!.content).toContain("不得把默认文案填入 charset");

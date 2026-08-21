@@ -203,6 +203,7 @@ function systemContent(request: SelectedToolParameterRequest): string {
     "当用户要求实际生成或修改效果时调用该工具；当用户只是咨询参数、能力或使用方式时直接用简洁中文回答，不调用工具。",
     "工具 arguments 顶层必须严格包含 effectParams 与 output：effectParams 遵循当前特效字段；output 只包含 durationSeconds 与 generationMode。",
     `未提及时 durationSeconds=${SELECTED_TOOL_DEFAULT_DURATION_SECONDS}。明确时长优先；“长一点/久一点”在明确时长或默认时长上加 2 秒；“短一点/视频短一点”减 2 秒。`,
+    "output.durationSeconds 只表示最终导出视频总时长。特效字段中的 duration、freezeDuration、transitionStart、freezeAt 等局部时间不能当作导出总时长；只有用户明确说导出/输出/生成 N 秒视频或视频总时长 N 秒时，才把该数字作为明确总时长。",
     "没有明确基准的“长视频/较长视频”使用 8 秒，“短视频/较短视频”使用 3 秒；最终限制在 1–60 秒并保留至多一位小数。",
     `generationMode 只能是 fast、standard、fine，默认 ${DEFAULT_VIDEO_GENERATION_MODE}。用户要求“生成快一点/快速生成/速度优先”时使用 fast；“标准/正常”使用 standard；“精美/高质量/更流畅/画质优先”时使用 fine。`,
     "“生成快一点”只改变 generationMode，不缩短 durationSeconds；“视频短一点”只改变 durationSeconds。",

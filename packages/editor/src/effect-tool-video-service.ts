@@ -405,19 +405,20 @@ export class EffectToolVideoService {
     height = 360,
     sourceImageId?: string,
     fps = this.fps,
-    inputIds?: Readonly<Record<string, string | readonly string[]>>
+    inputIds?: Readonly<Record<string, string | readonly string[]>>,
+    adaptToSourceDuration = false
   ): Promise<EffectToolVideoExecutionView> {
     if (this.closing) throw new Error("Effect video service is closing.");
     safeNumber(durationSeconds, "Video duration");
     safeNumber(fps, "Video frame rate");
     if (!Number.isInteger(fps) || fps > 120) throw new RangeError("Video frame rate exceeds the render limit.");
     let effectiveDuration = durationSeconds;
-    if (definition.toolName === "video_freeze_frame") {
+    if (adaptToSourceDuration && definition.toolName === "video_freeze_frame") {
       const sourceId = oneInputId(inputIds, "source_video");
       if (sourceId === undefined) throw new TypeError("source_video is required for adaptive freeze duration.");
       const source = await this.options.media.resolve(owner, sourceId);
       effectiveDuration = sourceDuration(source, "source_video") + Number(envelope.data.freezeDuration ?? 1.5);
-    } else if (definition.toolName === "zoom_tunnel") {
+    } else if (adaptToSourceDuration && definition.toolName === "zoom_tunnel") {
       const fromId = oneInputId(inputIds, "from_video");
       const toId = oneInputId(inputIds, "to_video");
       if (fromId === undefined || toId === undefined) {

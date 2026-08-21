@@ -17,6 +17,7 @@ import {
   resolveIntentCandidates,
   planAnimation,
   parseExplicitDuration,
+  parseExplicitOutputDuration,
   retrieveP0Effects,
   sanitizeUserText,
   serializeAiPlanCompletedResultV2,
@@ -1777,5 +1778,24 @@ describe("shared explicit duration parsing", () => {
     expect(parseExplicitDuration("输出视频时长为很多秒")).toEqual({ kind: "invalid", code: "DURATION_MALFORMED" });
     expect(parseExplicitDuration("输出视频时长为 0 秒")).toEqual({ kind: "invalid", code: "DURATION_OUT_OF_RANGE" });
     expect(parseExplicitDuration("时长 5 秒，但输出视频时长为 6 秒")).toEqual({ kind: "invalid", code: "DURATION_AMBIGUOUS" });
+  });
+});
+
+describe("selected-tool explicit output duration parsing", () => {
+  it.each([
+    ["导出 4 秒视频", 4],
+    ["做成 4 秒的视频", 4],
+    ["生成一个 6 秒的视频", 6],
+    ["视频总时长设置为 7.5 秒", 7.5],
+    ["output video duration is 8 seconds", 8]
+  ])("parses final video duration from %s", (prompt, seconds) => {
+    expect(parseExplicitOutputDuration(prompt)).toEqual({ kind: "valid", seconds, source: "description" });
+  });
+
+  it("does not confuse effect-local timings with final video duration", () => {
+    expect(parseExplicitOutputDuration("第 2 秒定格 1 秒")).toEqual({ kind: "none" });
+    expect(parseExplicitOutputDuration("从第 1 秒开始，用 2 秒完成转场")).toEqual({ kind: "none" });
+    expect(parseExplicitOutputDuration("第 2 秒定格 1 秒，导出 4 秒视频"))
+      .toEqual({ kind: "valid", seconds: 4, source: "description" });
   });
 });
