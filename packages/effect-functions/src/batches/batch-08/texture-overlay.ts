@@ -3,6 +3,7 @@ import type { AuthorizedEffectInputs, EffectToolDefinition } from "../../types.j
 import { GPU_BACKEND, JSON_SCHEMA, round, singleBinding } from "./common.js";
 
 export interface TextureOverlayParams extends JsonObject {
+  target: string;
   blendMode: "normal" | "multiply" | "screen" | "overlay" | "soft_light";
   opacity: number;
   scale: number;
@@ -21,6 +22,7 @@ export interface TextureOverlayOutput {
 }
 
 const defaults: TextureOverlayParams = Object.freeze({
+  target: "main subject",
   blendMode: "overlay",
   opacity: 0.45,
   scale: 1,
@@ -33,14 +35,15 @@ export const TEXTURE_OVERLAY_DEFINITION: EffectToolDefinition<TextureOverlayPara
   effectId: "fx.composite.textureOverlay",
   toolName: "texture_overlay",
   displayName: "纹理叠加",
-  version: "1.0.0",
+  version: "2.0.0",
   category: "composite",
   parameterSchema: {
     $schema: JSON_SCHEMA,
     type: "object",
     additionalProperties: false,
-    required: ["blendMode", "opacity"],
+    required: ["target", "blendMode", "opacity"],
     properties: {
+      target: { type: "string", minLength: 1, maxLength: 80, pattern: "^[\\p{L}\\p{N}][\\p{L}\\p{N} ,.'()/-]{0,79}$", default: "main subject" },
       blendMode: { type: "string", enum: ["normal", "multiply", "screen", "overlay", "soft_light"], default: "overlay" },
       opacity: { type: "number", minimum: 0, maximum: 1, default: 0.45 },
       scale: { type: "number", minimum: 0.05, maximum: 20, default: 1 },
@@ -51,22 +54,24 @@ export const TEXTURE_OVERLAY_DEFINITION: EffectToolDefinition<TextureOverlayPara
   },
   defaults,
   presets: [
-    { presetId: "texture-overlay.paper", displayName: "柔和纸纹", params: { blendMode: "soft_light", opacity: 0.28, scale: 1.4, motion: 0, motionAngle: 0, premultipliedAlpha: true } },
-    { presetId: "texture-overlay.grain", displayName: "动态颗粒", params: { blendMode: "overlay", opacity: 0.42, scale: 0.8, motion: 0.12, motionAngle: 35, premultipliedAlpha: true } },
-    { presetId: "texture-overlay.ink", displayName: "浓重墨理", params: { blendMode: "multiply", opacity: 0.7, scale: 1.1, motion: 0, motionAngle: 0, premultipliedAlpha: true } }
+    { presetId: "texture-overlay.paper", displayName: "柔和纸纹", params: { ...defaults, blendMode: "soft_light", opacity: 0.28, scale: 1.4 } },
+    { presetId: "texture-overlay.grain", displayName: "动态颗粒", params: { ...defaults, blendMode: "overlay", opacity: 0.42, scale: 0.8, motion: 0.12, motionAngle: 35 } },
+    { presetId: "texture-overlay.ink", displayName: "浓重墨理", params: { ...defaults, blendMode: "multiply", opacity: 0.7, scale: 1.1 } }
   ],
   inputSlots: [
     { name: "base_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized decoded base image." },
-    { name: "overlay_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized decoded texture image." }
+    { name: "overlay_image", kind: "image", required: true, cardinality: "one", description: "Server-authorized decoded texture image." },
+    { name: "subject_mask", kind: "mask", required: true, cardinality: "one", description: "Server-derived SAM3.1 mask for the requested object in base_image." }
   ],
   primaryBackend: GPU_BACKEND,
   fallbackStrategy: { kind: "reject", reason: "Texture compositing requires the deterministic server GPU path." },
   performanceGrade: "medium",
-  normalizeParams: (params) => ({ blendMode: params.blendMode, opacity: round(params.opacity), scale: round(params.scale), motion: round(params.motion), motionAngle: round(params.motionAngle), premultipliedAlpha: params.premultipliedAlpha }),
+  normalizeParams: (params) => ({ target: params.target.trim().toLowerCase(), blendMode: params.blendMode, opacity: round(params.opacity), scale: round(params.scale), motion: round(params.motion), motionAngle: round(params.motionAngle), premultipliedAlpha: params.premultipliedAlpha }),
   validateParams: () => ({ valid: true }),
   render: (context, params) => {
     singleBinding(context, "base_image");
     singleBinding(context, "overlay_image");
+    singleBinding(context, "subject_mask");
     const radians = params.motionAngle * Math.PI / 180;
     const distance = params.motion === 0
       ? 0

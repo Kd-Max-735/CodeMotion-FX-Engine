@@ -290,6 +290,35 @@ describe("effect tool frame compositor", () => {
     expect(changedInside).toBeGreaterThan(100);
   });
 
+  it("limits texture overlay pixels to the server-derived SAM subject mask", () => {
+    const base = gradientSource();
+    const texture = new Uint8Array(base.length);
+    for (let offset = 0; offset < texture.length; offset += 4) {
+      texture[offset] = 240;
+      texture[offset + 1] = 42;
+      texture[offset + 2] = 180;
+      texture[offset + 3] = 255;
+    }
+    const mask = new Uint8Array(detailedRequest.width * detailedRequest.height);
+    mask.fill(255, Math.floor(mask.length / 2));
+    const output = composeEffectToolFrame(metadata({
+      uvOffset: [0, 0], uvScale: [1, 1], opacity: 1, blendMode: "normal"
+    }), detailedRequest, "texture_overlay", undefined, {
+      base_image: base,
+      overlay_image: texture,
+      subject_mask: mask
+    });
+    let changedInside = 0;
+    for (let index = 0; index < mask.length; index += 1) {
+      const offset = index * 4;
+      const changed = output[offset] !== base[offset] || output[offset + 1] !== base[offset + 1]
+        || output[offset + 2] !== base[offset + 2];
+      if (mask[index] === 0) expect(changed, `pixel ${index} outside mask`).toBe(false);
+      else if (changed) changedInside += 1;
+    }
+    expect(changedInside).toBeGreaterThan(mask.length * 0.45);
+  });
+
   it("composites particle masks, source overlays, glow discs, and velocity streaks", () => {
     const source = solidSource();
     const mask = new Uint8Array(detailedRequest.width * detailedRequest.height).fill(255);

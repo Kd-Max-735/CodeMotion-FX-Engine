@@ -148,8 +148,9 @@ function validInputs(definition: EffectToolDefinition): AuthorizedEffectInputs {
       };
     case "texture_overlay":
       return {
-        base_layer: authorized("base_layer", "data", { version: "pixel-layer-v1", sample: [0.2, 0.4, 0.6, 0.5] }),
-        overlay_texture: authorized("overlay_texture", "texture", { version: "texture-sample-v1", sample: [0.8, 0.5, 0.25, 0.5], width: 512, height: 256 })
+        base_image: authorized("base_image", "image", { version: "rgba8-frame-v1", width: 1920, height: 1080, data: new Uint8Array(1920 * 1080 * 4) }),
+        overlay_image: authorized("overlay_image", "image", { version: "rgba8-frame-v1", width: 1920, height: 1080, data: new Uint8Array(1920 * 1080 * 4) }),
+        subject_mask: authorized("subject_mask", "mask", { version: "sam31-mask-v1", width: 1920, height: 1080, data: new Uint8Array(1920 * 1080) })
       };
     case "glass":
       return {
@@ -407,14 +408,15 @@ describe("batch-08 definitions", () => {
 
   it("composites a server texture with blend, opacity, motion, and premultiplied alpha", async () => {
     const result = await run(TEXTURE_OVERLAY_DEFINITION, {
-      base_layer: authorized("base_layer", "data", { version: "pixel-layer-v1", sample: [0.2, 0.4, 0.6, 0.5] }),
-      overlay_texture: authorized("overlay_texture", "texture", { version: "texture-sample-v1", sample: [0.8, 0.5, 0.25, 0.5], width: 512, height: 256 })
+      base_image: authorized("base_image", "image", { version: "rgba8-frame-v1", width: 1920, height: 1080, data: new Uint8Array(1920 * 1080 * 4) }),
+      overlay_image: authorized("overlay_image", "image", { version: "rgba8-frame-v1", width: 1920, height: 1080, data: new Uint8Array(1920 * 1080 * 4) }),
+      subject_mask: authorized("subject_mask", "mask", { version: "sam31-mask-v1", width: 1920, height: 1080, data: new Uint8Array(1920 * 1080) })
     }, 2);
     expect(result.output).toMatchObject({
-      rgba: [0.2035, 0.2563, 0.3056, 0.6125],
       uvScale: [1, 1],
-      textureSize: [512, 256],
+      textureSize: [1920, 1080],
       blendMode: "overlay",
+      opacity: 0.45,
       premultipliedAlpha: true
     });
   });

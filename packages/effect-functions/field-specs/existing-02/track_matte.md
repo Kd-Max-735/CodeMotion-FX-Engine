@@ -1,53 +1,27 @@
 # 轨道遮罩 `track_matte`
 
-使用服务端绑定的独立 matte 画面，以 Alpha 或亮度控制源画面的透明度，并支持反相和整体强度。对应现有特效 `fx.composite.trackMatte`。
+使用 SAM3.1 根据自然语言指定对象，在用户上传图片中生成对象遮罩，再用该遮罩控制源画面的透明度。用户只上传一张源图片，不上传独立 matte。对应现有特效 `fx.composite.trackMatte`。
 
 只输出 JSON，不附加解释或代码块：
 
 ```json
-{
-  "type": "track_matte",
-  "data": {
-    "mode": "alpha",
-    "invert": false,
-    "opacity": 1
-  }
-}
+{"type":"track_matte","data":{"mode":"alpha","invert":false,"opacity":1,"target":"main subject"}}
 ```
 
-| `data` 字段 | 必填 | 取值 | 选择策略 |
+| `data` 字段 | 必填 | 取值与默认值 | 选择策略 |
 | --- | --- | --- | --- |
-| `mode` | 是 | `alpha` / `luma` | matte 的透明度有意义时选 `alpha`；按明暗取遮罩时选 `luma` |
-| `invert` | 是 | 布尔值 | 正常 matte `false`；黑白或内外关系反转用 `true` |
-| `opacity` | 是 | 数字 `0..1`，步长 `0.01` | 控制 matte 对最终 Alpha 的整体强度 |
+| `mode` | 是 | `alpha` / `luma`，默认 `alpha` | SAM3.1 遮罩通常选 `alpha`；兼容亮度语义时选 `luma`，两者都使用同一对象覆盖率 |
+| `invert` | 是 | 布尔值，默认 `false` | 保留目标对象为 `false`，保留目标对象之外区域为 `true` |
+| `opacity` | 是 | 数字 `0..1`，步长 `0.01`，默认 `1` | 控制遮罩后的整体 Alpha；`0` 完全透明，`1` 完整应用 |
+| `target` | 是 | 非空字符串，最长 80，默认 `main subject` | 将用户指定对象翻译为简短、具体的英文视觉名词短语供 SAM3.1 分割 |
 
 ## 参数选择规则
 
-- 用户说“Alpha matte、透明通道”选 `alpha`；说“亮度、黑白、白显黑隐”选 `luma`。
-- “反相、白隐黑显、取相反区域”使用 `invert=true`。
-- “遮罩弱一点、半透明”降低 `opacity`；完整应用使用 `1`。
-- 采样依据优先由 `mode` 决定，内外关系再由 `invert` 决定，整体强弱最后由 `opacity` 决定。
-- 用户没说 matte 类型时用默认 `alpha`，不要根据资源名称自行猜测。
+先准确确定 `target`，再决定是否反相，最后选择整体透明度。不要把颜色、动作或背景描述混入 `target`；例如“只保留照片中的汽车”应输出 `target="car"`、`invert=false`。
 
-## 自然语言示例
+## 服务器输入槽（不进入模型 `data`）
 
-| 用户表达 | `data` 参数结果 |
-| --- | --- |
-| 使用 Alpha 轨道遮罩，完整应用 | `{"mode":"alpha","invert":false,"opacity":1}` |
-| 按亮度做 matte | `{"mode":"luma","invert":false,"opacity":1}` |
-| 反相的亮度 matte，强度八成 | `{"mode":"luma","invert":true,"opacity":0.8}` |
-| Alpha matte 只影响一半透明度 | `{"mode":"alpha","invert":false,"opacity":0.5}` |
-| 关闭轨道遮罩的可见贡献 | `{"mode":"alpha","invert":false,"opacity":0}` |
+- `source_image`（必需，`image`，单个）：用户上传、owner-authorized 且 locked 的源图片；同一张图可短暂提供给唯一 Ark 模型做视觉语义对齐。
+- `subject_mask`（必需，`mask`，单个）：服务器根据 `target` 调用 SAM3.1 从 `source_image` 派生的单通道遮罩，前端不要求上传。
 
-## 推荐档位
-
-| 强度 | `opacity` | 关系 | `invert` |
-| --- | ---: | --- | --- |
-| 关闭 | `0` | 正常 | `false` |
-| 轻微 | `0.35` | 反相 | `true` |
-| 中等 | `0.65` |  |  |
-| 完整 | `1` |  |  |
-
-默认值为 `mode=alpha`、`invert=false`、`opacity=1`。`opacity=1` 是完整应用默认值；`opacity=0` 会让源画面完全透明，并不是旁路关闭效果；`invert=false` 是正常关系。枚举没有强弱顺序，必须按 matte 信息来源选择。
-
-matte 和源画面由服务端绑定，不生成 `matteLayer`、第二路视频、资源 ID、路径或 URL。本工具不选择或创建 matte，不编辑其内容，不用于普通遮罩进度动画、图层颜色混合或置换扭曲。
+本工具不接收独立 matte 图片，不输出图片、遮罩、资源 ID、路径或 URL，不创建多工具流程。

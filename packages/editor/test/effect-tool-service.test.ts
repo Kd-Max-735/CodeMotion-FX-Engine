@@ -910,6 +910,17 @@ describe("server single effect-tool service", () => {
     }
     expect(resolveMedia).toHaveBeenCalledTimes(15);
 
+    const textureOverlay = EFFECT_TOOL_REGISTRY.getByToolName("texture_overlay")!;
+    await expect(resolver.visionImage(principal, textureOverlay, {
+      base_image: media.asset.id,
+      overlay_image: "asset_textureabcdefgh"
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    const trackMatte = EFFECT_TOOL_REGISTRY.getByToolName("track_matte")!;
+    await expect(resolver.visionImage(principal, trackMatte, {
+      source_image: media.asset.id
+    })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    expect(resolveMedia).toHaveBeenCalledTimes(17);
+
     const videoMedia: VerifiedStoredMedia = {
       ...media,
       asset: {
@@ -940,12 +951,18 @@ describe("server single effect-tool service", () => {
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(15);
+    expect(resolveMedia).toHaveBeenCalledTimes(17);
   });
 
-  it.each(["marker_stroke", "chalk_stroke", "neon_glow"])(
+  it.each([
+    ["marker_stroke", "source_image"],
+    ["chalk_stroke", "source_image"],
+    ["neon_glow", "source_image"],
+    ["texture_overlay", "base_image"],
+    ["track_matte", "source_image"]
+  ] as const)(
     "derives the locked %s subject mask from the owner-authorized source image and normalized target",
-    async (toolName) => {
+    async (toolName, sourceSlot) => {
       const width = 4; const height = 2;
       const media: VerifiedStoredMedia = {
         asset: {
@@ -981,10 +998,12 @@ describe("server single effect-tool service", () => {
       );
       const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
       const render = { time: 0.4, fps: 30, width, height, seed: 7, quality: "preview" } as const;
-      const inputIds = { source_image: media.asset.id };
+      const inputIds = toolName === "texture_overlay"
+        ? { base_image: media.asset.id, overlay_image: media.asset.id }
+        : { [sourceSlot]: media.asset.id };
 
       const preliminary = await resolver.resolve(principal, definition, inputIds, render);
-      expect(preliminary).toHaveProperty("source_image");
+      expect(preliminary).toHaveProperty(sourceSlot);
       expect(preliminary).not.toHaveProperty("subject_mask");
       const resolved = await resolver.resolve(principal, definition, inputIds, render, undefined, {
         ...definition.defaults,
@@ -1000,7 +1019,7 @@ describe("server single effect-tool service", () => {
         locked: true,
         binding: mask
       });
-      expect(inputIds).toEqual({ source_image: media.asset.id });
+      expect(inputIds).toHaveProperty(sourceSlot, media.asset.id);
     }
   );
 
@@ -1230,8 +1249,8 @@ describe("server single effect-tool service", () => {
       ["character_cascade", "text_raster", "text", true],
       ["kinetic_typography", "text_raster", "text", true],
       ["scramble_decode", "source_image", "image", true],
-      ["text_morph", "text_raster", "text", true],
-      ["text_path_reveal", "text_raster", "text", true],
+      ["text_morph", "source_image", "image", true],
+      ["text_path_reveal", "source_image", "image", true],
       ["typewriter", "text_raster", "text", true],
       ["word_explode", "text_raster", "text", true],
       ["text_extrude_3d", "text_raster", "text", true],
@@ -1581,6 +1600,30 @@ describe("server single effect-tool service", () => {
           ]
         });
       }
+      expect(catalog.tools.find((item) => item.toolName === "text_morph")).toMatchObject({
+        inputRequirements: [
+          { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "text_path_reveal")).toMatchObject({
+        inputRequirements: [
+          { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },
+          { name: "motion_path", kind: "data", required: true, acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "track_matte")).toMatchObject({
+        inputRequirements: [
+          { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },
+          { name: "subject_mask", kind: "mask", required: true, acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "texture_overlay")).toMatchObject({
+        inputRequirements: [
+          { name: "base_image", kind: "image", required: true, acceptsUploadedImage: true },
+          { name: "overlay_image", kind: "image", required: true, acceptsUploadedImage: true },
+          { name: "subject_mask", kind: "mask", required: true, acceptsUploadedImage: false }
+        ]
+      });
       expect(catalog.tools.find((item) => item.toolName === "blend")).toMatchObject({
         inputRequirements: [
           { name: "source_layer", required: true, acceptsUploadedImage: true },

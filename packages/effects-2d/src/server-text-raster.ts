@@ -82,9 +82,13 @@ function loadRuntime(family: ServerTextFontFamilyV1): CanvasFontRuntime {
   if (!canvas.GlobalFonts.has(alias) && !canvas.GlobalFonts.registerFromPath(fontPath, alias)) {
     throw new TypeError(`Requested ${family} CJK font could not be registered.`);
   }
+  const glyphCache = new Map<string, { readonly coverage: CoverageBuffer; readonly advance: number }>();
   const runtime: CanvasFontRuntime = Object.freeze({
     alias,
     rasterize: (text: string, pixelSize: number) => {
+      const cacheKey = `${pixelSize}:${text}`;
+      const cachedGlyph = glyphCache.get(cacheKey);
+      if (cachedGlyph !== undefined) return cachedGlyph;
       const probe = canvas.createCanvas(1, 1).getContext("2d");
       probe.font = `500 ${pixelSize}px "${alias}"`;
       const advance = Math.max(1, Math.ceil(probe.measureText(text).width));
@@ -105,10 +109,12 @@ function loadRuntime(family: ServerTextFontFamilyV1): CanvasFontRuntime {
         visible ||= alpha > 0;
       }
       if (!visible && !/^\s+$/u.test(text)) throw new TypeError("Requested font lacks a visible glyph.");
-      return Object.freeze({
+      const glyph = Object.freeze({
         advance: advance + 1,
         coverage: Object.freeze({ width, height, data, rowOrder: "top-to-bottom" as const })
       });
+      glyphCache.set(cacheKey, glyph);
+      return glyph;
     }
   });
   runtimes.set(family, runtime);

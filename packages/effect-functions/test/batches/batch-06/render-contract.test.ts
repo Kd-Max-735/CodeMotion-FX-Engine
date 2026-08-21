@@ -225,6 +225,22 @@ describe("batch-06 real rendering and explicit blockers", () => {
     expect(frame.data).toHaveLength(64);
   });
 
+  it("reveals the uploaded logo through real strip transforms and ends on the exact source artwork", async () => {
+    const params = {
+      ...TEXT_LOGO_REVEAL_DEFINITION.defaults,
+      duration: 2,
+      segmentCount: 4,
+      stagger: 0.5,
+      extrusionDepth: 1,
+      rotationDegrees: 90
+    };
+    const middle = (await executeParams(TEXT_LOGO_REVEAL_DEFINITION, params, 0.8)).output as Rgba8FrameOutput;
+    const end = (await executeParams(TEXT_LOGO_REVEAL_DEFINITION, params, 2)).output as Rgba8FrameOutput;
+    expect([...middle.data]).not.toEqual([...sourceImage.data]);
+    expect(middle.data.some((value, offset) => offset % 4 === 3 && value < 255)).toBe(true);
+    expect([...end.data]).toEqual([...sourceImage.data]);
+  });
+
   it("keeps only the out-of-scope echo adapter explicitly blocked", async () => {
     await expect(executeDefault(ECHO_TRAIL_DEFINITION)).rejects.toBeInstanceOf(Batch06AdapterRequiredError);
   });

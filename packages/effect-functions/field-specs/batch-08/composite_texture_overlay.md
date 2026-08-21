@@ -5,7 +5,7 @@
 
 ## 工具作用
 
-将服务端授权纹理叠加到服务端绑定图层，处理混合模式、透明度、缩放、移动和预乘 Alpha。纹理与图层身份不进入模型参数。
+将服务端授权纹理只叠加到基础图片中由自然语言指定的对象。服务器使用 SAM3.1 从基础图片派生对象遮罩，再在遮罩范围内处理混合模式、透明度、缩放、移动和预乘 Alpha。纹理、图片与遮罩身份不进入模型参数。
 
 ## 输出约束
 
@@ -15,6 +15,7 @@
 {
   "type": "texture_overlay",
   "data": {
+    "target": "main subject",
     "blendMode": "overlay",
     "opacity": 0.45,
     "scale": 1,
@@ -29,6 +30,7 @@
 
 | 字段 | 必填 | 取值 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
+| `target` | 是 | 非空英文视觉对象短语，最长 80 | `main subject` | 将用户指定对象翻译为简短具体的英文名词短语，供 SAM3.1 分割 |
 | `blendMode` | 是 | `normal` / `multiply` / `screen` / `overlay` / `soft_light` | `overlay` | 纹理混合算法 |
 | `opacity` | 是 | 0–1 | 0.45 | 纹理有效透明度 |
 | `scale` | 否 | 0.05–20 | 1 | 纹理采样比例 |
@@ -42,10 +44,11 @@
 | --- | --- | --- | --- |
 | `base_image` | `image` | 是 | 用户上传、服务端授权并逐像素解码的基础图片 |
 | `overlay_image` | `image` | 是 | 用户上传、服务端授权并逐像素解码的纹理图片 |
+| `subject_mask` | `mask` | 是 | 服务器根据 `target` 从 `base_image` 派生的 SAM3.1 单通道对象遮罩，前端不要求上传 |
 
 ## 选择策略
 
-“更透明”降低 `opacity`；“更明显”提高 `opacity`；“更亮”选 `screen`，增加对比选 `overlay`，压暗选 `multiply`，柔和融合选 `soft_light`；“更快”提高 `motion` 绝对值；纹理更细密可提高 `scale`。
+先把用户指定对象转换为准确的 `target`，例如“汽车”输出 `car`，不要把材质、颜色和动作混入目标短语。“更透明”降低 `opacity`；“更明显”提高 `opacity`；“更亮”选 `screen`，增加对比选 `overlay`，压暗选 `multiply`，柔和融合选 `soft_light`；“更快”提高 `motion` 绝对值；纹理更细密可提高 `scale`。
 
 ## 参数优先级
 
@@ -62,8 +65,8 @@
 
 ## 推荐值、默认值和中性值
 
-默认及中性值为 `blendMode=overlay`、`opacity=0.45`、`scale=1`、`motion=0`、`motionAngle=0`、`premultipliedAlpha=true`。自然材质通常推荐透明度 0.2–0.5。
+默认及中性值为 `target=main subject`、`blendMode=overlay`、`opacity=0.45`、`scale=1`、`motion=0`、`motionAngle=0`、`premultipliedAlpha=true`。自然材质通常推荐透明度 0.2–0.5。
 
 ## 非适用范围
 
-不生成、选择或定位纹理与图层，不输出资源 ID、路径或 URL；不负责遮罩、置换贴图、多层合成编排或客户端渲染。
+不生成纹理，不把纹理图送给 SAM3.1，不输出资源 ID、路径或 URL；不负责置换贴图、多层合成编排或客户端渲染。

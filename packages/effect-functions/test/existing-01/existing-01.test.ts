@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { makeEffectTimeSample, makeRealInputFixture } from "@codemotion/effects-2d";
 import {
   assertEffectToolDefinition,
   executeSelectedEffectTool,
@@ -50,8 +51,8 @@ const EXPECTED_INPUT_SLOTS: Readonly<Record<Existing01ToolName, readonly string[
   fade: ["source_layer"],
   float: ["source_layer"],
   kinetic_typography: ["source_image"],
-  path_morph: ["vector_source", "morph_paths"],
-  path_trim: ["vector_source"],
+  path_morph: ["source_frame", "target_frame"],
+  path_trim: ["source_image", "subject_mask"],
   radial_burst: ["vector_source"],
   rotate_in: ["source_layer"],
   scale_pop: ["source_layer"],
@@ -60,21 +61,16 @@ const EXPECTED_INPUT_SLOTS: Readonly<Record<Existing01ToolName, readonly string[
   shape_repeater: ["vector_source"],
   slide: ["source_layer"],
   text_extrude_3d: ["text_raster"],
-  text_morph: ["text_raster"],
-  text_path_reveal: ["text_raster", "motion_path"],
+  text_morph: ["source_image"],
+  text_path_reveal: ["source_image", "motion_path"],
   typewriter: ["text_raster"],
   word_explode: ["text_raster"]
 });
 
 const STRUCTURED_RESOURCE_TOOLS = Object.freeze([
-  "path_morph",
-  "path_trim",
   "radial_burst",
-  "scramble_decode",
   "shape_repeater",
   "text_extrude_3d",
-  "text_morph",
-  "text_path_reveal",
   "typewriter",
   "word_explode"
 ] as const satisfies readonly Existing01ToolName[]);
@@ -291,6 +287,72 @@ describe("existing-01 registry and field specifications", () => {
 });
 
 describe("existing-01 execution safety", () => {
+  it("renders real source and target glyphs and a server-derived path over one uploaded background", async () => {
+    const width = 160; const height = 90;
+    const surface = {
+      width,
+      height,
+      data: new Uint8ClampedArray(width * height * 4),
+      colorSpace: "srgb" as const,
+      alphaMode: "straight" as const
+    };
+    const bindingFor = (definition: EffectToolDefinition) => ({
+      surface,
+      rasterInput: makeRealInputFixture(
+        definition.effectId,
+        "media",
+        width,
+        height,
+        false,
+        "srgb",
+        makeEffectTimeSample(definition.effectId, `text-${definition.toolName}`, 0)
+      ).input
+    });
+    const authorized = (slot: string, kind: "image" | "data", binding: unknown) => ({
+      slot,
+      kind,
+      tenantId: "tenant-existing-01",
+      userId: "user-existing-01",
+      locked: true as const,
+      binding
+    });
+
+    const morph = definitionFor("text_morph");
+    const morphInputs = {
+      source_image: authorized("source_image", "image", bindingFor(morph))
+    };
+    const morphAt = async (time: number) => (await morph.render({
+      ...contextFor(morph),
+      time,
+      width,
+      height,
+      inputs: morphInputs
+    }, morph.defaults)).output as typeof surface;
+    const sourceGlyphs = await morphAt(0);
+    const targetGlyphs = await morphAt(morph.defaults.duration as number);
+    expect(Buffer.from(sourceGlyphs.data)).not.toEqual(Buffer.from(targetGlyphs.data));
+    expect(sourceGlyphs.data.some((value, offset) => offset % 4 === 3 && value > 0)).toBe(true);
+    expect(targetGlyphs.data.some((value, offset) => offset % 4 === 3 && value > 0)).toBe(true);
+
+    const path = definitionFor("text_path_reveal");
+    const pathInputs = {
+      source_image: authorized("source_image", "image", bindingFor(path)),
+      motion_path: authorized("motion_path", "data", { path: "M 0.08 0.62 C 0.3 0.18 0.7 0.82 0.92 0.38" })
+    };
+    const pathAt = async (time: number) => (await path.render({
+      ...contextFor(path),
+      time,
+      width,
+      height,
+      inputs: pathInputs
+    }, { ...path.defaults, progress: 1 })).output as typeof surface;
+    const hidden = await pathAt(0);
+    const revealed = await pathAt(path.defaults.duration as number);
+    const alphaCount = (data: Uint8ClampedArray) => data.filter((value, offset) => offset % 4 === 3 && value > 0).length;
+    expect(alphaCount(hidden.data)).toBe(0);
+    expect(alphaCount(revealed.data)).toBeGreaterThan(0);
+  }, 20_000);
+
   it("rejects unknown model parameters and resource identities for every tool", () => {
     for (const toolName of TOOL_NAMES) {
       const definition = definitionFor(toolName);
@@ -330,7 +392,7 @@ describe("existing-01 execution safety", () => {
     }
   });
 
-  it("reports missing non-image server resources before any renderer call", async () => {
+  it("reports missing required server resources before any renderer call", async () => {
     for (const toolName of TOOL_NAMES) {
       const definition = definitionFor(toolName);
       let renderCalls = 0;
@@ -341,10 +403,6 @@ describe("existing-01 execution safety", () => {
           return definition.render(...args);
         }
       } as EffectToolDefinition;
-      expect(definition.inputSlots.every((slot) => slot.kind === (
-        toolName === "character_cascade" || toolName === "kinetic_typography" ? "image" : "data"
-      )), toolName)
-        .toBe(true);
       await expect(executeSelectedEffectTool(
         observed,
         toolName,

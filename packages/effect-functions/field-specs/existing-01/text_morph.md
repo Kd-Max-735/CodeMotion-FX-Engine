@@ -1,44 +1,35 @@
 # 文字变形 `text_morph`
 
-让一段源文字向目标文字做确定性的字形扰动、颜色过渡和位置变化。对应现有特效 `fx.text.textMorph`。
+把自然语言指定的源文字平滑变形成目标文字。服务端分别生成两套真实印刷字形，按时间推进字形扰动、轮廓过渡、颜色渐变和位置适配；`progress` 可以让动画停留在任意目标阶段。对应现有特效 `fx.text.textMorph`。
 
-需要调用时只输出以下 JSON，不要附加解释或代码块：
+只输出以下 JSON，不附加解释或代码块：
 
 ```json
-{
-  "type": "text_morph",
-  "data": {
-    "sourceText": "CODE",
-    "targetText": "MOTION",
-    "matchMode": "glyph",
-    "progress": 0.5
-  }
-}
+{"type":"text_morph","data":{"sourceText":"CODE","targetText":"MOTION","matchMode":"glyph","progress":1,"duration":2.5,"fontFamily":"sans","fontSize":88,"sourcePositionX":0.5,"sourcePositionY":0.5,"targetPositionX":0.5,"targetPositionY":0.5,"sourceColor":"#5ac8fa","targetColor":"#ff5ea8"}}
 ```
 
-| `data` 字段 | 必填 | 取值 | 选择策略 |
+| `data` 字段 | 必填 | 取值与默认值 | 选择策略 |
 | --- | --- | --- | --- |
-| `sourceText` | 是 | 非空字符串，最长 4096 字符，默认 `CODE` | 使用用户明确给出的变形前文字；真实函数拒绝空字符串 |
-| `targetText` | 是 | 非空字符串，最长 4096 字符，默认 `MOTION` | 使用用户明确给出的变形后文字；真实函数拒绝空字符串 |
-| `matchMode` | 是 | `glyph` / `outline` / `position`，默认 `glyph` | 常规字符对应选 `glyph`；强调轮廓扰动选 `outline`；强调位置对应选 `position` |
-| `progress` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0.5` | `0` 为源端，`1` 为目标端，中间值表示过渡阶段 |
+| `sourceText` | 是 | 非空字符串，最长 80，默认 `CODE` | 严格使用用户给出的变形前文字 |
+| `targetText` | 是 | 非空字符串，最长 80，默认 `MOTION` | 严格使用用户给出的变形后文字 |
+| `matchMode` | 是 | `glyph` / `outline` / `position`，默认 `glyph` | 按字符对应选 `glyph`；强调外轮廓连续变形选 `outline`；强调文字布局和位置对应选 `position` |
+| `progress` | 是 | 数字 `0..1`，步长 `0.01`，默认 `1` | 动画最终停留阶段；`0` 为源文字，`1` 为完整目标文字 |
+| `duration` | 是 | 数字 `0.2..30` 秒，步长 `0.1`，默认 `2.5` | 从源端运行到 `progress` 指定阶段所需时间 |
+| `fontFamily` | 是 | `song` / `kai` / `sans`，默认 `sans` | 宋体选 `song`，楷书选 `kai`，现代无衬线选 `sans` |
+| `fontSize` | 是 | 数字 `12..240`，整数，默认 `88` | 文字字号，服务端仍会确保字形位于画布内 |
+| `sourcePositionX` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0.5` | 源文字中心横坐标，左上原点 |
+| `sourcePositionY` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0.5` | 源文字中心纵坐标，左上原点 |
+| `targetPositionX` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0.5` | 目标文字中心横坐标，左上原点 |
+| `targetPositionY` | 是 | 数字 `0..1`，步长 `0.01`，默认 `0.5` | 目标文字中心纵坐标，左上原点 |
+| `sourceColor` | 是 | `#RRGGBB`，默认 `#5ac8fa` | 源文字颜色 |
+| `targetColor` | 是 | `#RRGGBB`，默认 `#ff5ea8` | 目标文字颜色 |
 
-## 参数选择优先级
+## 参数选择规则
 
-`sourceText` 与 `targetText` 必须先按用户原文确定，再选择匹配方式和进度。不要把源、目标顺序颠倒来表达反向播放；用户要求反向时应明确交换二者。
-
-| 用户提示词 | 应输出的 `data` 参数 |
-| --- | --- |
-| CODE 变成 MOTION，进行到一半 | `sourceText="CODE", targetText="MOTION", matchMode=glyph, progress=0.5` |
-| HELLO 刚开始变成 WORLD | `sourceText="HELLO", targetText="WORLD", matchMode=glyph, progress=0.2` |
-| A 向 B 做明显轮廓变形 | `sourceText="A", targetText="B", matchMode=outline, progress=0.6` |
-| 两段文字按位置对应，接近完成 | `sourceText="旧标题", targetText="新标题", matchMode=position, progress=0.85` |
-| 完全显示目标文字阶段 | `sourceText="START", targetText="END", matchMode=glyph, progress=1` |
-
-`progress` 推荐值：轻微开始 `0.2`，中间态 `0.5`，明显接近目标 `0.75`，完成 `1`。默认把 `CODE` 向 `MOTION` 变形到一半；`progress=0` 保持源端，是中性起点。
-
-字体、字形覆盖和渲染素材由服务端绑定。本工具不选择字体、不做语义改写、不生成多段字幕，也不处理图形路径变形或三维挤出；不要输出字体、文件或 URL。
+源文字和目标文字顺序不能颠倒。用户要求完整变形时使用 `progress=1`；要求停在中间态时按明确比例填写。`duration` 只控制到达该阶段的速度，不改变停留阶段。两段文字位置不同时优先填写两组坐标，并选择 `position`。
 
 ## 服务器输入槽（不进入模型 `data`）
 
-- `text_raster`（必需，`data`，单个）：服务端根据真实文字、字体和字形覆盖生成的文字栅格。图片上传模式下，服务器从已授权图片派生文字单元代理，用于表现位置扰动和颜色过渡，不声称还原图片中的真实文字；图片身份不进入模型参数。缺失时必须停止执行。
+- `source_image`（必需，`image`，单个）：用户上传、owner-authorized 且 locked 的背景图片。服务端在该图片上叠加两套真实文字栅格；图片身份、字体文件和字形数据都不进入模型参数。
+
+本工具不识别图片里的现有文字，不修改上传图片本身的 Logo 轮廓，也不生成字体、资源 ID、路径或 URL。

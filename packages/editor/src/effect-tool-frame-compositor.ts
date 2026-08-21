@@ -1614,6 +1614,7 @@ function batch0708Frame(
   if (toolName === "texture_overlay") {
     const base = inputFrames?.base_image ?? source;
     const overlay = inputFrames?.overlay_image;
+    const subjectMask = inputFrames?.subject_mask;
     if (base === undefined || overlay === undefined || base.length !== output.length || overlay.length !== output.length) return false;
     const uvOffset = Array.isArray(value.uvOffset) ? value.uvOffset : [0, 0];
     const uvScale = Array.isArray(value.uvScale) ? Number(value.uvScale[0]) : 1;
@@ -1624,7 +1625,9 @@ function batch0708Frame(
       const texture = wrappedFramePixel(overlay, request,
         x * uvScale + Number(uvOffset[0] ?? 0) * request.width,
         y * uvScale + Number(uvOffset[1] ?? 0) * request.height);
-      const textureAlpha = opacity * texture[3] / 255;
+      const pixelIndex = y * request.width + x;
+      const textureAlpha = opacity * texture[3] / 255
+        * maskSample(subjectMask, base, pixelIndex, request.width * request.height);
       for (let channel = 0; channel < 3; channel += 1) {
         const blended = blendChannel(base[offset + channel]!, texture[channel]!, mode);
         output[offset + channel] = clampByte(base[offset + channel]! * (1 - textureAlpha) + blended * textureAlpha);

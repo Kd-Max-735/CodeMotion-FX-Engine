@@ -117,6 +117,9 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   D03: "1.1.0",
   D04: "2.0.0",
   L01: "2.0.0",
+  T04: "2.0.0",
+  T05: "2.0.0",
+  H02: "2.0.0",
   L03: "1.1.0",
   L04: "1.3.0",
   H01: "2.0.0",
@@ -168,6 +171,12 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
       })
     ]);
   }
+  if (effect.sourceId === "H02") {
+    return Object.freeze([
+      slot("source_image", "image", "Owner-authorized image whose requested object becomes the matte."),
+      slot("subject_mask", "mask", "Server-derived SAM3.1 mask for the requested visible target.")
+    ]);
+  }
   if (effect.sourceId === "D04") {
     return Object.freeze([
       slot(
@@ -192,6 +201,15 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   }
   if (effect.sourceId === "T08") {
     return Object.freeze([slot("text_raster", "data", "Server-rasterized glyph geometry and pixels.")]);
+  }
+  if (effect.sourceId === "T04") {
+    return Object.freeze([
+      slot("source_image", "image", "Owner-authorized background image receiving the path text."),
+      slot("motion_path", "data", "Server-generated normalized text motion path.")
+    ]);
+  }
+  if (effect.sourceId === "T05") {
+    return Object.freeze([slot("source_image", "image", "Owner-authorized background image receiving the morphing text.")]);
   }
   if (effect.sourceId === "T02" || effect.sourceId === "T06") {
     return Object.freeze([slot("source_image", "image", "Owner-authorized background image.")]);
@@ -225,8 +243,6 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   if (effect.category === "transition") {
     slots.push(slot("target_frame", "image", "Owner-authorized decoded source frame B."));
   }
-  if (effect.sourceId === "T04") slots.push(slot("motion_path", "data", "Server-bound text motion path."));
-  if (effect.sourceId === "H02") slots.push(slot("matte_layer", "mask", "Owner-authorized track matte."));
   if (effect.sourceId === "H03") slots.push(slot("overlay_layer", "image", "Owner-authorized overlay layer."));
   if (effect.sourceId === "H04") slots.push(slot("displacement_map", "texture", "Owner-authorized displacement map."));
   return Object.freeze(slots);
@@ -312,6 +328,24 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
       default: "main subject"
     };
   }
+  if (effect.sourceId === "H02") {
+    properties.target = {
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+      pattern: "^[\\p{L}\\p{N}][\\p{L}\\p{N} ,.'()/-]{0,79}$",
+      default: "main subject"
+    };
+  }
+  if (effect.sourceId === "T04" || effect.sourceId === "T05") {
+    for (const colorName of effect.sourceId === "T04" ? ["color"] : ["sourceColor", "targetColor"]) {
+      (properties[colorName] as JsonObject).pattern = "^#[0-9A-Fa-f]{6}$";
+    }
+    for (const textName of effect.sourceId === "T04" ? ["text"] : ["sourceText", "targetText"]) {
+      (properties[textName] as JsonObject).minLength = 1;
+      (properties[textName] as JsonObject).maxLength = 80;
+    }
+  }
   if (effect.sourceId === "C03") {
     properties.duration = { type: "number", minimum: 0.2, maximum: 30, multipleOf: 0.1, default: 2 };
   }
@@ -326,7 +360,7 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
   if (Array.isArray(schema.required)) {
     schema.required = schema.required.filter((name) => typeof name === "string" && name in properties);
     if (effect.sourceId === "D04") schema.required.push("target", "placement");
-    if (effect.sourceId === "L01") schema.required.push("target");
+    if (effect.sourceId === "L01" || effect.sourceId === "H02") schema.required.push("target");
     if (effect.sourceId === "C02" || effect.sourceId === "C04") schema.required.push("duration");
   }
   return schema as JsonSchema;
@@ -357,6 +391,7 @@ function primarySlotName(effect: P0CatalogEffectDefinition): string {
   if (effect.sourceId === "D03") return "source_image";
   if (effect.sourceId === "D04") return "source_image";
   if (effect.sourceId === "L01") return "source_image";
+  if (effect.sourceId === "T04" || effect.sourceId === "T05" || effect.sourceId === "H02") return "source_image";
   if (effect.sourceId === "D02") return "source_frame";
   if (effect.category === "text") return "text_raster";
   if (effect.category === "vector" || effect.category === "draw") return "vector_source";
@@ -395,7 +430,7 @@ function characterCascadeBinding(
 function serverTextBinding(
   context: ServerEffectRenderContext,
   params: Readonly<JsonObject>,
-  sourceId: "character-cascade" | "handwriting" | "kinetic-typography" | "scramble-decode"
+  sourceId: "character-cascade" | "handwriting" | "kinetic-typography" | "scramble-decode" | "text-morph-source" | "text-morph-target" | "text-path-reveal"
 ): ExistingRasterBinding {
   const background = rasterBinding(context, "source_image");
   const source = createServerTextRasterSourceV1({
@@ -419,13 +454,95 @@ function serverTextBinding(
   return Object.freeze({ surface: rasterizeLayerInput(rasterInput), rasterInput });
 }
 
+function pixelAt(surface: PixelSurface, x: number, y: number): readonly [number, number, number, number] {
+  if (x < 0 || x > surface.width - 1 || y < 0 || y > surface.height - 1) return [0, 0, 0, 0];
+  const sx = Math.max(0, Math.min(surface.width - 1, Math.round(x)));
+  const sy = Math.max(0, Math.min(surface.height - 1, Math.round(y)));
+  const offset = (sy * surface.width + sx) * 4;
+  return [surface.data[offset]!, surface.data[offset + 1]!, surface.data[offset + 2]!, surface.data[offset + 3]!];
+}
+
+function textMorphFrame(context: ServerEffectRenderContext, params: Readonly<JsonObject>): PixelSurface {
+  const common = {
+    fontFamily: params.fontFamily as "song" | "kai" | "sans",
+    fontSize: params.fontSize as number
+  };
+  const source = serverTextBinding(context, {
+    ...common,
+    text: params.sourceText as string,
+    color: params.sourceColor as string,
+    positionX: params.sourcePositionX as number,
+    positionY: params.sourcePositionY as number
+  }, "text-morph-source").surface;
+  const target = serverTextBinding(context, {
+    ...common,
+    text: params.targetText as string,
+    color: params.targetColor as string,
+    positionX: params.targetPositionX as number,
+    positionY: params.targetPositionY as number
+  }, "text-morph-target").surface;
+  const duration = Math.max(0.2, params.duration as number);
+  const stop = Math.max(0, Math.min(1, params.progress as number));
+  const phase = Math.min(stop, Math.max(0, context.time / duration) * stop);
+  if (phase <= 0) return { ...source, data: new Uint8ClampedArray(source.data) };
+  if (phase >= 1) return { ...target, data: new Uint8ClampedArray(target.data) };
+  const mode = params.matchMode as "glyph" | "outline" | "position";
+  const wave = Math.sin(phase * Math.PI);
+  const sourceDx = ((params.targetPositionX as number) - (params.sourcePositionX as number)) * context.width * phase;
+  const sourceDy = ((params.targetPositionY as number) - (params.sourcePositionY as number)) * context.height * phase;
+  const targetDx = ((params.sourcePositionX as number) - (params.targetPositionX as number)) * context.width * (1 - phase);
+  const targetDy = ((params.sourcePositionY as number) - (params.targetPositionY as number)) * context.height * (1 - phase);
+  const output = new Uint8ClampedArray(context.width * context.height * 4);
+  for (let y = 0; y < context.height; y += 1) for (let x = 0; x < context.width; x += 1) {
+    const normalizedX = x / Math.max(1, context.width - 1);
+    const normalizedY = y / Math.max(1, context.height - 1);
+    const glyphWave = Math.sin(normalizedX * Math.PI * 10 + phase * Math.PI * 2);
+    const outlineWave = Math.sin((normalizedX + normalizedY) * Math.PI * 14 - phase * Math.PI * 3);
+    const distortion = mode === "outline" ? outlineWave * wave * context.width * 0.022
+      : mode === "glyph" ? glyphWave * wave * context.width * 0.009 : 0;
+    const sourceSample = pixelAt(source, x - sourceDx + distortion, y - sourceDy - distortion * 0.45);
+    const targetSample = pixelAt(target, x - targetDx - distortion, y - targetDy + distortion * 0.45);
+    const sourceWeight = 1 - phase;
+    const targetWeight = phase;
+    const sourceAlpha = sourceSample[3] / 255 * sourceWeight;
+    const targetAlpha = targetSample[3] / 255 * targetWeight;
+    const alpha = Math.min(1, sourceAlpha + targetAlpha);
+    const offset = (y * context.width + x) * 4;
+    if (alpha > 0) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        output[offset + channel] = Math.round((sourceSample[channel]! * sourceAlpha
+          + targetSample[channel]! * targetAlpha) / alpha);
+      }
+      output[offset + 3] = Math.round(alpha * 255);
+    }
+  }
+  return { ...source, data: output };
+}
+
+function trackMatteFrame(context: ServerEffectRenderContext, params: Readonly<JsonObject>): PixelSurface {
+  const source = rasterBinding(context, "source_image").surface;
+  const mask = directMaskValues(context, "subject_mask");
+  const output = new Uint8ClampedArray(source.data);
+  const opacity = Math.max(0, Math.min(1, params.opacity as number));
+  for (let index = 0; index < mask.length; index += 1) {
+    const coverage = (params.invert as boolean ? 255 - mask[index]! : mask[index]!) / 255;
+    output[index * 4 + 3] = Math.round(output[index * 4 + 3]! * coverage * opacity);
+  }
+  return { ...source, data: output };
+}
+
 function internalParams(
   effect: P0CatalogEffectDefinition,
   context: ServerEffectRenderContext,
   params: Readonly<JsonObject>
 ): JsonObject {
   const output: JsonObject = { ...params };
-  if (effect.sourceId === "T04") output.path = singleBinding<ExistingPathBinding>(context, "motion_path").path;
+  if (effect.sourceId === "T04") {
+    output.path = singleBinding<ExistingPathBinding>(context, "motion_path").path;
+    const duration = Math.max(0.2, params.duration as number);
+    const stop = Math.max(0, Math.min(1, params.progress as number));
+    output.progress = Math.min(stop, Math.max(0, context.time / duration) * stop);
+  }
   if (effect.sourceId === "V02") {
     const paths = singleBinding<ExistingMorphPathsBinding>(context, "morph_paths");
     output.fromPath = paths.fromPath;
@@ -441,7 +558,6 @@ function internalParams(
     output.center = [anchor.x, anchor.y];
   }
   if (effect.sourceId === "H01") output.mask = "context://mask";
-  if (effect.sourceId === "H02") output.matteLayer = "context://secondary";
   if (effect.sourceId === "H04") output.map = "context://secondary";
   return output;
 }
@@ -843,7 +959,6 @@ function secondarySlotName(effect: P0CatalogEffectDefinition): string | undefine
   if (effect.sourceId === "D02") return "target_frame";
   if (effect.category === "transition") return "target_frame";
   if (effect.sourceId === "H01") return "mask_layer";
-  if (effect.sourceId === "H02") return "matte_layer";
   if (effect.sourceId === "H03") return "overlay_layer";
   if (effect.sourceId === "H04") return "displacement_map";
   return undefined;
@@ -866,6 +981,11 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
           placement: "outline"
         })
     : effect.sourceId === "L01"
+      ? Object.freeze({
+          ...withoutResourceFields(effect.effectId, effect.defaultPreset),
+          target: "main subject"
+        })
+    : effect.sourceId === "H02"
       ? Object.freeze({
           ...withoutResourceFields(effect.effectId, effect.defaultPreset),
           target: "main subject"
@@ -904,7 +1024,7 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         ? { ...params }
         : effect.sourceId === "H01"
         ? { ...params }
-        : effect.sourceId === "D04" || effect.sourceId === "L01"
+        : effect.sourceId === "D04" || effect.sourceId === "L01" || effect.sourceId === "H02"
           ? {
               ...normalizeEffectParams(effect.effectId, params),
               target: (params.target as string).trim().toLowerCase(),
@@ -952,6 +1072,10 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         output = chalkStrokeFrame(context, params);
       } else if (effect.sourceId === "L01") {
         output = neonGlowFrame(context, params);
+      } else if (effect.sourceId === "T05") {
+        output = textMorphFrame(context, params);
+      } else if (effect.sourceId === "H02") {
+        output = trackMatteFrame(context, params);
       } else if (effect.sourceId === "T08") {
         const input = singleBinding<TextExtrude3DRasterInput>(context, "text_raster");
         output = effect.renderPixels(input, resolved, {
@@ -966,6 +1090,8 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
             ? serverTextBinding(context, params, "scramble-decode")
           : effect.sourceId === "T03"
             ? serverTextBinding(context, params, "kinetic-typography")
+          : effect.sourceId === "T04"
+            ? serverTextBinding(context, params, "text-path-reveal")
           : effect.sourceId === "D01"
             ? serverTextBinding(context, params, "handwriting")
           : rasterBinding(context, primarySlotName(effect));

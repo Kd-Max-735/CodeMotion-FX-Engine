@@ -68,8 +68,7 @@ const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
 const HAN_TEXT = /\p{Script=Han}/u;
 const SENSITIVE_PATH = /(?:https?:\/\/|file:\/\/|[a-z]:\\|\/(?:home|tmp|var|etc|users)\/)/iu;
 const IMAGE_DERIVED_TEXT_TOOLS = new Set([
-  "kinetic_typography", "text_morph",
-  "text_extrude_3d", "text_path_reveal", "typewriter", "word_explode"
+  "kinetic_typography", "text_extrude_3d", "typewriter", "word_explode"
 ]);
 const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
   "path_trim", "path_morph", "radial_burst", "shape_repeater",
@@ -84,7 +83,9 @@ const SAM_DERIVED_MASK_SOURCES: Readonly<Record<string, Readonly<Record<string, 
     to_match_mask: "to_video"
   }),
   particle_logo_assemble: Object.freeze({ subject_mask: "logo_image" }),
-  path_trim: Object.freeze({ subject_mask: "source_image" })
+  path_trim: Object.freeze({ subject_mask: "source_image" }),
+  texture_overlay: Object.freeze({ subject_mask: "base_image" }),
+  track_matte: Object.freeze({ subject_mask: "source_image" })
 });
 const SAM_DERIVED_MASK_TOOLS = new Set(Object.keys(SAM_DERIVED_MASK_SOURCES));
 const PROMPT_ONLY_SERVER_INPUTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -111,7 +112,9 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   path_trim: "source_image",
   object_match_cut: "from_video",
   sim_rope: "source_image",
-  sim_spring: "source_image"
+  sim_spring: "source_image",
+  texture_overlay: "base_image",
+  track_matte: "source_image"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
@@ -419,6 +422,7 @@ function isSyntheticDerivedInputSlot(
   slot: EffectInputSlotDefinition
 ): boolean {
   return PROMPT_ONLY_SERVER_INPUTS[definition.toolName]?.includes(slot.name) === true
+    || definition.toolName === "text_path_reveal" && slot.name === "motion_path"
     || definition.toolName === "onset_trigger" && slot.name === "target_effect"
     || definition.toolName === "vocal_reactive_text"
       && (slot.name === "text_layer" || slot.name === "text_font")
@@ -1249,6 +1253,9 @@ function syntheticInputBinding(
         rowOrder: "top-to-bottom"
       }
     };
+  }
+  if (definition.toolName === "text_path_reveal" && slot.name === "motion_path") {
+    return Object.freeze({ path: "M 0.08 0.62 C 0.3 0.18 0.7 0.82 0.92 0.38" });
   }
   return legacyRasterBinding(
     definition,

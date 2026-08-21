@@ -216,9 +216,13 @@ const EXPECTED = Object.freeze({
     effectId: "fx.composite.trackMatte",
     properties: {
       mode: choice("alpha", ["alpha", "luma"]), invert: boolean(false),
-      opacity: number(1, 0, 1, 0.01)
+      opacity: number(1, 0, 1, 0.01),
+      target: {
+        type: "string", minLength: 1, maxLength: 80,
+        pattern: "^[\\p{L}\\p{N}][\\p{L}\\p{N} ,.'()/-]{0,79}$", default: "main subject"
+      }
     },
-    slots: [["source_layer", "data"], ["matte_layer", "mask"]]
+    slots: [["source_image", "image"], ["subject_mask", "mask"]]
   },
   wipe: {
     effectId: "fx.transition.wipe",
@@ -252,7 +256,7 @@ const DOC_INPUT_TERMS: Readonly<Record<string, readonly string[]>> = Object.free
   radial_blur: ["源画面由服务端绑定"],
   radial_wipe: ["A、B 两路素材由服务端绑定"],
   scan_beam: ["源画面由服务端绑定"],
-  track_matte: ["matte 和源画面由服务端绑定"],
+  track_matte: ["SAM3.1", "source_image", "subject_mask"],
   wipe: ["A、B 两路素材由服务端绑定"]
 });
 const FORBIDDEN_RESOURCE_FIELDS = new Set([
@@ -719,6 +723,40 @@ describe("existing-02 field specifications and adapter contracts", () => {
       .not.toEqual(Array.from(source.data.slice(boundary, boundary + 3)));
     expect(Array.from(glowing.data.slice(farBackground, farBackground + 4)))
       .toEqual(Array.from(source.data.slice(farBackground, farBackground + 4)));
+  });
+
+  it("uses the SAM-selected object as the track matte instead of requiring an uploaded matte", async () => {
+    const definition = definitions().get("track_matte")!;
+    const width = 4; const height = 2;
+    const source = {
+      width,
+      height,
+      data: new Uint8ClampedArray(width * height * 4).fill(255),
+      colorSpace: "srgb" as const,
+      alphaMode: "straight" as const
+    };
+    const mask = Uint8Array.from([0, 0, 255, 255, 0, 0, 255, 255]);
+    const input = (slotName: string, kind: EffectInputKind, binding: unknown) => ({
+      slot: slotName,
+      kind,
+      tenantId: "tenant-existing-02",
+      userId: "user-existing-02",
+      locked: true as const,
+      binding
+    });
+    const result = await definition.render({
+      ...contextFor(definition, {
+        source_image: input("source_image", "image", { surface: source, rasterInput: {} }),
+        subject_mask: input("subject_mask", "mask", { width, height, data: mask })
+      }),
+      width,
+      height
+    }, definition.defaults);
+    const output = result.output as typeof source;
+    expect(definition.inputSlots.map((slot) => slot.name)).toEqual(["source_image", "subject_mask"]);
+    expect(output.data.filter((_, offset) => offset % 4 === 3)).toEqual(
+      Uint8ClampedArray.from([0, 0, 255, 255, 0, 0, 255, 255])
+    );
   });
 
   it("maps exactly the assigned 20 snake_case tools to one independent Markdown file", async () => {

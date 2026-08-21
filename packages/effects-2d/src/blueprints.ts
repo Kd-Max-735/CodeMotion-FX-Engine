@@ -179,11 +179,19 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "medium", 7),
   b("T04", "fx.text.textPathReveal", "Text Path Reveal", "text", "Text reveal following a normalized path.", [
     text("path", "M0,0.5 C0.3,0.1 0.7,0.9 1,0.5"), number("progress", 0.5, 0, 1, 0.01),
-    choice("orientation", "tangent", ["tangent", "upright"]), number("feather", 0.04, 0, 0.5, 0.005)
+    choice("orientation", "tangent", ["tangent", "upright"]), number("feather", 0.04, 0, 0.5, 0.005),
+    number("duration", 2, 0.2, 30, 0.1, "seconds"), text("text", "PATH", 80),
+    choice("fontFamily", "sans", ["song", "kai", "sans"]), number("fontSize", 72, 12, 240, 1, "pixels"),
+    number("positionX", 0.5, 0, 1, 0.01, "canvas"), number("positionY", 0.5, 0, 1, 0.01, "canvas"),
+    text("color", "#ffffff", 16)
   ], "medium", 7),
   b("T05", "fx.text.textMorph", "Text Morph", "text", "Seeded source-to-target glyph morph.", [
     text("sourceText", "CODE"), text("targetText", "MOTION"), choice("matchMode", "glyph", ["glyph", "outline", "position"]),
-    number("progress", 0.5, 0, 1, 0.01)
+    number("progress", 1, 0, 1, 0.01), number("duration", 2.5, 0.2, 30, 0.1, "seconds"),
+    choice("fontFamily", "sans", ["song", "kai", "sans"]), number("fontSize", 88, 12, 240, 1, "pixels"),
+    number("sourcePositionX", 0.5, 0, 1, 0.01, "canvas"), number("sourcePositionY", 0.5, 0, 1, 0.01, "canvas"),
+    number("targetPositionX", 0.5, 0, 1, 0.01, "canvas"), number("targetPositionY", 0.5, 0, 1, 0.01, "canvas"),
+    text("sourceColor", "#5ac8fa", 16), text("targetColor", "#ff5ea8", 16)
   ], "heavy", 10),
   b("T06", "fx.text.scrambleDecode", "Scramble Decode", "text", "Seeded scramble-to-target decode over an authorized image.", [
     text("charset", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 256), number("speed", 24, 0.1, 240, 0.1, "glyphs/s"),
