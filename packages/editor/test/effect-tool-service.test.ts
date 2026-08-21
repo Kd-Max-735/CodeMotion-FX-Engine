@@ -902,6 +902,14 @@ describe("server single effect-tool service", () => {
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
     expect(resolveMedia).toHaveBeenCalledTimes(13);
 
+    for (const toolName of ["sim_rope", "sim_spring"] as const) {
+      const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
+      await expect(resolver.visionImage(principal, definition, {
+        source_image: media.asset.id
+      })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    }
+    expect(resolveMedia).toHaveBeenCalledTimes(15);
+
     const videoMedia: VerifiedStoredMedia = {
       ...media,
       asset: {
@@ -932,7 +940,7 @@ describe("server single effect-tool service", () => {
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(13);
+    expect(resolveMedia).toHaveBeenCalledTimes(15);
   });
 
   it.each(["marker_stroke", "chalk_stroke", "neon_glow"])(

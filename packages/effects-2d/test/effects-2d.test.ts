@@ -706,6 +706,25 @@ describe("Group 2 P0 catalog", () => {
     }
   });
 
+  it("uses slide duration to control entrance speed independently from distance and overshoot", () => {
+    const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "M02")!;
+    const fixture = realFixture(effect, "test.slide.duration", 0.5, 48, 32,
+      "srgb", 20260821, "final", 0, 30, 4);
+    const slow = effect.renderPixels(fixture.source.surface, {
+      ...effect.defaultPreset,
+      distance: 0.7,
+      overshoot: 0.08,
+      duration: 4
+    }, fixture.options);
+    const quick = effect.renderPixels(fixture.source.surface, {
+      ...effect.defaultPreset,
+      distance: 0.7,
+      overshoot: 0.08,
+      duration: 1
+    }, fixture.options);
+    expect(hashPixelSurface(slow)).not.toBe(hashPixelSurface(quick));
+  });
+
   it("changes rotate-in angular speed through the existing angle and turns controls", () => {
     const effect = GROUP_2_P0_EFFECTS.find((entry) => entry.sourceId === "M04")!;
     const fixture = realFixture(effect, "test.rotate-in.speed", 0.25, 48, 32);

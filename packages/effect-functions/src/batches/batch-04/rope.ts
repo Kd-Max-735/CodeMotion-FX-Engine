@@ -22,6 +22,8 @@ export interface RopeParams extends JsonObject {
   swingImpulse: number;
   solverIterations: number;
   anchorMode: "start" | "both";
+  anchorX: number;
+  anchorY: number;
 }
 
 export const ROPE_DEFAULTS: RopeParams = {
@@ -32,7 +34,9 @@ export const ROPE_DEFAULTS: RopeParams = {
   stiffness: 0.92,
   swingImpulse: 1.5,
   solverIterations: 5,
-  anchorMode: "start"
+  anchorMode: "start",
+  anchorX: 0.22,
+  anchorY: 0.18
 };
 
 function normalize(params: Readonly<RopeParams>): RopeParams {
@@ -44,7 +48,9 @@ function normalize(params: Readonly<RopeParams>): RopeParams {
     stiffness: rounded(bounded(params.stiffness, 0.1, 1, ROPE_DEFAULTS.stiffness), 2),
     swingImpulse: rounded(bounded(params.swingImpulse, 0, 8, ROPE_DEFAULTS.swingImpulse), 2),
     solverIterations: boundedInt(params.solverIterations, 1, 10, ROPE_DEFAULTS.solverIterations),
-    anchorMode: params.anchorMode === "both" ? "both" : "start"
+    anchorMode: params.anchorMode === "both" ? "both" : "start",
+    anchorX: rounded(bounded(params.anchorX, 0, 1, ROPE_DEFAULTS.anchorX), 3),
+    anchorY: rounded(bounded(params.anchorY, 0, 1, ROPE_DEFAULTS.anchorY), 3)
   };
 }
 
@@ -66,7 +72,9 @@ export const ROPE_DEFINITION: EffectToolDefinition<RopeParams> = {
       stiffness: { type: "number", minimum: 0.1, maximum: 1, multipleOf: 0.01, default: 0.92 },
       swingImpulse: { type: "number", minimum: 0, maximum: 8, multipleOf: 0.01, default: 1.5 },
       solverIterations: { type: "integer", minimum: 1, maximum: 10, default: 5 },
-      anchorMode: { type: "string", enum: ["start", "both"], default: "start" }
+      anchorMode: { type: "string", enum: ["start", "both"], default: "start" },
+      anchorX: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.001, default: 0.22 },
+      anchorY: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.001, default: 0.18 }
     }
   },
   defaults: ROPE_DEFAULTS,
@@ -91,7 +99,7 @@ export const ROPE_DEFINITION: EffectToolDefinition<RopeParams> = {
     const pointCount = params.segmentCount + 1;
     const spacing = params.ropeLength / params.segmentCount;
     const anchors = pointList(context.inputs, "pins", "points", 2);
-    const start = anchors[0] ?? { x: -0.55, y: -0.65 };
+    const start = anchors[0] ?? { x: params.anchorX * 2 - 1, y: params.anchorY * 2 - 1 };
     const end = anchors[1] ?? { x: start.x + params.ropeLength * 0.7, y: start.y };
     const points = Array.from({ length: pointCount }, (_, index) => {
       const ratio = index / params.segmentCount;

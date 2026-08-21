@@ -109,7 +109,9 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   particle_emitter: "background_image",
   particle_logo_assemble: "logo_image",
   path_trim: "source_image",
-  object_match_cut: "from_video"
+  object_match_cut: "from_video",
+  sim_rope: "source_image",
+  sim_spring: "source_image"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;

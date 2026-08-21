@@ -1238,30 +1238,31 @@ function simulationFrame(
   }
 
   if (toolName === "sim_spring") {
-    shadeFrame(output, 0.46, [7, 8, 12]);
+    shadeFrame(output, 0.82, [7, 8, 12]);
     const nodes = stateRecords(state, "nodes").map((node) => {
       const pixel = simulationPointToPixel({ x: Number(node.x), y: Number(node.y) }, request);
       return { x: pixel[0], y: pixel[1] };
     });
     if (nodes.length < 2) return false;
-    const coil: ScreenPoint[] = [];
-    for (let index = 0; index < nodes.length - 1; index += 1) {
-      const from = nodes[index]!;
-      const to = nodes[index + 1]!;
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      const length = Math.max(0.001, Math.hypot(dx, dy));
-      const normalX = -dy / length;
-      const normalY = dx / length;
-      const turns = 5;
-      for (let step = 0; step < turns; step += 1) {
-        const progress = step / turns;
-        const offset = Math.sin(progress * Math.PI * 2) * 7;
-        coil.push({ x: from.x + dx * progress + normalX * offset,
-          y: from.y + dy * progress + normalY * offset });
-      }
-    }
-    coil.push(nodes[nodes.length - 1]!);
+    const from = nodes[0]!;
+    const to = nodes[nodes.length - 1]!;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.max(0.001, Math.hypot(dx, dy));
+    const normalX = -dy / length;
+    const normalY = dx / length;
+    const turns = Math.max(8, Math.min(36, Math.round(nodes.length * 1.35)));
+    const samples = turns * 8;
+    const coilRadius = Math.max(6, Math.min(13, length / Math.max(12, turns * 1.4)));
+    const coil: ScreenPoint[] = Array.from({ length: samples + 1 }, (_, index) => {
+      const progress = index / samples;
+      const taperedRadius = coilRadius * Math.min(1, progress * 5, (1 - progress) * 5);
+      const offset = Math.sin(progress * turns * Math.PI * 2) * taperedRadius;
+      return {
+        x: from.x + dx * progress + normalX * offset,
+        y: from.y + dy * progress + normalY * offset
+      };
+    });
     drawScreenPolyline(output, coil.map((point) => ({ x: point.x + 4, y: point.y + 5 })),
       request, [0, 0, 0, 255], 0.38, 6.5);
     drawScreenPolyline(output, coil, request, [116, 72, 22, 255], 0.95, 4.6);

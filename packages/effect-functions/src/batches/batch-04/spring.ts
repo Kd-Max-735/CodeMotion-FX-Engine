@@ -22,6 +22,8 @@ export interface SpringParams extends JsonObject {
   impulseStrength: number;
   substeps: number;
   anchorMode: "first" | "both" | "none";
+  anchorX: number;
+  anchorY: number;
 }
 
 export const SPRING_DEFAULTS: SpringParams = {
@@ -32,7 +34,9 @@ export const SPRING_DEFAULTS: SpringParams = {
   restLength: 0.12,
   impulseStrength: 1.5,
   substeps: 2,
-  anchorMode: "first"
+  anchorMode: "first",
+  anchorX: 0.22,
+  anchorY: 0.18
 };
 
 function normalize(params: Readonly<SpringParams>): SpringParams {
@@ -44,7 +48,9 @@ function normalize(params: Readonly<SpringParams>): SpringParams {
     restLength: rounded(bounded(params.restLength, 0.03, 0.3, SPRING_DEFAULTS.restLength), 3),
     impulseStrength: rounded(bounded(params.impulseStrength, 0, 12, SPRING_DEFAULTS.impulseStrength), 2),
     substeps: boundedInt(params.substeps, 1, 4, SPRING_DEFAULTS.substeps),
-    anchorMode: params.anchorMode === "both" || params.anchorMode === "none" ? params.anchorMode : "first"
+    anchorMode: params.anchorMode === "both" || params.anchorMode === "none" ? params.anchorMode : "first",
+    anchorX: rounded(bounded(params.anchorX, 0, 1, SPRING_DEFAULTS.anchorX), 3),
+    anchorY: rounded(bounded(params.anchorY, 0, 1, SPRING_DEFAULTS.anchorY), 3)
   };
 }
 
@@ -66,7 +72,9 @@ export const SPRING_DEFINITION: EffectToolDefinition<SpringParams> = {
       restLength: { type: "number", minimum: 0.03, maximum: 0.3, multipleOf: 0.001, default: 0.12 },
       impulseStrength: { type: "number", minimum: 0, maximum: 12, multipleOf: 0.01, default: 1.5 },
       substeps: { type: "integer", minimum: 1, maximum: 4, default: 2 },
-      anchorMode: { type: "string", enum: ["first", "both", "none"], default: "first" }
+      anchorMode: { type: "string", enum: ["first", "both", "none"], default: "first" },
+      anchorX: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.001, default: 0.22 },
+      anchorY: { type: "number", minimum: 0, maximum: 1, multipleOf: 0.001, default: 0.18 }
     }
   },
   defaults: SPRING_DEFAULTS,
@@ -85,11 +93,21 @@ export const SPRING_DEFINITION: EffectToolDefinition<SpringParams> = {
     requireImageInput(context, "source_image");
     const params = normalize(rawParams);
     const steps = fixedSteps(context, 60, 360);
+    const anchorX = params.anchorX * 2 - 1;
+    const anchorY = params.anchorY * 2 - 1;
+    const direction = params.anchorX <= 0.5 ? 1 : -1;
+    const availableLength = direction > 0 ? 1 - anchorX : anchorX + 1;
+    const effectiveRestLength = Math.min(
+      params.restLength,
+      availableLength * 0.9 / Math.max(1, params.nodeCount - 1)
+    );
+    const impulseNode = params.anchorMode === "both"
+      ? Math.floor(params.nodeCount / 2) : params.nodeCount - 1;
     const nodes: SimulationPoint[] = Array.from({ length: params.nodeCount }, (_, index) => ({
-      x: -0.7 + index * params.restLength,
-      y: -0.35,
+      x: anchorX + direction * index * effectiveRestLength,
+      y: anchorY,
       vx: 0,
-      vy: index === Math.floor(params.nodeCount / 2) ? -params.impulseStrength : 0
+      vy: index === impulseNode ? -params.impulseStrength : 0
     }));
     const fixed = (index: number): boolean => params.anchorMode === "both"
       ? index === 0 || index === nodes.length - 1
@@ -104,7 +122,7 @@ export const SPRING_DEFINITION: EffectToolDefinition<SpringParams> = {
           const dx = right.x - left.x;
           const dy = right.y - left.y;
           const distance = Math.max(1e-6, Math.hypot(dx, dy));
-          const extension = distance - params.restLength;
+          const extension = distance - effectiveRestLength;
           const relativeVelocity = ((right.vx - left.vx) * dx + (right.vy - left.vy) * dy) / distance;
           const force = params.stiffness * extension + params.damping * relativeVelocity;
           const fx = force * dx / distance;
@@ -113,6 +131,23 @@ export const SPRING_DEFINITION: EffectToolDefinition<SpringParams> = {
           forces[index]!.y += fy;
           forces[index + 1]!.x -= fx;
           forces[index + 1]!.y -= fy;
+        }
+        // A coil spring resists sharp hinges along its axis. This curvature
+        // term keeps the simulated centerline spring-like instead of behaving
+        // as a freely jointed rope.
+        for (let index = 1; index < nodes.length - 1; index += 1) {
+          const previous = nodes[index - 1]!;
+          const node = nodes[index]!;
+          const next = nodes[index + 1]!;
+          const bendX = (previous.x + next.x) * 0.5 - node.x;
+          const bendY = (previous.y + next.y) * 0.5 - node.y;
+          const bendForce = params.stiffness * 0.42;
+          forces[index]!.x += bendX * bendForce;
+          forces[index]!.y += bendY * bendForce;
+          forces[index - 1]!.x -= bendX * bendForce * 0.5;
+          forces[index - 1]!.y -= bendY * bendForce * 0.5;
+          forces[index + 1]!.x -= bendX * bendForce * 0.5;
+          forces[index + 1]!.y -= bendY * bendForce * 0.5;
         }
         for (let index = 0; index < nodes.length; index += 1) {
           if (fixed(index)) continue;
@@ -133,7 +168,7 @@ export const SPRING_DEFINITION: EffectToolDefinition<SpringParams> = {
     }
     const strain = nodes.slice(1).reduce((sum, node, index) => {
       const previous = nodes[index]!;
-      return sum + Math.abs(Math.hypot(node.x - previous.x, node.y - previous.y) - params.restLength);
+      return sum + Math.abs(Math.hypot(node.x - previous.x, node.y - previous.y) - effectiveRestLength);
     }, 0) / (nodes.length - 1);
     return simulationResult("fx.sim.spring", steps.count, steps.dt,
       { nodes: nodes.map((node) => ({ x: rounded(node.x), y: rounded(node.y), vx: rounded(node.vx), vy: rounded(node.vy) })) },

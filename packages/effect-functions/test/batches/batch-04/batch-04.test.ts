@@ -275,6 +275,22 @@ describe("batch-04 definitions", () => {
     }
   });
 
+  it.each(["sim_rope", "sim_spring"])(
+    "places the %s start anchor at the model-provided vision coordinates",
+    async (toolName) => {
+      const definition = BATCH_04_DEFINITIONS.find((entry) => entry.toolName === toolName)!;
+      const params = { ...definition.defaults, anchorX: 0.73, anchorY: 0.41 };
+      const result = await definition.render(context(definition, 0.5), params);
+      const state = asRecord(asRecord(result.output).state);
+      const points = (state.points ?? state.nodes) as Array<Record<string, number>>;
+      expect(points[0]!.x).toBeCloseTo(0.46, 3);
+      expect(points[0]!.y).toBeCloseTo(-0.18, 3);
+      if (toolName === "sim_spring") {
+        expect(points.every((point) => point.x >= -1 && point.x <= 1)).toBe(true);
+      }
+    }
+  );
+
   it("rejects out-of-schema extremes before rendering", () => {
     for (const definition of BATCH_04_DEFINITIONS) {
       const properties = schemaProperties(definition);

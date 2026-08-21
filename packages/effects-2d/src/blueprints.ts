@@ -127,7 +127,8 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "light", 4),
   b("M02", "fx.motion.slide", "Slide", "motion", "Directional slide with overshoot.", [
     choice("direction", "left", ["left", "right", "up", "down"]), number("distance", 0.35, 0, 2, 0.01, "canvas"),
-    number("overshoot", 0.08, 0, 1, 0.01), vector("vector", [1, 0], -2, 2)
+    number("overshoot", 0.08, 0, 1, 0.01), vector("vector", [1, 0], -2, 2),
+    number("duration", 1.2, 0.05, 60, 0.05, "seconds")
   ], "light", 5),
   b("M03", "fx.motion.scalePop", "Scale Pop", "motion", "Spring-like scale entrance.", [
     number("startScale", 0.2, 0, 4, 0.01), number("endScale", 1, 0, 4, 0.01),

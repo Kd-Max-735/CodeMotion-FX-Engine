@@ -447,7 +447,7 @@ function renderMotion(
   const output = emptyLike(source);
   const seconds = elapsedSeconds(options);
   const duration = Math.max(0.05, numberParam(params, "duration", 1.2));
-  const p = eased(blueprint.sourceId === "M03" || blueprint.sourceId === "M04"
+  const p = eased(blueprint.sourceId === "M02" || blueprint.sourceId === "M03" || blueprint.sourceId === "M04"
     ? clamp(seconds / duration)
     : effectProgress(blueprint, params, options));
   const shakeOffset = blueprint.sourceId === "M08" ? (() => {
