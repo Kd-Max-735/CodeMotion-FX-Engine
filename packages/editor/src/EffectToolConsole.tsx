@@ -37,6 +37,8 @@ function errorMessage(error: unknown): string {
   }
   if (error instanceof BrowserApiError) {
     if (error.code === "ARK_PROVIDER_UNAVAILABLE") return "Ark 尚未配置，请检查服务器 ARK_API_KEY。";
+    if (error.code === "SAM31_GATEWAY_UNAVAILABLE") return "无法连接 SAM3 网关，请确认模型主机在线，并检查本机能否访问 SAM3_API_BASE_URL（网关 9100）。";
+    if (error.code === "SAM31_MODEL_UNAVAILABLE") return "SAM3 网关已连接，但 sam3 模型未配置 segment 操作，请检查模型主机的 /api/models。";
     if (error.code === "SAM31_UNAVAILABLE") return "SAM3 分割服务未运行或响应异常，请检查服务器的 SAM3_API_BASE_URL（网关 9100），并确认 SAM3 模型已配置。";
     if (error.code === "SAM31_TARGET_NOT_FOUND") return "SAM3 未在图片中找到指定对象，请换一个更明确的对象描述。";
     if (error.code === "SAM31_UNSUPPORTED_MEDIA") return "SAM3 仅支持 PNG、JPEG 或 WebP 图片。";

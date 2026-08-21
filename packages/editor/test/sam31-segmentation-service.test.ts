@@ -41,6 +41,19 @@ async function sourceMedia(): Promise<VerifiedStoredMedia> {
   };
 }
 
+function readinessResponse(input: string | URL | Request): Response | undefined {
+  const url = String(input);
+  if (url.endsWith("/health/live")) {
+    return new Response(JSON.stringify({ status: "ok", docker: true }), { status: 200 });
+  }
+  if (url.endsWith("/api/models")) {
+    return new Response(JSON.stringify({
+      models: [{ slug: "sam3", operations: ["segment"], configured: true }]
+    }), { status: 200 });
+  }
+  return undefined;
+}
+
 describe("SAM3 segmentation service", () => {
   it("rejects public, authenticated, and non-HTTP endpoints", () => {
     for (const baseUrl of [
@@ -58,6 +71,8 @@ describe("SAM3 segmentation service", () => {
     const highMask = maskPng([0, 255], 2, 1).toString("base64");
     let request = 0;
     const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const readiness = readinessResponse(input);
+      if (readiness !== undefined) return readiness;
       request += 1;
       if (request === 1) {
         expect(String(input)).toBe("http://192.168.1.31:9100/api/uploads");
@@ -114,10 +129,10 @@ describe("SAM3 segmentation service", () => {
       score: 0.93,
       bbox: [1, 0, 2, 1]
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
   });
 
-  it("does not leak malformed remote response details", async () => {
+  it("reports a failed health check as a gateway availability failure", async () => {
     const service = new Sam31SegmentationService({
       baseUrl: "http://192.168.1.20:9100",
       fetchImpl: vi.fn(async () => new Response("not-json", { status: 200 })) as typeof fetch
@@ -126,16 +141,37 @@ describe("SAM3 segmentation service", () => {
     await expect(service.segment(await sourceMedia(), "main subject", 2, 2))
       .rejects.toMatchObject({
         name: "Sam31SegmentationError",
-        code: "unavailable",
-        message: "SAM3 segmentation service is unavailable or returned an invalid response."
+        code: "gateway_unavailable",
+        message: "SAM3 gateway health check failed."
       } satisfies Partial<Sam31SegmentationError>);
+  });
+
+  it("requires a configured sam3 model with the segment operation", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).endsWith("/health/live")) {
+        return new Response(JSON.stringify({ status: "ok", docker: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        models: [{ slug: "sam3", operations: ["segment"], configured: false }]
+      }), { status: 200 });
+    });
+    const service = new Sam31SegmentationService({
+      baseUrl: "http://192.168.1.31:9100",
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await expect(service.segment(await sourceMedia(), "car", 2, 2))
+      .rejects.toMatchObject({ code: "model_unavailable" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("separates invalid targets and missing detections from service availability failures", async () => {
     let request = 0;
     const service = new Sam31SegmentationService({
       baseUrl: "http://127.0.0.1:9100",
-      fetchImpl: vi.fn(async () => {
+      fetchImpl: vi.fn(async (input) => {
+        const readiness = readinessResponse(input);
+        if (readiness !== undefined) return readiness;
         request += 1;
         if (request === 1) return new Response(JSON.stringify({ file_id: "upload_abcdefgh.png" }), { status: 200 });
         if (request === 2) return new Response(JSON.stringify({ task_id: "task_abcdefgh" }), { status: 200 });
@@ -155,7 +191,9 @@ describe("SAM3 segmentation service", () => {
     let request = 0;
     const service = new Sam31SegmentationService({
       baseUrl: "http://127.0.0.1:9100",
-      fetchImpl: vi.fn(async () => {
+      fetchImpl: vi.fn(async (input) => {
+        const readiness = readinessResponse(input);
+        if (readiness !== undefined) return readiness;
         request += 1;
         if (request === 1) return new Response(JSON.stringify({ file_id: "upload_abcdefgh.png" }), { status: 200 });
         if (request === 2) return new Response(JSON.stringify({ task_id: "task_abcdefgh" }), { status: 200 });
@@ -183,6 +221,8 @@ describe("SAM3 segmentation service", () => {
     const service = new Sam31SegmentationService({
       baseUrl: "http://127.0.0.1:9100",
       fetchImpl: vi.fn(async (input: string | URL | Request) => {
+        const readiness = readinessResponse(input);
+        if (readiness !== undefined) return readiness;
         request += 1;
         if (request === 1) return new Response(JSON.stringify({ file_id: "upload_abcdefgh.png" }), { status: 200 });
         if (request === 2) return new Response(JSON.stringify({ task_id: "task_abcdefgh" }), { status: 200 });
@@ -207,7 +247,8 @@ describe("SAM3 segmentation service", () => {
     expect(() => createSam31SegmentationService({
       SAM3_API_BASE_URL: "http://192.168.1.31:9100",
       SAM3_THRESHOLD: "0.3",
-      SAM3_TIMEOUT_MS: "300000",
+      SAM3_TIMEOUT_MS: "600000",
+      SAM3_READINESS_TIMEOUT_MS: "10000",
       SAM3_POLL_INTERVAL_MS: "1000"
     }, fetchImpl)).not.toThrow();
   });

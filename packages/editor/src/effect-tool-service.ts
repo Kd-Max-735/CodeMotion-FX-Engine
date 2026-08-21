@@ -2222,6 +2222,8 @@ function safeError(error: unknown): {
     if (error.code === "target_not_found") return { status: 422, code: "SAM31_TARGET_NOT_FOUND" };
     if (error.code === "unsupported_media") return { status: 422, code: "SAM31_UNSUPPORTED_MEDIA" };
     if (error.code === "invalid_input") return { status: 422, code: "SAM31_INPUT_INVALID" };
+    if (error.code === "gateway_unavailable") return { status: 503, code: "SAM31_GATEWAY_UNAVAILABLE" };
+    if (error.code === "model_unavailable") return { status: 503, code: "SAM31_MODEL_UNAVAILABLE" };
     return { status: 503, code: "SAM31_UNAVAILABLE" };
   }
   if (error instanceof EffectToolContractError) return { status: 422, code: error.code };

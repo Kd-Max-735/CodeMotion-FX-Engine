@@ -24,6 +24,7 @@ export interface Sam31SegmentationOptions {
   readonly baseUrl: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
+  readonly readinessTimeoutMs?: number;
   readonly pollIntervalMs?: number;
   readonly threshold?: number;
 }
@@ -32,6 +33,8 @@ export type Sam31SegmentationErrorCode =
   | "invalid_input"
   | "unsupported_media"
   | "target_not_found"
+  | "gateway_unavailable"
+  | "model_unavailable"
   | "unavailable";
 
 export class Sam31SegmentationError extends Error {
@@ -114,6 +117,46 @@ async function boundedJson(response: Response): Promise<unknown> {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   } catch {
     throw new Error("SAM3_GATEWAY_RESPONSE_INVALID");
+  }
+}
+
+function gatewayHealth(value: unknown): boolean {
+  const record = objectValue(value);
+  return record?.status === "ok" && record.docker === true;
+}
+
+function sam3ModelConfigured(value: unknown): boolean {
+  const record = objectValue(value);
+  const models = record?.models;
+  if (!Array.isArray(models)) return false;
+  return models.some((value) => {
+    const model = objectValue(value);
+    const operations = model?.operations;
+    return model?.slug === "sam3" && model.configured === true
+      && (operations === "segment" || Array.isArray(operations) && operations.includes("segment"));
+  });
+}
+
+async function fetchWithDeadline(
+  fetchImpl: typeof fetch,
+  input: string | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  parentSignal: AbortSignal
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(new Error("SAM31_READINESS_TIMEOUT")),
+    timeoutMs
+  );
+  const abort = () => controller.abort(parentSignal.reason);
+  parentSignal.addEventListener("abort", abort, { once: true });
+  if (parentSignal.aborted) abort();
+  try {
+    return await fetchImpl(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+    parentSignal.removeEventListener("abort", abort);
   }
 }
 
@@ -257,15 +300,78 @@ export class Sam31SegmentationService {
   readonly #baseUrl: URL;
   readonly #fetch: typeof fetch;
   readonly #timeoutMs: number;
+  readonly #readinessTimeoutMs: number;
   readonly #pollIntervalMs: number;
   readonly #threshold: number;
+  #readiness: Promise<void> | undefined;
 
   constructor(options: Sam31SegmentationOptions) {
     this.#baseUrl = checkedBaseUrl(options.baseUrl);
     this.#fetch = options.fetchImpl ?? fetch;
-    this.#timeoutMs = Math.max(1_000, Math.min(600_000, options.timeoutMs ?? 300_000));
+    this.#timeoutMs = Math.max(1_000, Math.min(600_000, options.timeoutMs ?? 600_000));
+    this.#readinessTimeoutMs = Math.max(
+      1_000,
+      Math.min(30_000, options.readinessTimeoutMs ?? 10_000)
+    );
     this.#pollIntervalMs = Math.max(100, Math.min(10_000, options.pollIntervalMs ?? 250));
     this.#threshold = Math.max(0.1, Math.min(0.95, options.threshold ?? 0.3));
+  }
+
+  private async ensureReady(signal: AbortSignal): Promise<void> {
+    const pending = this.#readiness ?? this.checkReadiness(signal);
+    this.#readiness = pending;
+    try {
+      await pending;
+    } catch (error) {
+      if (this.#readiness === pending) this.#readiness = undefined;
+      throw error;
+    }
+  }
+
+  private async checkReadiness(signal: AbortSignal): Promise<void> {
+    let health: unknown;
+    try {
+      health = await boundedJson(await fetchWithDeadline(
+        this.#fetch,
+        new URL("health/live", this.#baseUrl),
+        { redirect: "error" },
+        this.#readinessTimeoutMs,
+        signal
+      ));
+    } catch {
+      throw new Sam31SegmentationError(
+        "gateway_unavailable",
+        "SAM3 gateway health check failed."
+      );
+    }
+    if (!gatewayHealth(health)) {
+      throw new Sam31SegmentationError(
+        "gateway_unavailable",
+        "SAM3 gateway is not live or Docker is unavailable."
+      );
+    }
+
+    let models: unknown;
+    try {
+      models = await boundedJson(await fetchWithDeadline(
+        this.#fetch,
+        new URL("api/models", this.#baseUrl),
+        { redirect: "error" },
+        this.#readinessTimeoutMs,
+        signal
+      ));
+    } catch {
+      throw new Sam31SegmentationError(
+        "gateway_unavailable",
+        "SAM3 gateway model discovery failed."
+      );
+    }
+    if (!sam3ModelConfigured(models)) {
+      throw new Sam31SegmentationError(
+        "model_unavailable",
+        "SAM3 model is not configured for the segment operation."
+      );
+    }
   }
 
   async segment(
@@ -329,6 +435,7 @@ export class Sam31SegmentationService {
     const abort = () => controller.abort(signal?.reason);
     signal?.addEventListener("abort", abort, { once: true });
     try {
+      await this.ensureReady(controller.signal);
       const uploadBody = new FormData();
       uploadBody.append("file", new Blob([new Uint8Array(bytes)], { type: mime }), filename);
       const upload = objectValue(await boundedJson(await this.#fetch(new URL("api/uploads", this.#baseUrl), {
@@ -426,14 +533,16 @@ export function createSam31SegmentationService(
   fetchImpl?: typeof fetch
 ): Sam31SegmentationService {
   const threshold = Number(env.SAM3_THRESHOLD ?? env.SAM31_THRESHOLD ?? 0.3);
-  const timeoutMs = Number(env.SAM3_TIMEOUT_MS ?? 300_000);
+  const timeoutMs = Number(env.SAM3_TIMEOUT_MS ?? 600_000);
+  const readinessTimeoutMs = Number(env.SAM3_READINESS_TIMEOUT_MS ?? 10_000);
   const pollIntervalMs = Number(env.SAM3_POLL_INTERVAL_MS ?? 250);
   return new Sam31SegmentationService({
     baseUrl: env.SAM3_API_BASE_URL?.trim() || env.SAM31_API_BASE_URL?.trim()
       || "http://192.168.1.31:9100",
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
     threshold: Number.isFinite(threshold) ? threshold : 0.3,
-    timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 300_000,
+    timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 600_000,
+    readinessTimeoutMs: Number.isFinite(readinessTimeoutMs) ? readinessTimeoutMs : 10_000,
     pollIntervalMs: Number.isFinite(pollIntervalMs) ? pollIntervalMs : 250
   });
 }
