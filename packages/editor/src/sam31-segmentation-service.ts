@@ -162,7 +162,14 @@ async function fetchWithDeadline(
 
 function sameGatewayUrl(value: string, baseUrl: URL): URL {
   const url = new URL(value, baseUrl);
-  if (url.origin !== baseUrl.origin || url.username || url.password || url.search || url.hash) {
+  const filenameValues = url.searchParams.getAll("filename");
+  const safeFilename = filenameValues.length === 0 || filenameValues.length === 1
+    && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(filenameValues[0]!)
+    && !filenameValues[0]!.includes("..");
+  const onlyFilename = [...url.searchParams.keys()].every((key) => key === "filename");
+  if (url.origin !== baseUrl.origin || url.username || url.password || url.hash
+    || !/^\/api\/artifacts\/[A-Za-z0-9][A-Za-z0-9._-]{0,191}$/u.test(url.pathname)
+    || !safeFilename || !onlyFilename) {
     throw new Error("SAM31_ARTIFACT_URL_INVALID");
   }
   return url;

@@ -229,10 +229,16 @@ describe("SAM3 segmentation service", () => {
         if (request === 3) return new Response(JSON.stringify({
           id: "task_abcdefgh", status: "succeeded", result: {
             width: 2, height: 1,
-            detections: [{ score: 0.95, bbox_xyxy: [0, 0, 2, 1], mask_download_url: "/api/artifacts/mask.png" }]
+            detections: [{
+              score: 0.95,
+              bbox_xyxy: [0, 0, 2, 1],
+              mask_download_url: "/api/artifacts/mask.png?filename=sam3-mask-2.png"
+            }]
           }
         }), { status: 200 });
-        expect(String(input)).toBe("http://127.0.0.1:9100/api/artifacts/mask.png");
+        expect(String(input)).toBe(
+          "http://127.0.0.1:9100/api/artifacts/mask.png?filename=sam3-mask-2.png"
+        );
         return new Response(mask, { status: 200, headers: { "content-type": "image/png" } });
       }) as typeof fetch
     });
@@ -240,6 +246,37 @@ describe("SAM3 segmentation service", () => {
     const result = await service.segment(await sourceMedia(), "car", 2, 1);
     expect(result.score).toBe(0.95);
     expect(Array.from(result.data)).toEqual([0, 255]);
+  });
+
+  it.each([
+    "http://192.168.1.32:9100/api/artifacts/mask.png?filename=mask.png",
+    "/health/live?filename=mask.png",
+    "/api/artifacts/mask.png?download=1",
+    "/api/artifacts/mask.png?filename=mask.png&filename=other.png",
+    "/api/artifacts/mask.png?filename=..%2Fsecret.png"
+  ])("rejects an unsafe mask artifact URL: %s", async (maskDownloadUrl) => {
+    let request = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const readiness = readinessResponse(input);
+      if (readiness !== undefined) return readiness;
+      request += 1;
+      if (request === 1) return new Response(JSON.stringify({ file_id: "upload_abcdefgh.png" }), { status: 200 });
+      if (request === 2) return new Response(JSON.stringify({ task_id: "task_abcdefgh" }), { status: 200 });
+      return new Response(JSON.stringify({
+        id: "task_abcdefgh", status: "succeeded", result: {
+          width: 2, height: 1,
+          detections: [{ score: 0.95, bbox_xyxy: [0, 0, 2, 1], mask_download_url: maskDownloadUrl }]
+        }
+      }), { status: 200 });
+    });
+    const service = new Sam31SegmentationService({
+      baseUrl: "http://127.0.0.1:9100",
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await expect(service.segment(await sourceMedia(), "car", 2, 1))
+      .rejects.toMatchObject({ code: "unavailable" });
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
   });
 
   it("configures the private SAM3 gateway without exposing it to model parameters", () => {
