@@ -160,7 +160,10 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
 
   b("T01", "fx.text.typewriter", "Typewriter", "text", "Glyph-cell typewriter reveal.", [
     number("speed", 12, 0.1, 120, 0.1, "glyphs/s"), boolean("cursor", true),
-    boolean("wordMode", false), number("cursorWidth", 0.08, 0.01, 1, 0.01, "glyph")
+    boolean("wordMode", false), number("cursorWidth", 0.08, 0.01, 1, 0.01, "glyph"),
+    text("text", "在此输入文字", 80), choice("fontFamily", "song", ["song", "kai", "sans"]),
+    number("fontSize", 72, 12, 240, 1, "pixels"), number("positionX", 0.5, 0, 1, 0.01, "canvas"),
+    number("positionY", 0.5, 0, 1, 0.01, "canvas"), text("color", "#ffffff", 16)
   ], "light", 5),
   b("T02", "fx.text.characterCascade", "Character Cascade", "text", "Staggered glyph-cell cascade.", [
     number("stagger", 0.04, 0, 2, 0.01, "seconds"), choice("axis", "y", ["x", "y"]),
@@ -202,7 +205,10 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
   ], "medium", 7),
   b("T07", "fx.text.wordExplode", "Word Explode", "text", "Cell-based word explosion with depth fade.", [
     number("force", 0.45, 0, 4, 0.01), number("rotation", 35, -720, 720, 1, "degrees"),
-    number("depth", 0.3, 0, 2, 0.01, "canvas"), choice("selector", "word", ["character", "word"])
+    number("depth", 0.3, 0, 2, 0.01, "canvas"), choice("selector", "word", ["character", "word"]),
+    text("text", "文字爆散", 80), choice("fontFamily", "song", ["song", "kai", "sans"]),
+    number("fontSize", 72, 12, 240, 1, "pixels"), number("positionX", 0.5, 0, 1, 0.01, "canvas"),
+    number("positionY", 0.5, 0, 1, 0.01, "canvas"), text("color", "#ffffff", 16)
   ], "medium", 7),
 
   b("V01", "fx.vector.pathTrim", "Path Trim", "vector", "Arc-length path trim.", [
@@ -281,7 +287,8 @@ export const GROUP_2_BLUEPRINTS: readonly EffectBlueprint[] = Object.freeze([
 
   b("C01", "fx.transition.wipe", "Wipe", "transition", "A/B linear wipe.", [
     choice("direction", "left", ["left", "right", "up", "down"]), number("softness", 0.04, 0, 0.5, 0.005),
-    number("angle", 0, -180, 180, 1, "degrees"), number("progress", 0.5, 0, 1, 0.01)
+    number("angle", 0, -180, 180, 1, "degrees"), number("progress", 1, 0, 1, 0.01),
+    number("duration", 2, 0.2, 30, 0.1, "seconds")
   ], "light", 6),
   b("C02", "fx.transition.radialWipe", "Radial Wipe", "transition", "A/B radial sector wipe.", [
     vector("center", [0.5, 0.5]), number("startAngle", -90, -360, 360, 1, "degrees"),

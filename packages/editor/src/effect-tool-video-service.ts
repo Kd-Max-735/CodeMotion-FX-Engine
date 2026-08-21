@@ -270,6 +270,23 @@ function preparedOutputMetadata(width: number, height: number, durationSeconds: 
   };
 }
 
+function oneInputId(
+  inputIds: Readonly<Record<string, string | readonly string[]>> | undefined,
+  slotName: string
+): string | undefined {
+  const value = inputIds?.[slotName];
+  return typeof value === "string" ? value : value?.[0];
+}
+
+function sourceDuration(media: VerifiedStoredMedia, slotName: string): number {
+  if (media.asset.type !== "video") throw new TypeError(`${slotName} requires an authorized video asset.`);
+  const duration = Number(media.asset.metadata.duration);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new TypeError(`${slotName} requires finite positive video duration metadata.`);
+  }
+  return duration;
+}
+
 function safeFailureMessage(error: unknown): string {
   const value = error instanceof Error ? error.message : "Video rendering failed.";
   return value.replace(/[\r\n\t]+/g, " ").slice(0, 240);
@@ -394,7 +411,31 @@ export class EffectToolVideoService {
     safeNumber(durationSeconds, "Video duration");
     safeNumber(fps, "Video frame rate");
     if (!Number.isInteger(fps) || fps > 120) throw new RangeError("Video frame rate exceeds the render limit.");
-    const metadata = preparedOutputMetadata(width, height, durationSeconds, fps);
+    let effectiveDuration = durationSeconds;
+    if (definition.toolName === "video_freeze_frame") {
+      const sourceId = oneInputId(inputIds, "source_video");
+      if (sourceId === undefined) throw new TypeError("source_video is required for adaptive freeze duration.");
+      const source = await this.options.media.resolve(owner, sourceId);
+      effectiveDuration = sourceDuration(source, "source_video") + Number(envelope.data.freezeDuration ?? 1.5);
+    } else if (definition.toolName === "zoom_tunnel") {
+      const fromId = oneInputId(inputIds, "from_video");
+      const toId = oneInputId(inputIds, "to_video");
+      if (fromId === undefined || toId === undefined) {
+        throw new TypeError("from_video and to_video are required for adaptive transition duration.");
+      }
+      const [fromMedia, toMedia] = await Promise.all([
+        this.options.media.resolve(owner, fromId),
+        this.options.media.resolve(owner, toId)
+      ]);
+      sourceDuration(fromMedia, "from_video");
+      const incomingDuration = sourceDuration(toMedia, "to_video");
+      const transitionStart = Number(envelope.data.transitionStart ?? 1);
+      const transitionDuration = Number(envelope.data.duration ?? 0.9);
+      effectiveDuration = transitionStart + Math.max(incomingDuration, transitionDuration);
+    }
+    safeNumber(effectiveDuration, "Video duration");
+    effectiveDuration = Math.ceil(effectiveDuration * fps) / fps;
+    const metadata = preparedOutputMetadata(width, height, effectiveDuration, fps);
     const id = randomUUID();
     const directory = join(this.outputRoot, id);
     const outputPath = join(directory, "output.mp4");
@@ -676,6 +717,8 @@ export class EffectToolVideoService {
                 const freezeDuration = Number(params.freezeDuration ?? 1.5);
                 sampleTime = request.time < freezeAt ? request.time
                   : request.time < freezeAt + freezeDuration ? freezeAt : request.time - freezeDuration;
+              } else if (definition.toolName === "zoom_tunnel" && slot.name === "to_video") {
+                sampleTime = Math.max(0, request.time - Number(params.transitionStart ?? 1));
               } else if (definition.toolName === "speed_ramp") {
                 sampleTime = speedRampSourceTime(request.time, params);
               }

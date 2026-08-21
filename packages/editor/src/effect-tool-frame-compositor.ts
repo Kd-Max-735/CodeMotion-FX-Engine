@@ -1932,23 +1932,24 @@ function polishedStructuredFrame(
     if (grid === undefined) return false;
     const maximum = grid.values.reduce((current, entry) => Math.max(current, entry), 0);
     if (maximum <= Number.EPSILON) return true;
+    const color = hexColor(value.color, [255, 233, 176, 255]);
+    const beamWidth = typeof value.beamWidth === "number" ? Math.max(0.05, value.beamWidth) : 0.55;
     for (let y = 0; y < request.height; y += 1) {
       const gridY = Math.min(grid.height - 1, Math.floor(y / request.height * grid.height));
       for (let x = 0; x < request.width; x += 1) {
         const gridX = Math.min(grid.width - 1, Math.floor(x / request.width * grid.width));
         const radiance = Math.max(0, grid.values[gridY * grid.width + gridX]!);
-        const tone = 1 - Math.exp(-radiance * 0.42);
+        const tone = 1 - Math.exp(-radiance * (0.26 + Math.min(1.5, beamWidth) * 0.14));
         if (tone <= 0.001) continue;
         const dust = 0.9 + 0.1 * Math.sin(x * 0.071 + y * 0.043 + request.time * 3.1);
-        const warmth = y / Math.max(1, request.height - 1);
         blendPixel(output, request.width, request.height, x, y,
-          [255, 238 - warmth * 24, 178 - warmth * 36, 255], Math.min(0.86, tone * dust * 0.78));
+          color, Math.min(0.58, tone * dust * 0.56));
       }
     }
     const lightX = typeof value.lightX === "number" ? value.lightX * request.width : request.width * 0.5;
     const lightY = typeof value.lightY === "number" ? value.lightY * request.height : request.height * 0.2;
     drawDisc(output, request.width, request.height, lightX, lightY,
-      Math.min(request.width, request.height) * 0.075, [255, 248, 218, 255], 0.32);
+      Math.min(request.width, request.height) * (0.025 + Math.min(1.5, beamWidth) * 0.045), color, 0.2);
     return true;
   }
 

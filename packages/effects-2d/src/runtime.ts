@@ -1329,13 +1329,14 @@ function transitionCoverage(
   if (sourceId === "C01") {
     const direction = stringParam(params, "direction", "left");
     const angle = numberParam(params, "angle", 0) * Math.PI / 180;
-    const rotated = (u - 0.5) * Math.cos(angle) + (v - 0.5) * Math.sin(angle) + 0.5;
-    const coordinate = direction === "right" ? 1 - rotated
-      : direction === "up" ? v * Math.cos(angle) - (u - 0.5) * Math.sin(angle)
-        : direction === "down" ? 1 - (v * Math.cos(angle) - (u - 0.5) * Math.sin(angle))
-          : rotated;
+    const horizontal = (u - 0.5) * Math.cos(angle) + (v - 0.5) * Math.sin(angle) + 0.5;
+    const vertical = (v - 0.5) * Math.cos(angle) - (u - 0.5) * Math.sin(angle) + 0.5;
+    const coordinate = direction === "right" ? 1 - horizontal
+      : direction === "up" ? vertical
+        : direction === "down" ? 1 - vertical
+          : horizontal;
     const softness = numberParam(params, "softness", 0.04);
-    return smoothstep(progress - softness, progress + softness, 1 - coordinate);
+    return 1 - smoothstep(progress - softness, progress + softness, coordinate);
   }
   if (sourceId === "C02") {
     const center = vectorParam(params, "center", [0.5, 0.5]);

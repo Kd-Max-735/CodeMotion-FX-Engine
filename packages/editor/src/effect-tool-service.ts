@@ -68,7 +68,7 @@ const TOOL_NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
 const HAN_TEXT = /\p{Script=Han}/u;
 const SENSITIVE_PATH = /(?:https?:\/\/|file:\/\/|[a-z]:\\|\/(?:home|tmp|var|etc|users)\/)/iu;
 const IMAGE_DERIVED_TEXT_TOOLS = new Set([
-  "kinetic_typography", "text_extrude_3d", "typewriter", "word_explode"
+  "kinetic_typography", "text_extrude_3d"
 ]);
 const IMAGE_DERIVED_VECTOR_TOOLS = new Set([
   "path_trim", "path_morph", "radial_burst", "shape_repeater",
@@ -98,6 +98,8 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   dash_flow: "source_image",
   ken_burns: "source_image",
   kinetic_typography: "source_image",
+  typewriter: "source_image",
+  word_explode: "source_image",
   lens_flare: "source_frame",
   marker_stroke: "source_image",
   chalk_stroke: "source_image",
@@ -114,7 +116,9 @@ const VISION_POSITIONING_SLOTS: Readonly<Record<string, string>> = Object.freeze
   sim_rope: "source_image",
   sim_spring: "source_image",
   texture_overlay: "base_image",
-  track_matte: "source_image"
+  track_matte: "source_image",
+  wave_path: "source_image",
+  volumetric_ray: "source_image"
 });
 const MAX_VISION_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_MATERIAL_OUTPUT_EDGE = 640;
@@ -401,6 +405,7 @@ function isServerDerivedInputSlot(
   return isSyntheticDerivedInputSlot(definition, slot)
     || SAM_DERIVED_MASK_SOURCES[definition.toolName]?.[slot.name] !== undefined
     || definition.toolName === "depth_of_field" && slot.name === "depth_field"
+    || definition.toolName === "volumetric_ray" && slot.name === "occlusion_mask"
     || definition.toolName === "paint_on" && slot.name === "stroke_plan"
     || ["dolly", "dolly_zoom", "orbit", "pan_tilt", "parallax_layers"].includes(definition.toolName)
       && slot.name === "camera_target"
@@ -468,6 +473,7 @@ function derivedInputResourceId(
   if (!isServerDerivedInputSlot(definition, slot)) return undefined;
   const samSourceSlot = SAM_DERIVED_MASK_SOURCES[definition.toolName]?.[slot.name];
   const sourceSlot = samSourceSlot ?? (definition.toolName === "depth_of_field" ? "source_frame"
+      : definition.toolName === "volumetric_ray" ? "source_image"
       : definition.toolName === "paint_on" ? "source_image"
       : definition.toolName === "onset_trigger" || definition.toolName === "vocal_reactive_text"
         ? "audio_analysis"

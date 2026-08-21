@@ -714,6 +714,65 @@ describe("server single effect-tool service", () => {
     await service.close();
   });
 
+  it("derives freeze and two-video transition output durations from authorized media", async () => {
+    const outputRoot = await mkdtemp(join(tmpdir(), "cmfx-adaptive-video-"));
+    const durations: Readonly<Record<string, number>> = {
+      asset_freezeabcdefgh: 5,
+      asset_fromabcdefghij: 4,
+      asset_toabcdefghijkl: 3
+    };
+    const resolveMedia = vi.fn(async (_owner, assetId: string): Promise<VerifiedStoredMedia> => ({
+      asset: {
+        id: assetId,
+        type: "video",
+        uri: `media://${assetId}.mp4`,
+        hash: `sha256:${assetId}`,
+        metadata: { mime: "video/mp4", width: 2, height: 2, duration: durations[assetId], codec: "h264" }
+      },
+      descriptor: { id: assetId, type: "media/video", cacheKey: assetId, metadata: {} },
+      storedPath: join(outputRoot, `${assetId}.mp4`),
+      arkEligibility: { filesApi: false, videoTos: false, base64OrUrl: false, reason: "test" },
+      trustedBytes: 256
+    }));
+    const exportFrames = vi.fn(async (options: ExportOptions) => {
+      await writeFile(options.outputPath, "adaptive-video");
+      return { outputPath: options.outputPath, frameCount: 0, inspections: [], encoder: "libx264" };
+    });
+    const service = new EffectToolVideoService({
+      media: { resolve: resolveMedia },
+      outputRoot,
+      exportFrames: exportFrames as never,
+      decodeFrame: vi.fn() as never,
+      fps: 2,
+      gpuSampler: vi.fn(async () => ({ name: "Test GPU", memoryUsedMiB: 1, memoryTotalMiB: 2, utilizationPercent: 1 }))
+    });
+    const input = (slot: string, kind: "video") => Object.freeze({
+      slot, kind, tenantId: principal.tenantId, userId: principal.userId, locked: true as const,
+      binding: { version: "rgba8-frame-v1", width: 2, height: 2, data: new Uint8Array(16) }
+    });
+    const freeze = EFFECT_TOOL_REGISTRY.getByToolName("video_freeze_frame")!;
+    const freezeTask = await service.createPrepared(
+      principal, freeze,
+      { type: freeze.toolName, data: { ...freeze.defaults, freezeAt: 2, freezeDuration: 1 } },
+      { source_video: input("source_video", "video") },
+      ["asset_freezeabcdefgh"], 7, 1, 2, 2, undefined, 2,
+      { source_video: "asset_freezeabcdefgh" }
+    );
+    expect(freezeTask.video.durationSeconds).toBe(6);
+
+    const tunnel = EFFECT_TOOL_REGISTRY.getByToolName("zoom_tunnel")!;
+    const tunnelTask = await service.createPrepared(
+      principal, tunnel,
+      { type: tunnel.toolName, data: { ...tunnel.defaults, transitionStart: 2, duration: 1 } },
+      { from_video: input("from_video", "video"), to_video: input("to_video", "video") },
+      ["asset_fromabcdefghij", "asset_toabcdefghijkl"], 7, 1, 2, 2, undefined, 2,
+      { from_video: "asset_fromabcdefghij", to_video: "asset_toabcdefghijkl" }
+    );
+    expect(tunnelTask.video.durationSeconds).toBe(5);
+    await waitFor(() => service.get(principal, tunnelTask.id).status === "completed");
+    await service.close();
+  });
+
   it("requires every distinct selected-tool image only when Ark chooses the Tool Call", async () => {
     const provider = new NativeRecordingProvider();
     const inputs = new TestInputResolver();
@@ -919,7 +978,21 @@ describe("server single effect-tool service", () => {
     await expect(resolver.visionImage(principal, trackMatte, {
       source_image: media.asset.id
     })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
-    expect(resolveMedia).toHaveBeenCalledTimes(17);
+    const additionalPositioning = [
+      ["particle_logo_assemble", "logo_image"],
+      ["path_trim", "source_image"],
+      ["typewriter", "source_image"],
+      ["word_explode", "source_image"],
+      ["wave_path", "source_image"],
+      ["volumetric_ray", "source_image"]
+    ] as const;
+    for (const [toolName, sourceSlot] of additionalPositioning) {
+      const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
+      await expect(resolver.visionImage(principal, definition, {
+        [sourceSlot]: media.asset.id
+      })).resolves.toEqual({ mimeType: "image/png", base64Data: bytes.toString("base64") });
+    }
+    expect(resolveMedia).toHaveBeenCalledTimes(23);
 
     const videoMedia: VerifiedStoredMedia = {
       ...media,
@@ -951,13 +1024,15 @@ describe("server single effect-tool service", () => {
     await expect(resolver.visionImage(principal, filmGrain, {
       source_frame: media.asset.id
     })).resolves.toBeUndefined();
-    expect(resolveMedia).toHaveBeenCalledTimes(17);
+    expect(resolveMedia).toHaveBeenCalledTimes(23);
   });
 
   it.each([
     ["marker_stroke", "source_image"],
     ["chalk_stroke", "source_image"],
     ["neon_glow", "source_image"],
+    ["particle_logo_assemble", "logo_image"],
+    ["path_trim", "source_image"],
     ["texture_overlay", "base_image"],
     ["track_matte", "source_image"]
   ] as const)(
@@ -1251,8 +1326,8 @@ describe("server single effect-tool service", () => {
       ["scramble_decode", "source_image", "image", true],
       ["text_morph", "source_image", "image", true],
       ["text_path_reveal", "source_image", "image", true],
-      ["typewriter", "text_raster", "text", true],
-      ["word_explode", "text_raster", "text", true],
+      ["typewriter", "source_image", "image", true],
+      ["word_explode", "source_image", "image", true],
       ["text_extrude_3d", "text_raster", "text", true],
       ["path_trim", "vector_source", "shape", true],
       ["path_morph", "vector_source", "shape", true],
@@ -1344,8 +1419,7 @@ describe("server single effect-tool service", () => {
       ["electric_arc", "terminals", 4, false],
       ["lightning_trace", "guide_path", 11, false],
       ["shape_boolean_animate", "shape_a", 32, true],
-      ["shape_boolean_animate", "shape_b", 32, true],
-      ["wave_path", "source_path", 11, false]
+      ["shape_boolean_animate", "shape_b", 32, true]
     ] as const;
     for (const [toolName, slotName, pointCount, closed] of geometryCases) {
       const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
@@ -1614,6 +1688,18 @@ describe("server single effect-tool service", () => {
       expect(catalog.tools.find((item) => item.toolName === "track_matte")).toMatchObject({
         inputRequirements: [
           { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },
+          { name: "subject_mask", kind: "mask", required: true, acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "path_trim")).toMatchObject({
+        inputRequirements: [
+          { name: "source_image", kind: "image", required: true, acceptsUploadedImage: true },
+          { name: "subject_mask", kind: "mask", required: true, acceptsUploadedImage: false }
+        ]
+      });
+      expect(catalog.tools.find((item) => item.toolName === "particle_logo_assemble")).toMatchObject({
+        inputRequirements: [
+          { name: "logo_image", kind: "image", required: true, acceptsUploadedImage: true },
           { name: "subject_mask", kind: "mask", required: true, acceptsUploadedImage: false }
         ]
       });

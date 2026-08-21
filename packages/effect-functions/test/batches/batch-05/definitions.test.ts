@@ -379,6 +379,30 @@ describe("batch-05 rendering behavior", () => {
     }
   });
 
+  it("starts zoom tunnel at the requested first-video time", async () => {
+    const before = await executeSelectedEffectTool(
+      ZOOM_TUNNEL_DEFINITION,
+      "zoom_tunnel",
+      { type: "zoom_tunnel", data: { transitionStart: 2, duration: 1, easing: "linear" } },
+      context(ZOOM_TUNNEL_DEFINITION, 1.9)
+    );
+    const middle = await executeSelectedEffectTool(
+      ZOOM_TUNNEL_DEFINITION,
+      "zoom_tunnel",
+      { type: "zoom_tunnel", data: { transitionStart: 2, duration: 1, easing: "linear" } },
+      context(ZOOM_TUNNEL_DEFINITION, 2.5)
+    );
+    const after = await executeSelectedEffectTool(
+      ZOOM_TUNNEL_DEFINITION,
+      "zoom_tunnel",
+      { type: "zoom_tunnel", data: { transitionStart: 2, duration: 1, easing: "linear" } },
+      context(ZOOM_TUNNEL_DEFINITION, 3)
+    );
+    expect((before.output as JsonObject).progress).toBe(0);
+    expect((middle.output as JsonObject).progress).toBe(0.5);
+    expect((after.output as JsonObject).progress).toBe(1);
+  });
+
   it("produces real camera matrices and spatial movement", async () => {
     const panTilt = await defaultOutput(PAN_TILT_DEFINITION, 1);
     const orbit = await defaultOutput(ORBIT_DEFINITION, 2.5);

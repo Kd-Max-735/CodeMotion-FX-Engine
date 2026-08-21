@@ -13,10 +13,14 @@ export interface VolumetricRayParams extends JsonObject {
   weight: number;
   lightX: number;
   lightY: number;
+  color: string;
+  flowSpeed: number;
+  beamWidth: number;
 }
 
 const defaults: VolumetricRayParams = {
-  density: 0.65, sampleCount: 48, decay: 0.96, exposure: 0.8, weight: 0.18, lightX: 0.5, lightY: 0.2
+  density: 0.65, sampleCount: 48, decay: 0.96, exposure: 0.8, weight: 0.18,
+  lightX: 0.5, lightY: 0.2, color: "#FFE9B0", flowSpeed: 0.35, beamWidth: 0.55
 };
 
 function maskSample(values: readonly number[], width: number, height: number, x: number, y: number): number {
@@ -37,7 +41,7 @@ export const VOLUMETRIC_RAY_DEFINITION: EffectToolDefinition<VolumetricRayParams
   effectId: "fx.light.volumetricRay",
   toolName: "volumetric_ray",
   displayName: "体积光束",
-  version: "1.0.0",
+  version: "2.0.0",
   category: "light",
   parameterSchema: parameterSchema({
     density: numberField(0.65, 0, 1.5),
@@ -46,7 +50,10 @@ export const VOLUMETRIC_RAY_DEFINITION: EffectToolDefinition<VolumetricRayParams
     exposure: numberField(0.8, 0, 5),
     weight: numberField(0.18, 0, 1),
     lightX: numberField(0.5, -0.5, 1.5),
-    lightY: numberField(0.2, -0.5, 1.5)
+    lightY: numberField(0.2, -0.5, 1.5),
+    color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$", default: "#FFE9B0" },
+    flowSpeed: numberField(0.35, -5, 5),
+    beamWidth: numberField(0.55, 0.05, 1.5)
   }),
   defaults,
   presets: [
@@ -54,7 +61,10 @@ export const VOLUMETRIC_RAY_DEFINITION: EffectToolDefinition<VolumetricRayParams
     { presetId: "volumetric_ray.stage", displayName: "舞台光柱", params: { ...defaults, density: 0.78, sampleCount: 64, exposure: 1.15, weight: 0.22, lightY: 0.05 } },
     { presetId: "volumetric_ray.divine", displayName: "强烈天光", params: { ...defaults, density: 1.05, sampleCount: 96, decay: 0.98, exposure: 1.8, weight: 0.3, lightY: -0.1 } }
   ],
-  inputSlots: [{ name: "occlusion_mask", kind: "mask", required: true, cardinality: "one", description: "Server-authorized linear occlusion mask; one means blocked." }],
+  inputSlots: [
+    { name: "source_image", kind: "image", required: true, cardinality: "one", description: "Owner-authorized image retained beneath the light rays." },
+    { name: "occlusion_mask", kind: "mask", required: true, cardinality: "one", description: "Server-derived luminance occlusion mask; one means blocked." }
+  ],
   primaryBackend: SERVER_CPU_BACKEND,
   fallbackStrategy: SERVER_CPU_FALLBACK,
   performanceGrade: "heavy",
@@ -75,7 +85,12 @@ export const VOLUMETRIC_RAY_DEFINITION: EffectToolDefinition<VolumetricRayParams
           u -= stepX;
           v -= stepY;
           const transmission = 1 - maskSample(mask.values, mask.width, mask.height, u, v);
-          accumulated += transmission * illumination * params.weight;
+          const selectivity = Math.max(0.35, 1.35 / params.beamWidth);
+          const flowingDust = 0.82 + 0.18 * Math.sin(
+            (u * 11 + v * 7 - context.time * params.flowSpeed * 4) * Math.PI
+          );
+          accumulated += Math.pow(Math.max(0, transmission), selectivity)
+            * flowingDust * illumination * params.weight;
           illumination *= params.decay;
         }
         radiance.push(round(accumulated * params.exposure));
@@ -93,7 +108,10 @@ export const VOLUMETRIC_RAY_DEFINITION: EffectToolDefinition<VolumetricRayParams
       exposure: round(params.exposure),
       weight: round(params.weight),
       lightX: round(params.lightX),
-      lightY: round(params.lightY)
+      lightY: round(params.lightY),
+      color: params.color,
+      flowSpeed: round(params.flowSpeed),
+      beamWidth: round(params.beamWidth)
     });
   }
 };

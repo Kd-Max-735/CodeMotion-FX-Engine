@@ -5,11 +5,12 @@
 只输出 JSON；不要输出说明、Markdown 或资源引用。`type` 必须精确为 `zoom_tunnel`。
 
 ```json
-{"type":"zoom_tunnel","data":{"duration":0.9,"startScale":0.25,"endScale":3,"tunnelDepth":6,"motionBlur":0.55,"twistDegrees":0,"easing":"ease_in_out"}}
+{"type":"zoom_tunnel","data":{"transitionStart":1,"duration":0.9,"startScale":0.25,"endScale":3,"tunnelDepth":6,"motionBlur":0.55,"twistDegrees":0,"easing":"ease_in_out"}}
 ```
 
 | 字段 | 必填 | 取值 | 选择策略 |
 | --- | --- | --- | --- |
+| `transitionStart` | 否 | `0..60` 秒，默认 `1` | 从第一段视频的第几秒开始转场 |
 | `duration` | 否 | `0.2..5` 秒，默认 `0.9` | 越小穿梭越快 |
 | `startScale` | 否 | `0.05..1`，默认 `0.25` | 后景起始缩放，越小显得越远 |
 | `endScale` | 否 | `1.1..8`，默认 `3` | 前景结束缩放，越大越冲出 |
@@ -20,6 +21,7 @@
 
 ## 参数选择方法与优先级
 
+- 先提取“第几秒开始”到 `transitionStart`，再把“转场持续多久”写入 `duration`。
 - “向前冲、穿过”主要提高 `endScale` 和 `tunnelDepth`；快慢先用 `duration`。
 - 明确角度写入 `twistDegrees`；左右旋转按正负选择，未说旋转时保持 `0`。
 - 距离、深度用 `tunnelDepth`；“从很远处出现”同时降低 `startScale`。
@@ -39,6 +41,6 @@
 
 ## 推荐值、默认值与边界
 
-推荐 `duration=0.5..1.4`、`startScale=0.15..0.5`、`endScale=2..5`、`tunnelDepth=4..12`。中性值为 `motionBlur=0.5`、`twistDegrees=0`；完整默认值见示例。极端缩放和深度用于短时强冲击。
+推荐 `duration=0.5..1.4`、`startScale=0.15..0.5`、`endScale=2..5`、`tunnelDepth=4..12`。中性值为 `motionBlur=0.5`、`twistDegrees=0`；完整默认值见示例。服务器按两段视频元数据自适应导出时长：转场前保留第一段，第二段从转场开始处播放，并保证第二段完整播放，不使用共享默认 5 秒截断。
 
 模型不选择两路视频，也不输出遮罩、深度图或 camera target。当前产品若只上传静态图片，必须先由服务器静态帧源适配生成两路独立的视频帧源；不得把 `image` 直接绑定为 `video`，也不得复用同一绑定冒充前后两路。本工具不适用于真实相机 dolly、翻页、径向传送门、对象语义匹配或持续镜头运动。

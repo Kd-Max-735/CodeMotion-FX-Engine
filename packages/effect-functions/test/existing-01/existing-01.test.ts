@@ -63,16 +63,14 @@ const EXPECTED_INPUT_SLOTS: Readonly<Record<Existing01ToolName, readonly string[
   text_extrude_3d: ["text_raster"],
   text_morph: ["source_image"],
   text_path_reveal: ["source_image", "motion_path"],
-  typewriter: ["text_raster"],
-  word_explode: ["text_raster"]
+  typewriter: ["source_image"],
+  word_explode: ["source_image"]
 });
 
 const STRUCTURED_RESOURCE_TOOLS = Object.freeze([
   "radial_burst",
   "shape_repeater",
-  "text_extrude_3d",
-  "typewriter",
-  "word_explode"
+  "text_extrude_3d"
 ] as const satisfies readonly Existing01ToolName[]);
 
 const specDirectory = join(

@@ -229,7 +229,7 @@ const EXPECTED = Object.freeze({
     properties: {
       direction: choice("left", ["left", "right", "up", "down"]),
       softness: number(0.04, 0, 0.5, 0.005), angle: number(0, -180, 180, 1),
-      progress: number(0.5, 0, 1, 0.01)
+      progress: number(1, 0, 1, 0.01), duration: number(2, 0.2, 30, 0.1)
     },
     slots: [["source_frame", "image"], ["target_frame", "image"]]
   }
@@ -440,6 +440,55 @@ describe("existing-02 field specifications and adapter contracts", () => {
     expect(Array.from(midpoint.data)).not.toEqual(Array.from(target.data));
     expect(Array.from((await renderAt(2)).data)).toEqual(Array.from(target.data));
     expect(Array.from((await renderAt(4)).data)).toEqual(Array.from(target.data));
+  });
+
+  it("reveals wipe target from each requested edge and completes at duration", async () => {
+    const definition = definitions().get("wipe")!;
+    const width = 8;
+    const height = 8;
+    const surface = (red: number) => ({
+      width,
+      height,
+      data: new Uint8ClampedArray(Array.from({ length: width * height }, () => [red, 0, 0, 255]).flat()),
+      colorSpace: "srgb" as const,
+      alphaMode: "straight" as const
+    });
+    const source = surface(10);
+    const target = surface(240);
+    const fixtureTime = makeEffectTimeSample(definition.effectId, "wipe-direction-test", 0.5);
+    const sourceRasterInput = makeRealInputFixture(
+      definition.effectId, "media", width, height, false, "srgb", fixtureTime
+    ).input;
+    const targetRasterInput = makeRealInputFixture(
+      definition.effectId, "media", width, height, true, "srgb", fixtureTime
+    ).input;
+    const bind = (slot: string, binding: unknown) => ({
+      slot, kind: "image" as const, tenantId: "tenant-existing-02", userId: "user-existing-02",
+      locked: true as const, binding
+    });
+    const inputs = {
+      source_frame: bind("source_frame", { surface: source, rasterInput: sourceRasterInput }),
+      target_frame: bind("target_frame", { surface: target, rasterInput: targetRasterInput })
+    };
+    const render = async (direction: "left" | "right" | "up" | "down", time: number) =>
+      (await definition.render({ ...contextFor(definition, inputs), time, width, height }, {
+        ...definition.defaults, direction, softness: 0, duration: 2
+      })).output as typeof source;
+    const redAt = (frame: typeof source, x: number, y: number) => frame.data[(y * width + x) * 4]!;
+    const left = await render("left", 0.5);
+    const right = await render("right", 0.5);
+    const up = await render("up", 0.5);
+    const down = await render("down", 0.5);
+    expect(redAt(left, 0, 4)).toBe(240);
+    expect(redAt(left, 7, 4)).toBe(10);
+    expect(redAt(right, 7, 4)).toBe(240);
+    expect(redAt(right, 0, 4)).toBe(10);
+    expect(redAt(up, 4, 0)).toBe(240);
+    expect(redAt(up, 4, 7)).toBe(10);
+    expect(redAt(down, 4, 7)).toBe(240);
+    expect(redAt(down, 4, 0)).toBe(10);
+    expect(Array.from((await render("left", 0)).data)).toEqual(Array.from(source.data));
+    expect(Array.from((await render("left", 2)).data)).toEqual(Array.from(target.data));
   });
 
   it.each(["pixel_dissolve", "radial_wipe"] as const)(

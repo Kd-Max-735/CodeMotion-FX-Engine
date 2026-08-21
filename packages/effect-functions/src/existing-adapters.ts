@@ -112,6 +112,8 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   M07: "1.2.0",
   T02: "1.2.0",
   T03: "1.2.0",
+  T01: "2.0.0",
+  T07: "2.0.0",
   D02: "1.3.0",
   D01: "1.1.0",
   D03: "1.1.0",
@@ -123,7 +125,8 @@ const ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
   L03: "1.1.0",
   L04: "1.3.0",
   H01: "2.0.0",
-  C03: "2.0.0"
+  C03: "2.0.0",
+  C01: "2.0.0"
 });
 
 function slot(
@@ -201,6 +204,9 @@ function inputSlots(effect: P0CatalogEffectDefinition): readonly EffectInputSlot
   }
   if (effect.sourceId === "T08") {
     return Object.freeze([slot("text_raster", "data", "Server-rasterized glyph geometry and pixels.")]);
+  }
+  if (effect.sourceId === "T01" || effect.sourceId === "T07") {
+    return Object.freeze([slot("source_image", "image", "Owner-authorized background image receiving real server-rasterized text.")]);
   }
   if (effect.sourceId === "T04") {
     return Object.freeze([
@@ -346,15 +352,16 @@ function parameterSchema(effect: P0CatalogEffectDefinition): JsonSchema {
       (properties[textName] as JsonObject).maxLength = 80;
     }
   }
-  if (effect.sourceId === "C03") {
+  if (effect.sourceId === "C01" || effect.sourceId === "C03") {
     properties.duration = { type: "number", minimum: 0.2, maximum: 30, multipleOf: 0.1, default: 2 };
   }
   if (effect.sourceId === "C02" || effect.sourceId === "C04") {
     properties.duration = { type: "number", minimum: 0.2, maximum: 30, multipleOf: 0.1, default: 2 };
     (properties.progress as JsonObject).default = 1;
   }
-  if (effect.sourceId === "T02" || effect.sourceId === "T03" || effect.sourceId === "T06" || effect.sourceId === "D01") {
+  if (["T01", "T02", "T03", "T06", "T07", "D01"].includes(effect.sourceId)) {
     (properties.text as JsonObject).minLength = 1;
+    (properties.text as JsonObject).maxLength = 80;
     (properties.color as JsonObject).pattern = "^#[0-9A-Fa-f]{6}$";
   }
   if (Array.isArray(schema.required)) {
@@ -385,7 +392,7 @@ function rasterBinding(context: ServerEffectRenderContext, name: string): Existi
 function primarySlotName(effect: P0CatalogEffectDefinition): string {
   if (effect.sourceId === "V01") return "source_image";
   if (effect.sourceId === "V02") return "source_frame";
-  if (effect.sourceId === "T02" || effect.sourceId === "T06") return "source_image";
+  if (["T01", "T02", "T06", "T07"].includes(effect.sourceId)) return "source_image";
   if (effect.sourceId === "D01") return "source_image";
   if (effect.sourceId === "T03") return "source_image";
   if (effect.sourceId === "D03") return "source_image";
@@ -430,7 +437,7 @@ function characterCascadeBinding(
 function serverTextBinding(
   context: ServerEffectRenderContext,
   params: Readonly<JsonObject>,
-  sourceId: "character-cascade" | "handwriting" | "kinetic-typography" | "scramble-decode" | "text-morph-source" | "text-morph-target" | "text-path-reveal"
+  sourceId: "character-cascade" | "handwriting" | "kinetic-typography" | "scramble-decode" | "text-morph-source" | "text-morph-target" | "text-path-reveal" | "typewriter" | "word-explode"
 ): ExistingRasterBinding {
   const background = rasterBinding(context, "source_image");
   const source = createServerTextRasterSourceV1({
@@ -990,7 +997,7 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
           ...withoutResourceFields(effect.effectId, effect.defaultPreset),
           target: "main subject"
         })
-    : effect.sourceId === "C03"
+    : effect.sourceId === "C01" || effect.sourceId === "C03"
       ? Object.freeze({ ...withoutResourceFields(effect.effectId, effect.defaultPreset), duration: 2 })
       : effect.sourceId === "C02" || effect.sourceId === "C04"
         ? Object.freeze({ ...withoutResourceFields(effect.effectId, effect.defaultPreset), progress: 1, duration: 2 })
@@ -1033,24 +1040,24 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         : effect.sourceId === "T08"
         ? normalizeTextExtrude3DParams(params)
         : normalizeEffectParams(effect.effectId, params);
-      const withDuration = effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04"
+      const withDuration = ["C01", "C02", "C03", "C04"].includes(effect.sourceId)
         ? { ...(normalized as JsonObject), duration: params.duration as number }
         : normalized as JsonObject;
       return withoutResourceFields(effect.effectId,
-        effect.sourceId === "C02" || effect.sourceId === "C04"
+        effect.sourceId === "C01" || effect.sourceId === "C02" || effect.sourceId === "C04"
           ? { ...withDuration, progress: 1 }
           : withDuration);
     },
     validateParams: () => ({ valid: true as const }),
     render(context: ServerEffectRenderContext, params: Readonly<JsonObject>) {
-      const duration = effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04"
+      const duration = ["C01", "C02", "C03", "C04"].includes(effect.sourceId)
         ? Math.max(0.2, params.duration as number)
         : 1;
-      const boundedTime = effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04"
+      const boundedTime = ["C01", "C02", "C03", "C04"].includes(effect.sourceId)
         ? Math.min(duration, Math.max(0, Number.isFinite(context.time) ? context.time : 0))
         : context.time;
       const time = effectTime(effect.effectId, context, duration);
-      const renderTime = effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04"
+      const renderTime = ["C01", "C02", "C03", "C04"].includes(effect.sourceId)
         ? Object.freeze({
             ...time,
             projectTime: boundedTime,
@@ -1084,7 +1091,11 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
           quality: context.quality
         });
       } else {
-        const primary = effect.sourceId === "T02"
+        const primary = effect.sourceId === "T01"
+          ? serverTextBinding(context, params, "typewriter")
+          : effect.sourceId === "T07"
+            ? serverTextBinding(context, params, "word-explode")
+          : effect.sourceId === "T02"
           ? serverTextBinding(context, params, "character-cascade")
           : effect.sourceId === "T06"
             ? serverTextBinding(context, params, "scramble-decode")
@@ -1099,10 +1110,10 @@ function createExistingAdapter(effect: P0CatalogEffectDefinition): EffectToolDef
         const secondary = secondaryName === undefined ? undefined : rasterBinding(context, secondaryName);
         const brush = effect.sourceId === "D02"
           ? singleBinding<ExistingBrushBinding>(context, "brush_texture") : undefined;
-        if ((effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04")
+        if (["C01", "C02", "C03", "C04"].includes(effect.sourceId)
           && secondary !== undefined && boundedTime >= duration) {
           output = { ...secondary.surface, data: new Uint8ClampedArray(secondary.surface.data) };
-        } else if ((effect.sourceId === "C02" || effect.sourceId === "C03" || effect.sourceId === "C04")
+        } else if (["C01", "C02", "C03", "C04"].includes(effect.sourceId)
           && secondary !== undefined && boundedTime <= 0) {
           output = { ...primary.surface, data: new Uint8ClampedArray(primary.surface.data) };
         } else {

@@ -20,7 +20,7 @@ export const VIDEO_FREEZE_FRAME_DEFINITION: EffectToolDefinition<VideoFreezeFram
   effectId: "fx.media.videoFreezeFrame",
   toolName: "video_freeze_frame",
   displayName: "视频定格",
-  version: "1.0.0",
+  version: "1.1.0",
   category: "media",
   parameterSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",

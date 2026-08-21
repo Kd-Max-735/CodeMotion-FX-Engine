@@ -20,7 +20,7 @@
 
 | `data` 字段 | 必填 | 取值 | 选择策略 |
 | --- | --- | --- | --- |
-| `target` | 是 | 1..80 字符目标描述，默认 `main subject` | SAM3.1 在图片中定位的物体 |
+| `target` | 是 | 1..80 字符英文目标描述，默认 `main subject` | 将用户点名对象翻译成简短、具体的英文视觉名词短语供 SAM3.1 分割 |
 | `mode` | 是 | `reveal` / `erase`，默认 `reveal` | 逐渐显现或逐渐擦除 |
 | `duration` | 是 | 数字 `0.2..30` 秒，步长 `0.1`，默认 `3` | 描绘完成时间 |
 | `direction` | 是 | `left_to_right/right_to_left/top_to_bottom/bottom_to_top/clockwise/counter_clockwise`，默认 `left_to_right` | 轮廓推进方向 |
@@ -29,7 +29,7 @@
 
 ## 参数选择优先级
 
-先选择 `mode`，再设置自然语言中的完成时间和推进方向，最后调整笔触宽度与颜色。`target` 必须对应图片中可见物体，不输出坐标或路径字符串。
+先把用户点名对象翻译成简短英文 `target`，再选择 `mode`，设置自然语言中的完成时间和推进方向，最后调整笔触宽度与颜色。`target` 必须对应图片中可见物体，不输出坐标或路径字符串。
 
 | 用户提示词 | 应输出的 `data` 参数 |
 | --- | --- |
