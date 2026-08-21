@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { BATCH_02_DEFINITIONS } from "../../../src/batches/batch-02/index.js";
 import { validateAndNormalizeEffectEnvelope } from "../../../src/validation.js";
 
-const specDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../../../field-specs/batch-02");
+const specDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../../../field-specs/tools");
 const expectedFiles = BATCH_02_DEFINITIONS.map((definition) => `${definition.toolName}.md`).sort();
 const assignedToolNames = new Set([
   "aura_field", "chromatic_aberration", "color_grade", "datamosh", "depth_of_field",
@@ -14,7 +14,7 @@ const assignedToolNames = new Set([
 
 describe("batch-02 Chinese field specifications", () => {
   it("provides exactly one specification for every tool", () => {
-    const files = readdirSync(specDirectory).filter((name) => name.endsWith(".md")).sort();
+    const files = readdirSync(specDirectory).filter((name) => expectedFiles.includes(name)).sort();
     expect(files).toEqual(expectedFiles);
   });
 

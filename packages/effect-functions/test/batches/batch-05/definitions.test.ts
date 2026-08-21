@@ -491,7 +491,7 @@ describe("batch-05 field specifications", () => {
   ];
 
   it("provides ten Chinese model-field documents with all required sections", async () => {
-    const directory = fileURLToPath(new URL("../../../field-specs/batch-05/", import.meta.url));
+    const directory = fileURLToPath(new URL("../../../field-specs/tools/", import.meta.url));
     for (const toolName of tools) {
       const markdown = await readFile(`${directory}${toolName}.md`, "utf8");
       expect(markdown).toContain(`# `);

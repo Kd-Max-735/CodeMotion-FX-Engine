@@ -131,19 +131,6 @@ const invalidData: Readonly<Record<string, Record<string, unknown>>> = {
   electric_arc: { intensity: 11 }
 };
 
-const fieldSpecNames: Readonly<Record<string, string>> = {
-  wave_path: "wave-path-tool-field-spec.zh-CN.md",
-  dash_flow: "dash-flow-tool-field-spec.zh-CN.md",
-  blob_morph: "blob-morph-tool-field-spec.zh-CN.md",
-  shape_boolean_animate: "shape-boolean-animate-tool-field-spec.zh-CN.md",
-  marker_stroke: "marker-stroke-tool-field-spec.zh-CN.md",
-  neon_trace: "neon-trace-tool-field-spec.zh-CN.md",
-  lightning_trace: "lightning-trace-tool-field-spec.zh-CN.md",
-  paint_on: "paint-on-tool-field-spec.zh-CN.md",
-  volumetric_ray: "volumetric-ray-tool-field-spec.zh-CN.md",
-  electric_arc: "electric-arc-tool-field-spec.zh-CN.md"
-};
-
 describe("batch-01 effect definitions", () => {
   it("keeps the brightest fallback centered on one local salient region", () => {
     const width = 80; const height = 60;
@@ -412,8 +399,8 @@ describe("batch-01 effect definitions", () => {
   });
 
   it.each(BATCH_01_DEFINITIONS)("keeps the $toolName Markdown JSON example Schema-valid", (definition) => {
-    const filename = fieldSpecNames[definition.toolName]!;
-    const markdown = readFileSync(new URL(`../../../field-specs/batch-01/${filename}`, import.meta.url), "utf8");
+    const filename = `${definition.toolName}.md`;
+    const markdown = readFileSync(new URL(`../../../field-specs/tools/${filename}`, import.meta.url), "utf8");
     expect(markdown).toContain(`\`${definition.toolName}\``);
     const match = /```json\s*([\s\S]*?)```/u.exec(markdown);
     expect(match, `${filename} needs one JSON example`).not.toBeNull();

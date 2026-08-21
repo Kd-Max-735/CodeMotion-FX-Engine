@@ -101,8 +101,8 @@ Future effect implementation may run in parallel only with disjoint directory ow
 
 | Work | Source owner root | Test owner root | Field-spec owner root |
 | --- | --- | --- | --- |
-| New functions 1-8 | `src/batches/batch-01` through `batch-08` | `test/batches/batch-01` through `batch-08` | `field-specs/batch-01` through `batch-08` |
-| Existing adapters | Assigned existing-effect source root | Assigned existing-effect test root | `field-specs/existing-01` or `existing-02` |
+| New functions 1-8 | `src/batches/batch-01` through `batch-08` | `test/batches/batch-01` through `batch-08` | `field-specs/tools/<tool_name>.md` |
+| Existing adapters | Assigned existing-effect source root | Assigned existing-effect test root | `field-specs/tools/<tool_name>.md` |
 
 No worker may edit the public contract, registry, another owner's directory, governance, or shared package metadata without explicit reassignment. Parallel coding does not permit parallel Git integration: tests, status inspection, complete staged-diff inspection, staging, and local commits remain serial. The registry may reference a batch only after its implementation exists and its contract tests pass.
 

@@ -240,7 +240,7 @@ const EXPECTED = Object.freeze({
 } satisfies Readonly<Record<string, ExpectedContract>>);
 
 const TOOL_NAMES = Object.freeze(Object.keys(EXPECTED).sort());
-const SPEC_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), "../../field-specs/existing-02");
+const SPEC_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), "../../field-specs/tools");
 const DOC_INPUT_TERMS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   blend: ["底层和上层画面由服务端绑定"],
   brush_reveal: ["服务端绑定的真实笔刷覆盖", "起始图片", "目标图片"],
@@ -836,12 +836,13 @@ describe("existing-02 field specifications and adapter contracts", () => {
   it("maps exactly the assigned 20 snake_case tools to one independent Markdown file", async () => {
     const byToolName = definitions();
     expect([...byToolName.keys()].sort()).toEqual(TOOL_NAMES);
-    expect(await readdir(SPEC_DIRECTORY).then((files) => files.filter((name) => name.endsWith(".md")).sort()))
+    expect(await readdir(SPEC_DIRECTORY).then((files) => files.filter((name) =>
+      TOOL_NAMES.includes(name.replace(/\.md$/u, ""))).sort()))
       .toEqual(TOOL_NAMES.map((toolName) => `${toolName}.md`));
 
     for (const toolName of TOOL_NAMES) {
       const descriptor = getEffectFieldSpec(toolName);
-      expect(descriptor).toEqual({ toolName, relativePath: `existing-02/${toolName}.md` });
+      expect(descriptor).toEqual({ toolName, relativePath: `tools/${toolName}.md` });
       expect(await loadEffectFieldSpec(toolName))
         .toBe(await readFile(resolve(SPEC_DIRECTORY, `${toolName}.md`), "utf8"));
     }

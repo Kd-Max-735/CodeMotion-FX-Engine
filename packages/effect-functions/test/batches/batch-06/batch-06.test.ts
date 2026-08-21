@@ -242,10 +242,10 @@ describe.skip("superseded batch-06 metadata-only behavior", () => {
 });
 
 describe("batch-06 field specifications", () => {
-  const markdownDirectory = fileURLToPath(new URL("../../../field-specs/batch-06/", import.meta.url));
+  const markdownDirectory = fileURLToPath(new URL("../../../field-specs/tools/", import.meta.url));
 
   it.each(BATCH_06_DEFINITIONS)("validates the documented JSON example for $toolName", (definition) => {
-    const filename = definition.toolName.replaceAll("_", "-") + ".md";
+    const filename = `${definition.toolName}.md`;
     const markdown = readFileSync(`${markdownDirectory}${filename}`, "utf8");
     const jsonBlocks = [...markdown.matchAll(/```json\s*([\s\S]*?)```/gu)];
     expect(jsonBlocks).toHaveLength(1);

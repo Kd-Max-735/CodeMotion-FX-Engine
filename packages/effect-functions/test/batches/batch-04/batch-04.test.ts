@@ -463,8 +463,8 @@ describe("batch-04 definitions", () => {
 });
 
 describe("batch-04 Chinese model field specifications", () => {
-  it.each(EXPECTED)("documents %s as selected-tool-only JSON guidance", (_effectId, toolName, fileName) => {
-    const markdown = readFileSync(new URL(`../../../field-specs/batch-04/${fileName}`, import.meta.url), "utf8");
+  it.each(EXPECTED)("documents %s as selected-tool-only JSON guidance", (_effectId, toolName, _fileName) => {
+    const markdown = readFileSync(new URL(`../../../field-specs/tools/${toolName}.md`, import.meta.url), "utf8");
     expect(markdown).toContain(`\`${toolName}\``);
     expect(markdown).toContain("只输出");
     expect(markdown).toContain(`\"type\":\"${toolName}\"`);

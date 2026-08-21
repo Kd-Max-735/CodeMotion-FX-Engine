@@ -527,7 +527,7 @@ describe("batch-07 Chinese field specifications", () => {
   it("independently loads one complete, executable model instruction for every tool", async () => {
     for (const [, toolName] of expectedIdentities) {
       const descriptor = getEffectFieldSpec(toolName);
-      expect(descriptor?.relativePath).toBe(`batch-07/${toolName.replaceAll("_", "-")}.md`);
+      expect(descriptor?.relativePath).toBe(`tools/${toolName}.md`);
       const markdown = await loadEffectFieldSpec(toolName);
       expect(markdown).toContain(`\`${toolName}\``);
       expect(markdown).toContain("合法 JSON 示例");

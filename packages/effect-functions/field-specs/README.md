@@ -1,6 +1,6 @@
-# Field-spec ownership
+# Tool field specifications
 
-- `batch-01` through `batch-08` are the isolated field-spec ownership roots for future new effect-function batches.
-- `existing-01` and `existing-02` are the isolated field-spec ownership roots for future adapters over existing effects.
-- A directory placeholder is not an implementation and is never imported by the public registry.
+- `tools/` contains exactly one Markdown specification for each of the 120 registered tools.
+- Every file uses the canonical `<tool_name>.md` name so the Registry mapping remains explicit and auditable.
 - A field specification must classify every field as either model-generatable `params` or server-authorized `inputs`; one field cannot be both.
+- Batch ownership remains in the source and test directories; it no longer determines the runtime Markdown path.

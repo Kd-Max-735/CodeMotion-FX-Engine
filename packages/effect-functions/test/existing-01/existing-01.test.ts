@@ -75,7 +75,7 @@ const STRUCTURED_RESOURCE_TOOLS = Object.freeze([
 
 const specDirectory = join(
   dirname(fileURLToPath(import.meta.url)),
-  "../../field-specs/existing-01"
+  "../../field-specs/tools"
 );
 
 function definitionFor(toolName: Existing01ToolName): EffectToolDefinition {
@@ -138,8 +138,9 @@ function documentedValue(value: unknown): string {
 describe("existing-01 registry and field specifications", () => {
   it("resolves exactly the assigned twenty tool names from the integrated Registry", async () => {
     const { EFFECT_TOOL_REGISTRY } = await import("../../src/registry.js");
-    const files = readdirSync(specDirectory).filter((name) => name.endsWith(".md")).sort();
-    expect(files).toEqual(TOOL_NAMES.map((toolName) => `${toolName}.md`).sort());
+    const expectedFiles = TOOL_NAMES.map((toolName) => `${toolName}.md`).sort();
+    const files = readdirSync(specDirectory).filter((name) => expectedFiles.includes(name)).sort();
+    expect(files).toEqual(expectedFiles);
     for (const toolName of TOOL_NAMES) {
       const definition = definitionFor(toolName);
       expect(definition.toolName).toBe(toolName);
@@ -153,7 +154,7 @@ describe("existing-01 registry and field specifications", () => {
       const descriptor = getEffectFieldSpec(toolName);
       expect(descriptor).toEqual({
         toolName,
-        relativePath: `existing-01/${toolName}.md`
+        relativePath: `tools/${toolName}.md`
       });
       const loaded = await loadEffectFieldSpec(toolName);
       expect(loaded).toBe(readFileSync(join(specDirectory, `${toolName}.md`), "utf8"));

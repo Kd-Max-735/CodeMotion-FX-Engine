@@ -440,7 +440,7 @@ describe("batch-03 Chinese field specifications", () => {
   it("provides one complete, executable default envelope for each tool", () => {
     for (const [, toolName] of EXPECTED_IDENTITIES) {
       const definition = BATCH_03_DEFINITIONS.find((item) => item.toolName === toolName)!;
-      const path = fileURLToPath(new URL(`../../../field-specs/batch-03/${toolName}.md`, import.meta.url));
+      const path = fileURLToPath(new URL(`../../../field-specs/tools/${toolName}.md`, import.meta.url));
       const markdown = readFileSync(path, "utf8");
       expect(markdown).toContain(`\`${toolName}\``);
       for (const heading of [

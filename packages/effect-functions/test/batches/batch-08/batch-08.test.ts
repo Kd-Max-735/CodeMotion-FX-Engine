@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -542,10 +542,10 @@ describe("batch-08 definitions", () => {
 });
 
 describe("batch-08 Chinese field specifications", () => {
-  const specDirectory = join(dirname(fileURLToPath(import.meta.url)), "../../../field-specs/batch-08");
+  const specDirectory = join(dirname(fileURLToPath(import.meta.url)), "../../../field-specs/tools");
 
   it("provides ten complete specs exactly aligned with definitions and server input slots", () => {
-    const files = readdirSync(specDirectory).filter((name) => name.endsWith(".md"));
+    const files = BATCH_08_DEFINITIONS.map((definition) => `${definition.toolName}.md`);
     expect(files).toHaveLength(10);
     const forbidden = /"(?:audio|source|dataSource|texture|font|layer|effectRef|resourceId|path|url)"\s*:/u;
     const specTypes: string[] = [];
