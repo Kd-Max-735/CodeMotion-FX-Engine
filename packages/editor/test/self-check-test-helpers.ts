@@ -2,6 +2,22 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCanvas } from "@napi-rs/canvas";
+import {
+  EFFECT_TOOL_REGISTRY,
+  validateAndNormalizeEffectEnvelope
+} from "@codemotion/effect-functions";
+
+export function effectiveParamsFor(
+  toolName: string,
+  overrides: Readonly<Record<string, unknown>> = {}
+): Readonly<Record<string, unknown>> {
+  const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName);
+  if (definition === undefined) throw new TypeError(`Unknown effect tool: ${toolName}`);
+  return validateAndNormalizeEffectEnvelope(definition, toolName, {
+    type: toolName,
+    data: Object.freeze({ ...definition.defaults, ...overrides })
+  }).data;
+}
 
 export async function selfCheckFixture<Params extends Readonly<Record<string, unknown>>>(
   toolName: string,

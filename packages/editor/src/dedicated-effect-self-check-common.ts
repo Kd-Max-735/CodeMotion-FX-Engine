@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import { ARK_V1_MODEL, ProviderError } from "@codemotion/ai-planner";
 import type { EffectParameterEnvelope } from "@codemotion/effect-functions";
+import { observedEffectInformation, selfCheckParameterInformation } from "./self-check-parameter-summary.js";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
@@ -762,7 +763,7 @@ function publicView(
     original_request: request.userRequest.slice(0, 4_000),
     summary: Object.freeze({
       description: analysis.description,
-      key_information: Object.freeze([...analysis.keyInformation]),
+      key_information: selfCheckParameterInformation(profile.toolName, request.envelope.data),
       missing_information: Object.freeze([...analysis.missingInformation])
     }),
     metadata: Object.freeze({
@@ -780,6 +781,7 @@ function publicView(
         decodable: true,
         has_audio: false
       }),
+      observed_effect: observedEffectInformation(analysis.keyInformation),
       quality: qualityView(analysis.selectedSamples, analysis, request.width, request.height),
       keyframe_evidence: Object.freeze({
         evidence_state: "sufficient",

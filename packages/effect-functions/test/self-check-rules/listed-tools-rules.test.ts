@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { expectValidParameterContract } from "./parameter-contract-test-helper.js";
 
 const RULES = Object.freeze([
   ["beat_pulse", ["visible_pulse_count", "recovery_between_pulses"]],
@@ -37,7 +38,7 @@ describe("listed tools independent self-check Markdown", () => {
       expect(markdown).toContain("最终 MP4");
       expect(markdown).toContain("keyframe_contact_sheet");
       expect(markdown).not.toMatch(/effectId|版本号|模型名|doubao|Ark|backendId|resourceId/u);
-      expect(markdown).not.toMatch(/`(?:threshold|cooldown|sensitivity|barCount|sampleCount|fromValue|toValue|speed|duration|progress|beatMap|scaleMap|strokeWidth)`/u);
+      expectValidParameterContract(markdown, toolName);
     });
   }
 

@@ -1,5 +1,24 @@
 # chalk_stroke 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `grain` | 粉笔颗粒 |
+| `scatter` | 散粉程度 |
+| `opacity` | 描边不透明度 |
+| `progress` | 描边进度 |
+| `color` | 描边颜色 |
+| `strokeWidth` | 描边宽度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 只接收顶层为 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及从最终 MP4 抽帧合成的一张 `keyframe_contact_sheet`。不得假设存在其他图像或运行上下文。
@@ -14,7 +33,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：粉笔笔迹在最终画面中的总体描述。
-- `summary.key_information`：包括“特效类型”“可见程度”“描边覆盖”“粉笔颗粒”“散粉表现”“描边阶段”。
 - `metadata.effect.描边覆盖`：实际可见粉笔区域。
 - `metadata.effect.粉笔颗粒`：细腻、自然颗粒或粗粝断续。
 - `metadata.effect.散粉表现`：主笔迹外的离散粉尘程度。
@@ -60,7 +78,7 @@
 
 ## 禁止事项
 
-- 不读取或输出内部参数、遮罩、轮廓数组、资源身份或实现信息。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不以输入设置证明成片符合要求。
 - 不要求关键帧重复 JSON 中的内部数值。
 - 不将主观“更好看”作为失败条件。

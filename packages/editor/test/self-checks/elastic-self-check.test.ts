@@ -6,7 +6,7 @@ import { runObservedFixture, testFrame } from "./observed-motion-test-helpers.js
 
 describe("elastic independent self-check", () => {
   it("selects alternating overshoot, rebound, damping, and stable stages", async () => {
-    const result = await runObservedFixture(runElasticSelfCheck, (time, _duration, width, height) =>
+    const result = await runObservedFixture("elastic", runElasticSelfCheck, (time, _duration, width, height) =>
       testFrame(width, height, { x: Math.sin(time * Math.PI * 6) * 0.18 * Math.exp(-time * 1.5) }),
     "水平弹性往返并快速衰减");
     expect(result.keyframes.some((item) => /超调/u.test(String(item.role)))).toBe(true);

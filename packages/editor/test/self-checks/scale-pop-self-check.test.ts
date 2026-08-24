@@ -6,7 +6,7 @@ import { runObservedFixture, testFrame } from "./observed-motion-test-helpers.js
 
 describe("scale_pop independent self-check", () => {
   it("selects start, overshoot, rebound, and final scale evidence", async () => {
-    const result = await runObservedFixture(runScalePopSelfCheck, (time, duration, width, height) => {
+    const result = await runObservedFixture("scale_pop", runScalePopSelfCheck, (time, duration, width, height) => {
       const progress = time / duration;
       const scale = 0.25 + progress * 0.75 + Math.sin(progress * Math.PI * 3) * (1 - progress) * 0.16;
       return testFrame(width, height, { scale });

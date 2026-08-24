@@ -1,5 +1,27 @@
 # wave_surface 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `mode` | 波面模式 |
+| `gridSize` | 网格尺寸 |
+| `amplitude` | 波面幅度 |
+| `frequencyX` | 横向频率 |
+| `frequencyY` | 纵向频率 |
+| `damping` | 波动阻尼 |
+| `speed` | 波动速度 |
+| `crestColor` | 波峰颜色 |
+| `troughColor` | 波谷颜色 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 仅接收四字段自检 JSON 和最终 MP4 的 `keyframe_contact_sheet`。不得读取高度数据、坡度数据、计算网格、函数参数、路径或资源身份。
@@ -35,7 +57,7 @@
 
 ## 禁止事项
 
-- 不输出模式枚举、波高、频率、网格、坡度或内部公式。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不把固定明暗渐变误判为波峰波谷。
 - 不凭单帧判断波面推进方向。
 - 不把正常阴影区域机械判为黑帧。

@@ -1,5 +1,22 @@
 # fade 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `from` | 起始透明度 |
+| `to` | 结束透明度 |
+| `duration` | 过渡时长 |
+| `easing` | 缓动方式 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约和核心原则
 
 验收输入只有顶层为 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及最终 MP4 生成的 `keyframe_contact_sheet`。
@@ -11,7 +28,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户原话，决定淡入、淡出、时长和节奏要求。
 - `summary.description`：用起终可见状态、淡入或淡出和过渡节奏描述结果。
-- `summary.key_information`：实际起始状态、结束状态、过渡方向和过渡节奏。
 - `summary.missing_information`：无法可靠观察的事实。
 - `metadata.media`：最终视频媒体事实。
 - `metadata.quality`：黑帧、冻结、闪变、突切和尺寸一致性；开场或结尾全黑可能是有意淡化，需结合需求判断。
@@ -50,7 +66,6 @@
 
 ## 禁止事项
 
-- 不输出函数参数、缓动公式、采样安排、算法、后端或资源信息。
 - 不把编码完成、调用成功或预期透明变化当成视觉通过。
 - 不把用户要求的全黑起点或终点机械判为坏帧。
 - 不用素材自身的镜头变化冒充透明度过渡。

@@ -1,5 +1,28 @@
 # particle_spark 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `count` | 火花数量 |
+| `speed` | 飞散速度 |
+| `spread` | 飞散范围 |
+| `lifetime` | 火花寿命 |
+| `gravity` | 重力 |
+| `glow` | 发光强度 |
+| `size` | 火花尺寸 |
+| `burstInterval` | 爆发间隔 |
+| `direction` | 飞散方向 |
+| `color` | 火花颜色 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入必须是程序生成的 `file_name`、`original_request`、`summary`、`metadata` 自检 JSON，以及由最终 MP4 动态抽帧形成的一张 `keyframe_contact_sheet`。不接受中间渲染图。
@@ -16,7 +39,6 @@
 - `file_name`：最终视频名称。
 - `original_request`：用户原始需求。
 - `summary.description`：实际火花爆发表现。
-- `summary.key_information`：火花数量感、爆发次数感、飞散方向、爆发力度和衰减表现。
 - `summary.missing_information`：无法确认项。
 - `metadata.media`：视频规格与可解码状态。
 - `metadata.quality`：黑帧、时间变化和亮度跳变；亮度跳变需结合火花峰值解释。

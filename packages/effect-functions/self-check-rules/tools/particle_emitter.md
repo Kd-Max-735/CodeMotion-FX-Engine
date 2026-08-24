@@ -1,5 +1,28 @@
 # particle_emitter 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `rate` | 发射速率 |
+| `speed` | 粒子速度 |
+| `direction` | 发射方向 |
+| `spread` | 发射散布 |
+| `lifetime` | 粒子寿命 |
+| `size` | 粒子尺寸 |
+| `gravity` | 重力 |
+| `positionX` | 发射点横坐标 |
+| `positionY` | 发射点纵坐标 |
+| `color` | 粒子颜色 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入为程序生成的自检 JSON 和最终视频的 `keyframe_contact_sheet`。JSON 必须包含 `file_name`、`original_request`、`summary`、`metadata`，合成图必须呈现实际生成、增长、峰值和退场过程。
@@ -16,7 +39,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户未经改写的需求。
 - `summary.description`：实际发射过程描述。
-- `summary.key_information`：粒子数量感、发射位置感、发射方向、发射力度和生命周期。
 - `summary.missing_information`：无法可靠取得的信息。
 - `metadata.media`：最终视频规格和可用状态。
 - `metadata.quality`：黑帧、跨帧变化和亮度跳变。

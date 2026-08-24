@@ -1,5 +1,25 @@
 # sim_rigid_body_2d 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `bodyCount` | 刚体数量 |
+| `gravity` | 重力 |
+| `restitution` | 反弹系数 |
+| `friction` | 摩擦力 |
+| `initialSpeed` | 初始速度 |
+| `bodyRadius` | 刚体半径 |
+| `solverIterations` | 求解迭代次数 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 验收只使用顶层为 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及从最终 MP4 合成的一张 `keyframe_contact_sheet`。
@@ -14,7 +34,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：刚体分布、运动和碰撞的实际概述。
-- `summary.key_information`：包括“特效类型”“可见程度”“刚体分布”“模拟运动”“碰撞表现”“边界表现”。
 - `metadata.effect.刚体分布`：少量大块、中等数量或较密集的可见分布。
 - `metadata.effect.模拟运动`：平缓、活跃或猛烈。
 - `metadata.effect.碰撞表现`：是否观察到碰撞或反弹峰值。
@@ -60,7 +79,7 @@
 
 ## 禁止事项
 
-- 不输出刚体数组、速度、碰撞计数、模拟步长、内部设置或资源信息。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不用输入数量或动力设置证明成片。
 - 不从单帧推断碰撞响应。
 - 不要求超出二维圆形刚体范围的物理功能。

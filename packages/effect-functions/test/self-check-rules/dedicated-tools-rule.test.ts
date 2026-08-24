@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { EFFECT_TOOL_REGISTRY } from "../../src/registry.js";
+import { expectValidParameterContract } from "./parameter-contract-test-helper.js";
 
 const TOOLS = Object.freeze([
   "background_remove_compose",
@@ -41,12 +41,9 @@ describe("nine dedicated tool self-check rules", () => {
     expect(markdown.split(/\r?\n/u).length).toBeLessThan(110);
   });
 
-  it.each(TOOLS)("$0 does not expose its function fields or implementation identity", async (toolName) => {
+  it.each(TOOLS)("$0 exposes only real important fields without implementation identity", async (toolName) => {
     const markdown = await readFile(rulePath(toolName), "utf8");
-    const definition = EFFECT_TOOL_REGISTRY.getByToolName(toolName)!;
-    for (const field of Object.keys(definition.defaults)) {
-      expect(markdown, `${toolName}:${field}`).not.toMatch(new RegExp(`\\b${field}\\b`, "u"));
-    }
+    expectValidParameterContract(markdown, toolName);
     expect(markdown).not.toMatch(/effectId|ruleVersion|evidenceContractVersion|backendId|same_codec_control|normalizedParams/u);
     expect(markdown).not.toMatch(/doubao-seed|gpt-|claude|gemini/iu);
   });

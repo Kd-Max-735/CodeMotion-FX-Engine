@@ -1,5 +1,24 @@
 # glitch_slice 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `sliceSize` | 切片尺寸 |
+| `displacement` | 切片错位 |
+| `density` | 切片密度 |
+| `direction` | 切片方向 |
+| `channelJitter` | 通道抖动 |
+| `mix` | 混合比例 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 - 自检 JSON 顶层只有 `file_name`、`original_request`、`summary`、`metadata`。
@@ -15,7 +34,6 @@
 - `file_name`：安全文件名。
 - `original_request`：用户要求的方向、粗细、密度、强弱和彩色边缘偏好。
 - `summary.description`：描述实际切片方向、错位程度和完成状态。
-- `summary.key_information`：记录切片方向、错位可见度和后段完整性。
 - `metadata.media`：成片媒体事实与完整解码结果。
 - `metadata.quality`：技术完整性及关键帧读取情况。
 - `metadata.effect_observation`：切片结构、时间变化和完成观察。
@@ -49,6 +67,5 @@
 ## 禁止事项
 
 - 不把切片撕裂、红蓝边、整条错位或快速跳变判成编码损坏。
-- 不输出参数、种子、公式、算法、后端或资源信息。
 - 不把数据错帧、像素排序或随机噪点当作切片通过证据。
 - 不增加用户没有提出的故障强度要求。

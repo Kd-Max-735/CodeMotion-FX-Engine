@@ -1,5 +1,25 @@
 # dash_flow 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `dashLength` | 虚线段长度 |
+| `gapLength` | 虚线间隙 |
+| `speed` | 流动速度 |
+| `direction` | 流动方向 |
+| `curve` | 路径弯曲度 |
+| `color` | 虚线颜色 |
+| `thickness` | 虚线宽度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入是一份仅含 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及一张由最终 MP4 关键帧按时间合成的 `keyframe_contact_sheet`。
@@ -14,7 +34,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：成片虚线的路径、方向、速度和节奏概述。
-- `summary.key_information`：包括“特效类型”“可见程度”“虚线流向”“流动速度”“虚线节奏”“路径覆盖”。
 - `metadata.effect.虚线流向`：从成片变化观察到的方向。
 - `metadata.effect.流动速度`：静止、缓慢、中速或快速的可理解描述。
 - `metadata.effect.虚线节奏`：短段细密、虚实清楚或长段舒展。
@@ -60,7 +79,7 @@
 
 ## 禁止事项
 
-- 不输出路径点、内部设置、速度数值、资源信息或实现细节。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不用输入方向证明成片方向。
 - 不用单帧推断运动方向。
 - 不因用户未指定端帽等审美细节而判失败。

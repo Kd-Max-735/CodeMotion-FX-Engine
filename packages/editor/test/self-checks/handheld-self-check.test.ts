@@ -6,7 +6,7 @@ import { runObservedFixture, testFrame } from "./observed-motion-test-helpers.js
 
 describe("handheld independent self-check", () => {
   it("selects real multi-direction shake stages and keeps its rule independent", async () => {
-    const result = await runObservedFixture(runHandheldSelfCheck, (time, _duration, width, height) =>
+    const result = await runObservedFixture("handheld", runHandheldSelfCheck, (time, _duration, width, height) =>
       testFrame(width, height, { x: Math.sin(time * 13) * 0.05, y: Math.sin(time * 17) * 0.03,
         angle: Math.sin(time * 11) * 0.08 }), "自然但明显的手持晃动");
     expect(result.artifacts.view.status).toBe("pass");

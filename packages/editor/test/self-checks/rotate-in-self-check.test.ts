@@ -6,7 +6,7 @@ import { runObservedFixture, testFrame } from "./observed-motion-test-helpers.js
 
 describe("rotate_in independent self-check", () => {
   it("keeps a multi-stage final-video rotation proof", async () => {
-    const result = await runObservedFixture(runRotateInSelfCheck, (time, duration, width, height) =>
+    const result = await runObservedFixture("rotate_in", runRotateInSelfCheck, (time, duration, width, height) =>
       testFrame(width, height, { angle: (1 - time / duration) * Math.PI * 1.5, scale: 0.75 + time / duration * 0.25 }),
     "顺时针旋转进入并回正");
     expect(result.keyframes.filter((item) => /旋转/u.test(String(item.role))).length).toBeGreaterThanOrEqual(3);

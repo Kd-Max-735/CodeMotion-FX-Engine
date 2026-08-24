@@ -1,5 +1,22 @@
 # elastic 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `amplitude` | 弹性幅度 |
+| `period` | 弹性周期 |
+| `decay` | 弹性衰减 |
+| `axis` | 弹性方向 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约和核心原则
 
 验收输入只有顶层为 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及从最终 MP4 合成的 `keyframe_contact_sheet`。
@@ -11,7 +28,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户原始需求。
 - `summary.description`：用水平、垂直或缩放方向，以及超调、反向回弹和趋稳描述结果。
-- `summary.key_information`：实际弹性方向、方向反转、阻尼趋势和节奏。
 - `summary.missing_information`：无法由现有画面可靠确认的事项。
 - `metadata.media`：最终视频媒体事实。
 - `metadata.quality`：黑帧、冻结、闪变、突切和尺寸一致性。

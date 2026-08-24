@@ -1,5 +1,26 @@
 # character_cascade 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `stagger` | 字符间隔 |
+| `axis` | 级联方向 |
+| `offset` | 字符位移 |
+| `text` | 文字内容 |
+| `fontSize` | 字号 |
+| `positionX` | 横向位置 |
+| `positionY` | 纵向位置 |
+| `color` | 文字颜色 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 检查四字段自检 JSON 和最终视频 `keyframe_contact_sheet`。`original_request` 中的文字内容、级联方向、节奏和完整性要求是验收目标。
@@ -11,7 +32,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：级联过程和最终文字状态。
-- `summary.key_information`：文字显现范围、级联过程、文字完整性、文字边界和完成保持。
 - `summary.missing_information`：无法确认的文字覆盖事实。
 - `metadata.media`：最终视频规格。
 - `metadata.quality`：基础质量与异常静止。
@@ -41,6 +61,6 @@
 
 ## 禁止事项
 
-- 不输出文字栅格、内部选择方式、计算或采样安排。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不把过渡帧的错位当成最终缺陷。
 - 不因字体风格不合个人喜好而失败，除非用户明确指定。

@@ -1,5 +1,24 @@
 # glass 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `blur` | 玻璃模糊 |
+| `refraction` | 折射强度 |
+| `tintColor` | 玻璃色调 |
+| `tintStrength` | 色调强度 |
+| `border` | 边缘宽度 |
+| `opacity` | 玻璃不透明度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 仅接收四字段自检 JSON 和最终 MP4 的 `keyframe_contact_sheet`。不得读取玻璃表面数据、背景绑定、函数参数、路径或资源标识。
@@ -10,7 +29,7 @@
 
 ## 自检视图字段
 
-`summary.key_information` 应包含通透与磨砂、折射表现、玻璃色调、边缘高光和原有运动保留；`metadata` 分别记录成片、技术质量和关键帧覆盖。
+- `metadata.observed_effect`：记录通透与磨砂、折射表现、玻璃色调、边缘高光及原有运动保留情况。
 
 ## 关键帧规则
 

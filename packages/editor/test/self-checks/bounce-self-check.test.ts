@@ -6,7 +6,7 @@ import { runObservedFixture, testFrame } from "./observed-motion-test-helpers.js
 
 describe("bounce independent self-check", () => {
   it("selects apex, landing, decay, and settle evidence", async () => {
-    const result = await runObservedFixture(runBounceSelfCheck, (time, _duration, width, height) => {
+    const result = await runObservedFixture("bounce", runBounceSelfCheck, (time, _duration, width, height) => {
       const displacement = -Math.abs(Math.sin(time * Math.PI * 2.5)) * 0.2 * Math.exp(-time * 0.8);
       return testFrame(width, height, { y: displacement, scale: 1 + Math.max(0, Math.cos(time * Math.PI * 5)) * 0.04 });
     }, "向上弹跳三次并逐渐停稳");

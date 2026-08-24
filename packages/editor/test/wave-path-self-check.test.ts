@@ -160,7 +160,12 @@ describe("wave_path automatic self-check contract", () => {
       macroView: {
         file_name: "output.mp4",
         original_request: "生成一条细密、静止并自然收束的路径波浪",
-        summary: { key_information: [{ label: "特效类型", value: "路径波浪" }] },
+        summary: { key_information: {
+          amplitude: { label: "波动幅度", value: 10 },
+          wavelength: { label: "波长", value: 72 },
+          speed: { label: "波动速度", value: 0 },
+          taper: { label: "两端收束", value: 0.75 }
+        } },
         metadata: {
           media: { media_type: "video/mp4", width_px: 640, height_px: 360, duration_seconds: 5 },
           quality: { black_frame_ratio: 0, unexpected_global_change_ratio: 0 },

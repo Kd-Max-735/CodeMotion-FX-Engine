@@ -1,5 +1,27 @@
 # 打字机显现自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `speed` | 打字速度 |
+| `cursor` | 光标样式 |
+| `wordMode` | 按词显示 |
+| `cursorWidth` | 光标宽度 |
+| `text` | 文字内容 |
+| `fontSize` | 字号 |
+| `positionX` | 横向位置 |
+| `positionY` | 纵向位置 |
+| `color` | 文字颜色 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入为四字段自检 JSON 与最终 MP4 的单张 `keyframe_contact_sheet`。文字内容可公开审查，字形数组和内部显现计划不可见。
@@ -40,7 +62,6 @@
 
 ## 禁止事项
 
-- 不输出字形数组、字符时间表、内部速度或绘制方法。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不用输入文字替代最终画面检查。
 - 不暴露字体资源、路径、后端或实现信息。
-

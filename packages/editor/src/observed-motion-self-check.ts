@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import { ARK_V1_MODEL, ProviderError } from "@codemotion/ai-planner";
+import { observedEffectInformation, selfCheckParameterInformation } from "./self-check-parameter-summary.js";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
@@ -97,6 +98,7 @@ export interface ObservedMotionSelfCheckRequest {
   readonly tenantId: string;
   readonly userId: string;
   readonly userRequest: string;
+  readonly effectiveParams: Readonly<Record<string, unknown>>;
   readonly videoPath: string;
   readonly fileName?: string;
   readonly outputDirectory: string;
@@ -462,7 +464,7 @@ function publicSelfCheckView(
     original_request: request.userRequest.slice(0, 4_000),
     summary: Object.freeze({
       description: summary.description,
-      key_information: summary.keyInformation,
+      key_information: selfCheckParameterInformation(config.toolName, request.effectiveParams),
       missing_information: summary.missingInformation
     }),
     metadata: Object.freeze({
@@ -480,6 +482,7 @@ function publicSelfCheckView(
         decodable: true,
         has_audio: false
       }),
+      observed_effect: observedEffectInformation(summary.keyInformation),
       quality: qualityView(candidates),
       keyframe_evidence: Object.freeze({
         coverage: "sufficient",

@@ -1,5 +1,22 @@
 # 节拍脉冲自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `sensitivity` | 节拍灵敏度 |
+| `decay` | 脉冲衰减 |
+| `amount` | 脉冲幅度 |
+| `targetProperty` | 响应属性 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 审查输入只包含自检 JSON 与一张 `keyframe_contact_sheet`。JSON 顶层必须是 `file_name`、`original_request`、`summary`、`metadata`；关键帧必须来自最终 MP4。
@@ -10,9 +27,9 @@
 
 ## 自检视图字段
 
-- `summary.key_information`：实际响应次数、实际脉冲强弱、峰后表现；用户明确指定强弱时，另列用户要求强弱和强弱要求匹配结果。
 - `metadata.observed_effect.visible_pulse_count`：成片中可区分的可见脉冲次数。
 - `metadata.observed_effect.pulse_peak_level`：可见峰值的轻微、中等或明显等级。
+- `metadata.observed_effect.key_information`：用中文集中展示实际脉冲强弱、用户要求及二者是否匹配。
 - `metadata.observed_effect.recovery_between_pulses`：峰值之间是否实际回落。
 - `metadata.media`、`metadata.quality`：成片可用性与基础质量。
 - `metadata.keyframe_evidence`：合成图及关键帧角色。
@@ -40,7 +57,7 @@
 
 ## 禁止事项
 
-- 不输出或引用音频特征数组、触发参数、时间计划或内部指标。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不以音频峰值存在代替成片视觉响应。
 - 不用用户要求覆盖实际检测等级，也不因存在可见峰值就忽略强弱冲突。
 - 不暴露资源、路径、后端或实现信息。

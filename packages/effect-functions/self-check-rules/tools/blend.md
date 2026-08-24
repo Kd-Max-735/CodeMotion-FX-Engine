@@ -1,5 +1,22 @@
 # blend 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `mode` | 混合模式 |
+| `opacity` | 图层不透明度 |
+| `mix` | 混合比例 |
+| `premultiply` | 预乘透明度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 同时检查四字段自检 JSON 与最终视频的单张 `keyframe_contact_sheet`。不得假设还能读取原始素材、调用设置或中间图层。
@@ -11,7 +28,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：最终混合画面的整体观感。
-- `summary.key_information`：图层贡献、明暗结果、色彩结果、混合覆盖和时间表现。
 - `summary.missing_information`：无法可靠比较底层或叠加层时的缺项。
 - `metadata.media`：最终视频规格和可用性。
 - `metadata.quality`：黑帧、尺寸一致性、时间状态和异常静止。

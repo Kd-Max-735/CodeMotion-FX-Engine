@@ -1,5 +1,24 @@
 # dolly 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `direction` | 推拉方向 |
+| `distance` | 移动距离 |
+| `heightOffset` | 高度偏移 |
+| `duration` | 镜头时长 |
+| `verticalFovDegrees` | 垂直视场角 |
+| `easing` | 缓动方式 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约和核心原则
 
 验收输入只有顶层为 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及最终 MP4 生成的 `keyframe_contact_sheet`。
@@ -11,7 +30,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户原话。
 - `summary.description`：用推进或拉远、高度、构图移动、节奏和转向描述结果。
-- `summary.key_information`：实际推拉方向、高度变化、构图移动和镜头节奏。
 - `summary.missing_information`：无法可靠观察的镜头事实。
 - `metadata.media`：最终视频媒体事实。
 - `metadata.quality`：黑帧、冻结、闪变、突切和尺寸一致性。
@@ -50,7 +68,6 @@
 
 ## 禁止事项
 
-- 不输出函数参数、相机距离、轨迹公式、采样计划、算法、后端或资源信息。
 - 不以相机调用成功或预期位移证明最终运镜正确。
 - 不只凭单一主体大小就断言轨道运动，需结合构图和前后景证据。
 - 不把瞬时数字缩放、随机手持或静态画面判为轨道推拉。

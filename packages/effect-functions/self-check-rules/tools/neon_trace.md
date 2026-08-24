@@ -1,5 +1,25 @@
 # neon_trace 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `progress` | 追踪进度 |
+| `glowRadius` | 光晕半径 |
+| `intensity` | 发光强度 |
+| `trailLength` | 拖尾长度 |
+| `pulseRate` | 脉冲频率 |
+| `hue` | 霓虹色相 |
+| `coreWidth` | 光芯宽度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 同时接收顶层仅含 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，及一张从最终 MP4 抽帧生成的 `keyframe_contact_sheet`。不得读取起止坐标声明、路径点、源图或内部发光层。
@@ -17,7 +37,6 @@
 - `file_name`：最终视频名称。
 - `original_request`：起点、终点、方向、颜色、强弱和节奏要求的来源。
 - `summary.description`：实际追踪区域、方向、亮度、颜色和光晕概况。
-- `summary.key_information`：路径起始区域、到达区域、追踪方向、实际亮度、霓虹颜色、光束层次、显现与保留、脉冲表现。
 - `metadata.media`：最终成片规格和可解码状态。
 - `metadata.quality`：路径连续性、保留情况、异常黑帧和脉冲误判保护。
 - `metadata.keyframe_evidence`：出现、前段、中段、完成、持续和后段证据。
@@ -55,7 +74,7 @@
 
 ## 禁止事项
 
-- 不输出坐标、路径点、参数、亮度门限、公式、算法、后端或内部光层。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不输出路径、资源标识、网址或身份信息。
 - 不把显现过程、滚动高亮或正常脉冲误判为闪烁。
 - 不交换用户明确的起点和终点。

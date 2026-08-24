@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import type { EffectParameterEnvelope } from "@codemotion/effect-functions";
+import { observedEffectInformation, selfCheckParameterInformation } from "./self-check-parameter-summary.js";
 
 const execFileAsync = promisify(execFile);
 const RULE_VERSION = "1.0.0";
@@ -690,7 +691,7 @@ export async function runFinalVideoSelfCheck(
       original_request: request.userRequest.slice(0, 4_000),
       summary: Object.freeze({
         description: summary.description,
-        key_information: Object.freeze(summary.keyInformation),
+        key_information: selfCheckParameterInformation(spec.toolName, request.envelope.data),
         missing_information: Object.freeze(summary.missingInformation ?? [])
       }),
       metadata: Object.freeze({
@@ -708,6 +709,7 @@ export async function runFinalVideoSelfCheck(
           decodable: true,
           has_audio: false
         }),
+        observed_effect: observedEffectInformation(summary.keyInformation),
         quality: Object.freeze(summary.quality),
         keyframe_evidence: Object.freeze({
           coverage: "sufficient",

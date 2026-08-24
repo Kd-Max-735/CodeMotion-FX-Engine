@@ -1,5 +1,25 @@
 # particle_dissolve 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `progress` | 溶解进度 |
+| `particleCount` | 粒子数量 |
+| `force` | 消散力度 |
+| `direction` | 消散方向 |
+| `turbulence` | 湍流强度 |
+| `particleSize` | 粒子尺寸 |
+| `duration` | 溶解时长 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入只有程序生成的自检 JSON 与一张 `keyframe_contact_sheet`。JSON 顶层必须为 `file_name`、`original_request`、`summary`、`metadata`；图片必须来自最终编码视频。两者任一缺失都不能判为通过。
@@ -16,7 +36,6 @@
 - `file_name`：最终成片名称，不得包含服务器路径。
 - `original_request`：未经改写的用户需求。
 - `summary.description`：对实际溶解结果的简述。
-- `summary.key_information`：粒子数量感、溶解程度、消散方向、分布变化和过程完整性。
 - `summary.missing_information`：无法可靠判断的要求。
 - `metadata.media`：格式、尺寸、帧率、时长、帧数、大小与可解码状态。
 - `metadata.quality`：黑帧、跨帧变化与亮度跳变等成片事实。

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { expectValidParameterContract } from "./parameter-contract-test-helper.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../self-check-rules/tools");
 
@@ -76,7 +77,8 @@ describe("ten independent effect self-check rules", () => {
       expect(markdown).toMatch(new RegExp(`^# ${rule.tool} 自检规则`, "u"));
       for (const section of SECTIONS) expect(markdown, section).toContain(section);
       for (const phrase of rule.required) expect(markdown, phrase).toContain(phrase);
-      for (const name of rule.forbidden) expect(markdown, name).not.toContain(name);
+      const documented = expectValidParameterContract(markdown, rule.tool);
+      expect(rule.forbidden.some((name) => documented.includes(name))).toBe(true);
       expect(markdown).toContain("`file_name`");
       expect(markdown).toContain("`original_request`");
       expect(markdown).toContain("`summary`");

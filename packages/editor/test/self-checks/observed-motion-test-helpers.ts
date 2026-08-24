@@ -6,6 +6,7 @@ import type {
   ObservedMotionSelfCheckArtifacts,
   ObservedMotionSelfCheckRequest
 } from "../../src/observed-motion-self-check.js";
+import { effectiveParamsFor } from "../self-check-test-helpers.js";
 
 export interface TestPose {
   readonly x?: number;
@@ -36,6 +37,7 @@ export function testFrame(width: number, height: number, pose: TestPose): Buffer
 }
 
 export async function runObservedFixture(
+  toolName: string,
   run: (request: ObservedMotionSelfCheckRequest) => Promise<ObservedMotionSelfCheckArtifacts>,
   render: (time: number, duration: number, width: number, height: number) => Buffer,
   userRequest: string
@@ -60,6 +62,7 @@ export async function runObservedFixture(
     durationSeconds: duration,
     frameCount: 60,
     bytes: 4096,
+    effectiveParams: effectiveParamsFor(toolName),
     reviewer: {
       review: async (request) => Object.freeze({
         status: "pass" as const,

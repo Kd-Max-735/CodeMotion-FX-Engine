@@ -13,6 +13,7 @@ import { runRadialBlurSelfCheck } from "../src/radial-blur-self-check.js";
 import { runRgbSplitSelfCheck } from "../src/rgb-split-self-check.js";
 import { runTextureOverlaySelfCheck } from "../src/texture-overlay-self-check.js";
 import { runTrackMatteSelfCheck } from "../src/track-matte-self-check.js";
+import { effectiveParamsFor } from "./self-check-test-helpers.js";
 
 const RUNNERS = Object.freeze({
   chromatic_aberration: runChromaticAberrationSelfCheck,
@@ -87,6 +88,7 @@ describe("ten independent visual-quality self-checks", () => {
         durationSeconds: 4,
         frameCount: 96,
         bytes: 1_024,
+        effectiveParams: effectiveParamsFor(toolName),
         frameExtractor: syntheticFrame,
         reviewer: async ({ ruleIds, view }: {
           ruleIds: readonly string[];

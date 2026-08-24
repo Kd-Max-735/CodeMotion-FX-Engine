@@ -1,5 +1,22 @@
 # lens_flare 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `source` | 光源位置 |
+| `ghosts` | 鬼影数量 |
+| `streak` | 光条强度 |
+| `chromatic` | 色散强度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入为一份自检 JSON 和一张 `keyframe_contact_sheet`。JSON 顶层只有 `file_name`、`original_request`、`summary`、`metadata`；合成图来自最终 MP4。不得读取光源坐标声明、鬼影数量声明、源图或内部光学元素。
@@ -17,7 +34,6 @@
 - `file_name`：最终视频名称。
 - `original_request`：位置、鬼影、条纹和色散要求的来源。
 - `summary.description`：实际光源位置、亮度、颜色和光学结构概况。
-- `summary.key_information`：光源位置、实际亮度、主要颜色、鬼影表现、镜头条纹、覆盖范围和稳定性。
 - `metadata.media`：成片尺寸、时长、帧率、帧数与可解码状态。
 - `metadata.quality`：光学元素稳定性、异常黑帧和底图可读性。
 - `metadata.keyframe_evidence`：前、中、后稳定证据。
@@ -54,7 +70,7 @@
 
 ## 禁止事项
 
-- 不输出坐标参数、亮度门限、光学公式、算法、后端或中间光斑数据。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不输出路径、资源标识、网址或身份信息。
 - 不把局部主光源高亮直接判为全局过曝。
 - 不凭一张关键帧宣称位置稳定。

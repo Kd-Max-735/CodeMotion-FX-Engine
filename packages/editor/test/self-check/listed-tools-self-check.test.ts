@@ -15,6 +15,7 @@ import { runVocalReactiveTextSelfCheck } from "../../src/self-check/vocal-reacti
 import { runWaveformSelfCheck } from "../../src/self-check/waveform-self-check.js";
 import { EffectToolVideoService } from "../../src/effect-tool-video-service.js";
 import { runListedToolSelfCheck } from "../../src/self-check/listed-tool-self-check.js";
+import { importantParameterDefinitions } from "../../src/self-check-parameter-summary.js";
 import type { EffectToolDefinition } from "@codemotion/effect-functions";
 import type {
   ObservedSelfCheckArtifacts,
@@ -157,11 +158,17 @@ describe("listed tools final-video self-checks", () => {
       const json = artifacts.view.macroView as Record<string, unknown>;
       expect(Object.keys(json)).toEqual(["file_name", "original_request", "summary", "metadata"]);
       const metadata = json.metadata as Record<string, unknown>;
+      const summary = json.summary as {
+        key_information: Record<string, { label: string; value: unknown }>;
+      };
+      expect(Object.keys(summary.key_information)).toEqual(
+        importantParameterDefinitions(item.toolName).map(([name]) => name)
+      );
       const facts = metadata.observed_effect as Record<string, unknown>;
       for (const factKey of item.factKeys) expect(facts, factKey).toHaveProperty(factKey);
       expect((metadata.keyframe_evidence as { image_count: number }).image_count).toBeGreaterThanOrEqual(2);
       const serialized = JSON.stringify(json);
-      expect(serialized).not.toMatch(/audio_analysis|glyph|fontHandle|layerHandle|backendId|resourceId|effectId|formula|algorithm/u);
+      expect(serialized).not.toMatch(/audio_analysis|fontHandle|layerHandle|backendId|resourceId|effectId|formula|algorithm/u);
       expect(artifacts.jsonPath).toBeTypeOf("string");
       expect(artifacts.evidenceFiles.get("keyframe_contact_sheet")).toBeTypeOf("string");
     });
@@ -174,15 +181,14 @@ describe("listed tools final-video self-checks", () => {
   it("fails beat_pulse when an observed obvious pulse conflicts with a weaker request", async () => {
     const base = CASES.find((item) => item.toolName === "beat_pulse")!;
     const artifacts = await execute({ ...base, request: "脉冲强度较弱" });
-    const summary = artifacts.view.macroView!.summary as {
-      key_information: readonly { label: string; value: string }[];
-    };
     const facts = (artifacts.view.macroView!.metadata as {
-      observed_effect: Record<string, unknown>;
+      observed_effect: Record<string, unknown> & {
+        key_information: readonly { label: string; value: string }[];
+      };
     }).observed_effect;
 
     expect(artifacts.view.status).toBe("fail");
-    expect(summary.key_information).toEqual(expect.arrayContaining([
+    expect(facts.key_information).toEqual(expect.arrayContaining([
       { label: "用户要求强弱", value: "较弱" },
       { label: "实际脉冲强弱", value: "明显" },
       { label: "强弱要求匹配", value: "不一致：要求较弱，实际为明显" }

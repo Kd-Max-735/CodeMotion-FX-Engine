@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import { ARK_V1_MODEL, ProviderError } from "@codemotion/ai-planner";
 import type { EffectRenderResult } from "@codemotion/effect-functions";
+import { observedEffectInformation, selfCheckParameterInformation } from "../self-check-parameter-summary.js";
 
 const execFileAsync = promisify(execFile);
 const EVIDENCE_FONT_FAMILY = "CMFX CJK";
@@ -139,6 +140,7 @@ export interface ObservableSelfCheckRequest {
   readonly tenantId: string;
   readonly userId: string;
   readonly userRequest: string;
+  readonly effectiveParams: Readonly<Record<string, unknown>>;
   readonly videoPath: string;
   readonly fileName?: string;
   readonly outputDirectory: string;
@@ -591,7 +593,7 @@ function publicView(definition: ObservableSelfCheckDefinition, request: Observab
     original_request: request.userRequest.slice(0, 4_000),
     summary: Object.freeze({
       description: summary.description,
-      key_information: Object.freeze(summary.keyInformation),
+      key_information: selfCheckParameterInformation(definition.toolName, request.effectiveParams),
       missing_information: Object.freeze(summary.missingInformation ?? [])
     }),
     metadata: Object.freeze({
@@ -601,6 +603,7 @@ function publicView(definition: ObservableSelfCheckDefinition, request: Observab
         duration_seconds: rounded(request.durationSeconds, 3), frame_count: request.frameCount,
         file_size_bytes: request.bytes, encoding_completed: true, decodable: true, has_audio: false
       }),
+      observed_effect: observedEffectInformation(summary.keyInformation),
       quality,
       keyframe_evidence: Object.freeze({
         coverage: "sufficient",

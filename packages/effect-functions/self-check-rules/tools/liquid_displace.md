@@ -1,8 +1,26 @@
 # liquid_displace 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `viscosity` | 液体黏度 |
+| `refraction` | 折射强度 |
+| `flowSpeed` | 流动速度 |
+| `surfaceTension` | 表面张力 |
+| `chromaticDispersion` | 色散强度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
-输入仅为四字段自检 JSON 和最终 MP4 的单张 `keyframe_contact_sheet`，不读取流场、素材身份、函数参数或中间纹理。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 
 ## 核心原则
 
@@ -10,11 +28,11 @@
 
 ## 自检视图字段
 
-`summary.key_information` 应包含液态流动、折射表现、彩色边缘和流动连续性；媒体、基础质量和关键帧证据分别位于 `metadata.media`、`metadata.quality`、`metadata.keyframe_evidence`。
+- `metadata.observed_effect`：记录液态流动、折射表现、彩色边缘和流动连续性。
 
 ## 关键帧规则
 
-覆盖流动起始、折射代表状态、主要形变变化和结束；缓慢凝胶可少取，活跃液面应增加不同流态。所有帧必须来自最终 MP4，只标注帧序、角色和时间。
+覆盖流动起始、折射代表状态、主要形变变化和结束；缓慢凝胶可少取，活跃液面应增加不同流态。所有帧必须来自最终 MP4，并按时间合并为 `keyframe_contact_sheet`，只标注帧序、角色和时间。
 
 ## 用户要求到证据的映射
 
@@ -35,7 +53,7 @@
 
 ## 禁止事项
 
-- 不输出黏度、速度、折射数值、流场或内部算法。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不把正常焦散亮度变化判为闪白。
 - 不把棱彩边缘误判为编码色散。
 - 不因缓慢液体帧差较小而直接判冻结。

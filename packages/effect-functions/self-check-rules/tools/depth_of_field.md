@@ -1,5 +1,23 @@
 # depth_of_field 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `focusDepth` | 焦点深度 |
+| `focusRange` | 清晰范围 |
+| `blurRadius` | 模糊半径 |
+| `bokehBoost` | 散景增强 |
+| `edgePreservation` | 边缘保留 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 验收只接收自检 JSON 和一张 `keyframe_contact_sheet`。JSON 顶层严格为 `file_name`、`original_request`、`summary`、`metadata`；关键帧均来自最终 MP4。
@@ -14,7 +32,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：最终画面实际清晰区域与景深层次。
-- `summary.key_information`：包括“特效类型”“可见程度”“清晰焦点”“焦内外层次”“焦点稳定性”“边缘表现”。
 - `metadata.effect.清晰焦点`：清晰细节主要所在的用户可理解画面区域。
 - `metadata.effect.焦内外层次`：差异较弱、层次清楚或反差强。
 - `metadata.effect.焦点稳定性`：稳定或发生转移。

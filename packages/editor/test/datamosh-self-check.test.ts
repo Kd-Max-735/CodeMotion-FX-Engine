@@ -18,7 +18,7 @@ describe("datamosh dedicated self-check", () => {
       intentional_effects_excluded_from_damage_detection: true
     });
     expect(await readFile(artifacts.evidenceFiles.get("keyframe_contact_sheet")!)).not.toHaveLength(0);
-    expect(JSON.stringify(artifacts.json)).not.toMatch(/blockSize|carry|backend|cache|algorithm/u);
+    expect(JSON.stringify(artifacts.json)).not.toMatch(/backend|cache|algorithm/u);
   });
 
   it("marks only a real decode failure for repair", async () => {

@@ -1,5 +1,23 @@
 # 人声响应文字自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `band` | 响应频段 |
+| `mapping` | 映射方式 |
+| `smoothing` | 响应平滑度 |
+| `amount` | 响应幅度 |
+| `baseline` | 响应基线 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 审查只接收四字段自检 JSON 和最终 MP4 的 `keyframe_contact_sheet`。可见文字内容属于交付事实，内部文字结构不属于审查输入。
@@ -42,4 +60,3 @@
 - 不输出音频特征、字形数组、属性路径或内部数值。
 - 不用人声分析结果代替文字成片表现。
 - 不暴露字体资源、图层信息、路径或后端。
-

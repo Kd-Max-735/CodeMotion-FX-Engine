@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { expectValidParameterContract } from "./parameter-contract-test-helper.js";
 
 const RULES = Object.freeze([
   ["handheld", ["intensity", "frequency", "translationJitter", "rotationJitterDegrees", "smoothing", "seedOffset"]],
@@ -28,7 +29,7 @@ const REQUIRED = Object.freeze([
 
 describe("ten independent motion self-check rules", () => {
   for (const [toolName, parameters] of RULES) {
-    it(`${toolName}.md contains only final-video acceptance guidance`, async () => {
+    it(`${toolName}.md contains final-video guidance and real important parameters`, async () => {
       const markdown = await readFile(resolve(
         `packages/effect-functions/self-check-rules/tools/${toolName}.md`
       ), "utf8");
@@ -38,10 +39,8 @@ describe("ten independent motion self-check rules", () => {
       expect(markdown).toContain("keyframe_contact_sheet");
       expect(markdown).toMatch(/关键帧数量.*(?:不固定|实际|取决|根据|随)/u);
       expect(markdown).not.toMatch(/model|模型名|版本号|effectId|ruleVersion|evidenceContractVersion|doubao|Ark|backendId|resourceId/u);
-      for (const parameter of parameters) {
-        expect(markdown, parameter).not.toContain(`\`${parameter}\``);
-        expect(markdown, parameter).not.toMatch(new RegExp(`\\b${parameter}\\b`, "u"));
-      }
+      const documented = expectValidParameterContract(markdown, toolName);
+      expect(parameters.some((parameter) => documented.includes(parameter))).toBe(true);
       expect(markdown.split(/\r?\n/u).length).toBeLessThan(100);
     });
   }

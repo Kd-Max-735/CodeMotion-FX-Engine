@@ -1,5 +1,25 @@
 # hologram 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `scanline` | 扫描线强度 |
+| `flicker` | 闪动强度 |
+| `glitch` | 故障强度 |
+| `depth` | 全息深度 |
+| `brightness` | 投影亮度 |
+| `opacity` | 投影不透明度 |
+| `colorMode` | 颜色模式 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入是一份顶层严格包含 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及最终 MP4 的 `keyframe_contact_sheet`。不得读取深度图、材质数据、函数入参、源图或中间纹理。
@@ -17,7 +37,6 @@
 - `file_name`：最终视频名称。
 - `original_request`：颜色、亮度、透明、扫描、故障、稳定和深度要求的来源。
 - `summary.description`：实际自发光颜色、亮度、扫描和稳定性概况。
-- `summary.key_information`：投影亮度、投影颜色、位置、覆盖范围、扫描表现、全息抖动、深度层次和主体可读性。
 - `metadata.media`：最终成片规格和可解码状态。
 - `metadata.quality`：异常黑帧、主体连续性、非预期闪变和关键阶段覆盖。
 - `metadata.keyframe_evidence`：全息出现、扫描、较暗、较亮、故障变化和后段证据。
@@ -55,7 +74,7 @@
 
 ## 禁止事项
 
-- 不输出深度数据、材质参数、亮度门限、公式、算法、后端或中间纹理。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不输出路径、资源标识、网址或身份信息。
 - 不把扫描线、受控闪烁和故障抖动误判为普通闪烁。
 - 不仅凭内部声明判断深度表现，必须以最终关键帧为准。

@@ -1,5 +1,24 @@
 # gradient_flow 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `intensity` | 渐变强度 |
+| `scale` | 渐变尺度 |
+| `speed` | 流动速度 |
+| `angle` | 流动角度 |
+| `phase` | 起始相位 |
+| `palette` | 渐变色板 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入是一份仅含 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及一张由最终 MP4 关键帧合成的 `keyframe_contact_sheet`。不得使用函数入参、色板声明、源图或中间帧补充证据。
@@ -17,7 +36,6 @@
 - `file_name`：最终成片名称。
 - `original_request`：提取验收要求的唯一文本依据。
 - `summary.description`：实际主色、亮度、覆盖和传播概况。
-- `summary.key_information`：实际亮度、色彩表现、覆盖范围、传播方向、流动速度和色带连续性。
 - `metadata.media`：最终 MP4 的尺寸、帧率、时长、帧数与可解码状态。
 - `metadata.quality`：黑帧、色场连续性、非预期闪变和关键阶段覆盖。
 - `metadata.keyframe_evidence`：关键帧角色、时间及单张合成图引用。
@@ -54,7 +72,6 @@
 
 ## 禁止事项
 
-- 不输出函数参数、亮度门限、色彩计算、算法、后端或中间视图。
 - 不输出路径、资源标识、网址或安全上下文。
 - 不把正常传播误判为闪烁，不把合法全幅渐变误判为全局污染。
 - 不用用户未提出的配色偏好否定成片。

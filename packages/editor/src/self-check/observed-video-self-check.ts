@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
+import { observedEffectInformation, selfCheckParameterInformation } from "../self-check-parameter-summary.js";
 
 const execFileAsync = promisify(execFile);
 const CONTACT_SHEET_ID = "keyframe_contact_sheet";
@@ -87,7 +88,7 @@ export interface ObservedVideoSelfCheckRequest {
   readonly durationSeconds: number;
   readonly frameCount: number;
   readonly bytes: number;
-  readonly effectParams?: Readonly<Record<string, unknown>>;
+  readonly effectParams: Readonly<Record<string, unknown>>;
   readonly ffmpegPath?: string;
   readonly frameExtractor?: (
     inputPath: string,
@@ -579,7 +580,7 @@ export async function runObservedVideoEvidencePipeline(
       const frames = withDifferences(rawFrames, request);
       const selected = distinctFrames(profile.selectFrames(frames));
       if (selected.length < 2) throw new Error(`${profile.toolName} 没有选出足够的最终成片关键帧。`);
-      const evaluation = profile.evaluate(frames, selected, request.effectParams ?? Object.freeze({}));
+      const evaluation = profile.evaluate(frames, selected, request.effectParams);
       const result = resultFor(evaluation, frames, request, profile.expectedMotion);
       const boardPath = join(directory, "keyframe_contact_sheet.png");
       const board = await contactSheet(selected, boardPath, request.width, request.height);
@@ -588,13 +589,16 @@ export async function runObservedVideoEvidencePipeline(
         original_request: request.userRequest.slice(0, MAX_REQUEST_LENGTH),
         summary: Object.freeze({
           description: evaluation.description,
-          key_information: Object.freeze([...evaluation.keyInformation]),
+          key_information: selfCheckParameterInformation(profile.toolName, request.effectParams),
           missing_information: Object.freeze([...(evaluation.missingInformation ?? [])])
         }),
         metadata: Object.freeze({
           media: mediaFacts(request),
           quality: qualityFacts(frames, request),
-          observed_effect: evaluation.observedFacts,
+          observed_effect: Object.freeze({
+            ...evaluation.observedFacts,
+            ...observedEffectInformation(evaluation.keyInformation)
+          }),
           keyframe_evidence: keyframeFacts(selected)
         })
       });

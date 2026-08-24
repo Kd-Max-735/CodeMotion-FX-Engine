@@ -1,5 +1,26 @@
 # zoom_tunnel 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `transitionStart` | 转场开始时间 |
+| `duration` | 转场时长 |
+| `startScale` | 起始缩放 |
+| `endScale` | 结束缩放 |
+| `tunnelDepth` | 隧道深度 |
+| `motionBlur` | 运动模糊 |
+| `twistDegrees` | 扭转角度 |
+| `easing` | 缓动方式 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 - 自检 JSON 顶层只有 `file_name`、`original_request`、`summary`、`metadata`。
@@ -15,7 +36,6 @@
 - `file_name`：最终成片文件名。
 - `original_request`：用户对开始时刻、速度、纵深、旋转和模糊的要求。
 - `summary.description`：描述缩放穿梭过程、强弱和完成状态。
-- `summary.key_information`：记录起步、中段、出口与最终接替情况。
 - `metadata.media`：媒体事实与完整解码状态。
 - `metadata.quality`：技术完整性，不把速度模糊计作损坏。
 - `metadata.effect_observation`：缩放进度、隧道可见度和完成观察。
@@ -49,6 +69,5 @@
 ## 禁止事项
 
 - 不把运动模糊、快速放大、扭转或画面边缘拉伸判为技术故障。
-- 不输出参数、公式、镜头计算、算法、后端或资源信息。
 - 不用单纯交叉淡化冒充隧道穿梭。
 - 不以到达预定时间代替完成画面证据。

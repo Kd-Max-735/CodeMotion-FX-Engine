@@ -6,7 +6,7 @@ import { runObservedFixture, testFrame } from "./observed-motion-test-helpers.js
 
 describe("fade independent self-check", () => {
   it("selects observed visibility quarters without reading expected opacity", async () => {
-    const result = await runObservedFixture(runFadeSelfCheck, (time, duration, width, height) =>
+    const result = await runObservedFixture("fade", runFadeSelfCheck, (time, duration, width, height) =>
       testFrame(width, height, { opacity: Math.min(1, time / (duration * 0.7)) }), "柔和淡入后保持清晰");
     expect(result.keyframes.some((item) => item.role === "可见度过渡中点")).toBe(true);
     expect(JSON.stringify(result.macro.summary)).toContain("由弱到强淡入");

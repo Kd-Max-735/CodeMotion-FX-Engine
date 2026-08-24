@@ -1,5 +1,22 @@
 # video_freeze_frame 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `freezeAt` | 冻结时间点 |
+| `freezeDuration` | 冻结时长 |
+| `zoomScale` | 冻结缩放 |
+| `vignette` | 暗角强度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 - 自检 JSON 顶层只有 `file_name`、`original_request`、`summary`、`metadata`。
@@ -15,7 +32,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户要求的定格时刻、持续感和强调样式。
 - `summary.description`：说明冻结区间是否稳定以及之后是否恢复。
-- `summary.key_information`：记录冻结区间、边界覆盖和恢复状态。
 - `metadata.media`：成片尺寸、时长、帧数与完整解码事实。
 - `metadata.quality`：技术完整性；有意定格不计为异常静帧。
 - `metadata.effect_observation`：冻结稳定性、边界和恢复证据。
@@ -49,6 +65,5 @@
 ## 禁止事项
 
 - 不把用户要求的冻结区间判为卡死、丢帧或编码损坏。
-- 不输出参数、缓存帧、时间重映射细节、算法、后端或资源信息。
 - 不用单张冻结画面证明整个冻结区间。
 - 不忽略定格结束后的恢复证据。

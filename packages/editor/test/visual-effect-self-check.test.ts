@@ -23,6 +23,7 @@ import {
   runVisualEffectSelfCheck,
   type VisualFrameSample
 } from "../src/visual-effect-self-check.js";
+import { effectiveParamsFor } from "./self-check-test-helpers.js";
 
 const directories: string[] = [];
 
@@ -114,6 +115,7 @@ describe("ten independent final-video self-check functions", () => {
       durationSeconds: 1,
       frameCount: 10,
       bytes: 1234,
+      effectiveParams: effectiveParamsFor("kaleidoscope"),
       frameExtractor: async (inputPath, outputPath, width, height, time) => {
         extractedInputs.push(inputPath);
         const canvas = createCanvas(width, height);

@@ -5,6 +5,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import { describe, expect, it, vi } from "vitest";
 import { EFFECT_TOOL_REGISTRY, type EffectParameterEnvelope } from "@codemotion/effect-functions";
 import { EffectToolVideoService } from "../src/effect-tool-video-service.js";
+import { importantParameterDefinitions } from "../src/self-check-parameter-summary.js";
 import {
   type DedicatedSelfCheckRunner,
   type DedicatedSelfCheckToolName
@@ -215,20 +216,23 @@ describe("nine dedicated automatic self-check functions", () => {
     });
     const macro = artifacts.view.macroView!;
     expect(Object.keys(macro)).toEqual(["file_name", "original_request", "summary", "metadata"]);
-    const summary = macro.summary as { key_information: { label: string; value: string }[] };
-    expect(summary.key_information.map((item) => item.label)).toContain(entry.expectedLabel);
+    const summary = macro.summary as { key_information: Record<string, { label: string; value: unknown }> };
+    expect(Object.keys(summary.key_information)).toEqual(
+      importantParameterDefinitions(entry.toolName).map(([name]) => name)
+    );
     const metadata = macro.metadata as {
       keyframe_evidence: { keyframes: ReadonlyArray<Readonly<Record<string, unknown>>> };
+      observed_effect: { key_information: ReadonlyArray<{ label: string; value: string }> };
     };
+    expect(metadata.observed_effect.key_information.map((item) => item.label)).toContain(entry.expectedLabel);
     expect(metadata.keyframe_evidence.keyframes.length).toBeGreaterThanOrEqual(3);
     for (const keyframe of metadata.keyframe_evidence.keyframes) {
       expect(Object.keys(keyframe)).toEqual(["sequence", "time_seconds", "role"]);
     }
     const serializedMacro = JSON.stringify(macro);
     expect(serializedMacro).not.toMatch(/normalizedParams|backendId|algorithm|resourceId|[A-Za-z]:\\|https?:\/\//u);
-    const definition = EFFECT_TOOL_REGISTRY.getByToolName(entry.toolName)!;
-    for (const field of Object.keys(definition.defaults)) {
-      expect(serializedMacro).not.toContain(`"${field}":`);
+    for (const [field] of importantParameterDefinitions(entry.toolName)) {
+      expect(summary.key_information).toHaveProperty(field);
     }
     const boardPath = artifacts.evidenceFiles.get("keyframe_contact_sheet");
     expect(boardPath).toBeTypeOf("string");

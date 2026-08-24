@@ -1,5 +1,24 @@
 # aura_field 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `intensity` | 光场强度 |
+| `centerX` | 中心横坐标 |
+| `centerY` | 中心纵坐标 |
+| `radius` | 光场半径 |
+| `hue` | 主色相 |
+| `pulseRate` | 呼吸频率 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 同时接收一份自检 JSON 和一张 `keyframe_contact_sheet`。JSON 顶层只有 `file_name`、`original_request`、`summary`、`metadata`；合成图只由最终 MP4 的关键帧组成。不得假设还存在调用参数、源素材、渲染中间结果或其他上下文。
@@ -17,7 +36,6 @@
 - `file_name`：仅用于识别最终视频文件，不得解释为服务器位置。
 - `original_request`：用户未经改写的原始要求，是确定验收维度的唯一来源。
 - `summary.description`：实际光场位置、亮度、颜色、覆盖和时间表现的简述。
-- `summary.key_information`：实际亮度、主要颜色、实际光场位置、覆盖范围、呼吸表现和运动速度；用户明确指定位置时，另列用户要求位置和位置要求匹配结果。
 - `metadata.media`：编码格式、尺寸、帧率、时长、帧数和可解码状态。
 - `metadata.quality`：黑帧、连续性、非预期闪变和证据覆盖情况。
 - `metadata.keyframe_evidence`：关键帧数量、时间、角色和合成图名称，不含本地地址。
@@ -54,7 +72,7 @@
 
 ## 禁止事项
 
-- 不输出或核对函数参数、亮度门限、公式、算法、后端和中间数据。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不输出服务器路径、资源标识、网址、租户或鉴权信息。
 - 不把正常呼吸和轻微漂移误判为故障闪烁。
 - 不用用户要求覆盖实际检测位置，也不因关键帧中存在光场就忽略位置冲突。

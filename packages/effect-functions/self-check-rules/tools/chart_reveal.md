@@ -1,5 +1,26 @@
 # chart_reveal 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `chartType` | 图表类型 |
+| `duration` | 揭示时长 |
+| `stagger` | 项目间隔 |
+| `easing` | 缓动方式 |
+| `direction` | 揭示方向 |
+| `labels` | 项目名称 |
+| `values` | 项目数值 |
+| `colors` | 项目颜色 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 检查四字段自检 JSON 与最终视频 `keyframe_contact_sheet`。用户需求决定需要核对的图表形态、数据组、顺序和完成状态。
@@ -11,7 +32,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：图表揭示与完成保持的实际结果。
-- `summary.key_information`：图表呈现、揭示范围、揭示过程、完成状态和清晰度。
 - `summary.missing_information`：无法可靠分辨的数据组或图形事实。
 - `metadata.media`：最终视频规格。
 - `metadata.quality`：黑帧、尺寸和时间连续性。

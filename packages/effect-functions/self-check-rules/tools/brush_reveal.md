@@ -1,5 +1,21 @@
 # brush_reveal 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `size` | 笔刷尺寸 |
+| `roughness` | 笔刷粗糙度 |
+| `progress` | 揭示进度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 检查四字段自检 JSON 和最终视频 `keyframe_contact_sheet`。验收目标来自用户对源画面、目标画面、笔刷质感、显现范围和完成程度的描述。
@@ -11,7 +27,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：目标显现、笔刷边缘和源目标过渡的结果。
-- `summary.key_information`：目标画面显现、源目标过渡、笔刷边缘、显现覆盖和时间表现。
 - `summary.missing_information`：缺少源或目标对照时的无法确认项。
 - `metadata.media`：最终视频规格。
 - `metadata.quality`：基础质量和时间连续性。

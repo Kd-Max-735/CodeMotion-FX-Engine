@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import { ARK_V1_MODEL, ProviderError } from "@codemotion/ai-planner";
 import type { EffectParameterEnvelope, EffectRenderResult } from "@codemotion/effect-functions";
+import { observedEffectInformation, selfCheckParameterInformation } from "./self-check-parameter-summary.js";
 
 const execFileAsync = promisify(execFile);
 const RULE_IDS = Object.freeze([
@@ -535,6 +536,7 @@ function publicSelfCheckView(request: Readonly<{
   durationSeconds: number;
   frameCount: number;
   bytes: number;
+  effectiveParams: Readonly<Record<string, unknown>>;
   snapshots: readonly WavePathRenderSnapshot[];
   geometry: Readonly<Record<string, unknown>>;
   technicalQuality: Readonly<Record<string, unknown>>;
@@ -589,7 +591,7 @@ function publicSelfCheckView(request: Readonly<{
     original_request: request.userRequest.slice(0, 4_000),
     summary: Object.freeze({
       description: `最终视频中的路径波浪从${regionName(startX, startY)}延伸到${regionName(endX, endY)}，波动${strengthLevel}，${directionText}。`,
-      key_information: Object.freeze(keyInformation),
+      key_information: selfCheckParameterInformation(TOOL_NAME, request.effectiveParams),
       missing_information: Object.freeze(wavelength === undefined ? ["波纹疏密"] : [])
     }),
     metadata: Object.freeze({
@@ -599,6 +601,7 @@ function publicSelfCheckView(request: Readonly<{
         duration_seconds: rounded(request.durationSeconds, 3), frame_count: request.frameCount,
         file_size_bytes: request.bytes, encoding_completed: true, decodable: true, has_audio: false
       }),
+      observed_effect: observedEffectInformation(keyInformation),
       quality: Object.freeze({
         black_frame_ratio: finite(request.technicalQuality.blackFrameRatio),
         decode_failure_count: finite(request.technicalQuality.decodeFailureCount),
@@ -1012,6 +1015,7 @@ export async function runWavePathSelfCheck(request: Readonly<{
       durationSeconds: request.durationSeconds,
       frameCount: request.frameCount,
       bytes: request.bytes,
+      effectiveParams: request.envelope.data,
       snapshots: request.snapshots,
       geometry,
       technicalQuality

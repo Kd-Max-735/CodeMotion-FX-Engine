@@ -307,7 +307,7 @@ function SelfCheckPanel({
         <section className="self-check-json" aria-label="自检视图 JSON">
           <div className="self-check-section-title">
             <Braces size={14} /><strong>自检视图 JSON</strong>
-            <span>成片、实际效果、质量与关键帧；不含函数内部参数</span>
+            <span>最终生效的重要参数、成片观察、质量与关键帧</span>
             <button type="button" className="self-check-json-download" onClick={() => downloadSelfCheckView(selfCheck.macroView!)}>
               <Download size={13} />下载 JSON
             </button>

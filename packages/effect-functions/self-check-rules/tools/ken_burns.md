@@ -1,5 +1,27 @@
 # ken_burns 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `duration` | 镜头时长 |
+| `startScale` | 起始缩放 |
+| `endScale` | 结束缩放 |
+| `startCenterX` | 起始中心横坐标 |
+| `startCenterY` | 起始中心纵坐标 |
+| `endCenterX` | 结束中心横坐标 |
+| `endCenterY` | 结束中心纵坐标 |
+| `easing` | 缓动方式 |
+| `motionMode` | 运动模式 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约和核心原则
 
 验收输入只有顶层为 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及最终 MP4 生成的 `keyframe_contact_sheet`。
@@ -11,7 +33,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户原话。
 - `summary.description`：用镜头平移方向、推近或拉远、节奏和转向描述结果。
-- `summary.key_information`：实际平移方向、缩放方向、镜头节奏与起终构图。
 - `summary.missing_information`：无法可靠确认的取景事实。
 - `metadata.media`：最终视频媒体事实。
 - `metadata.quality`：黑帧、冻结、闪变、突切和尺寸一致性。
@@ -50,7 +71,6 @@
 
 ## 禁止事项
 
-- 不输出函数参数、中心坐标、轨迹公式、采样安排、算法、后端或资源信息。
 - 不依据预期中心和缩放证明成片正确。
 - 不把主体自身运动误当成镜头平移；需结合背景和多个固定参照。
 - 不把突然裁切或数字跳变美化为平滑运镜。

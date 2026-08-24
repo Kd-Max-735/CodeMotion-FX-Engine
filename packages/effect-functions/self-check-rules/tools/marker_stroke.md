@@ -1,5 +1,25 @@
 # marker_stroke 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `target` | 描边目标 |
+| `width` | 笔触宽度 |
+| `opacity` | 笔触不透明度 |
+| `bleed` | 渗色程度 |
+| `edgeRoughness` | 边缘粗糙度 |
+| `color` | 笔触颜色 |
+| `curve` | 笔触弯曲度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 验收只接收一份自检 JSON 和一张 `keyframe_contact_sheet`。JSON 顶层仅有 `file_name`、`original_request`、`summary`、`metadata`。合成图中的所有画面必须来自最终 MP4，并按时间从左到右排列。
@@ -14,7 +34,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：最终画面中实际可见的马克笔表现。
-- `summary.key_information`：包括“特效类型”“可见程度”“描边覆盖”“笔触质感”“落笔过程”。
 - `metadata.effect.描边覆盖`：笔迹在成片中的局部、适中或大范围覆盖事实。
 - `metadata.effect.笔触质感`：平整、自然手绘起伏或粗粝等可见质感。
 - `metadata.effect.落笔状态`：逐步展开或保持稳定。

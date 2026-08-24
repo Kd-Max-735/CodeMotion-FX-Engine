@@ -6,7 +6,7 @@ import { runObservedFixture, testFrame } from "./observed-motion-test-helpers.js
 
 describe("ken_burns independent self-check", () => {
   it("keeps start, pan/zoom stages, midpoint, and end framing", async () => {
-    const result = await runObservedFixture(runKenBurnsSelfCheck, (time, duration, width, height) => {
+    const result = await runObservedFixture("ken_burns", runKenBurnsSelfCheck, (time, duration, width, height) => {
       const progress = time / duration;
       return testFrame(width, height, { x: progress * 0.13, y: -progress * 0.05, scale: 1 + progress * 0.28 });
     }, "缓慢向右上巡览并推近");

@@ -6,7 +6,7 @@ import { runObservedFixture, testFrame } from "./observed-motion-test-helpers.js
 
 describe("slide independent self-check", () => {
   it("selects entry, overshoot, rebound, and stable landing evidence", async () => {
-    const result = await runObservedFixture(runSlideSelfCheck, (time, duration, width, height) => {
+    const result = await runObservedFixture("slide", runSlideSelfCheck, (time, duration, width, height) => {
       const progress = time / duration;
       const x = -0.42 * (1 - progress) + Math.sin(progress * Math.PI) * 0.04;
       return testFrame(width, height, { x });

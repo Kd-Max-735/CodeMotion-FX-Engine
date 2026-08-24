@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
+import { observedEffectInformation, selfCheckParameterInformation, type SelfCheckParameterInformation } from "./self-check-parameter-summary.js";
 
 const execFileAsync = promisify(execFile);
 const CONTACT_SHEET_ID = "keyframe_contact_sheet";
@@ -47,7 +48,7 @@ export interface EffectSelfCheckJson {
   readonly original_request: string;
   readonly summary: Readonly<{
     description: string;
-    key_information: readonly Readonly<{ label: string; value: string }>[];
+    key_information: SelfCheckParameterInformation;
     missing_information: readonly string[];
   }>;
   readonly metadata: Readonly<{
@@ -438,11 +439,7 @@ export async function runEffectVideoSelfCheck<Params extends Readonly<Record<str
     original_request: request.userRequest.slice(0, MAX_REQUEST_LENGTH),
     summary: Object.freeze({
       description: description.description,
-      key_information: Object.freeze([
-        Object.freeze({ label: "特效类型", value: config.displayName }),
-        ...description.keyInformation,
-        Object.freeze({ label: "交付状态", value: deliveryPassed ? "自检通过" : "需要返修" })
-      ]),
+      key_information: selfCheckParameterInformation(config.toolName, request.params),
       missing_information: Object.freeze([
         ...(description.missingInformation ?? []),
         ...(coverage === "insufficient" ? ["部分关键时刻未能从最终视频取得画面"] : [])
@@ -469,6 +466,7 @@ export async function runEffectVideoSelfCheck<Params extends Readonly<Record<str
         damage_basis: "完整视频解码和关键帧读取"
       }),
       effect_observation: Object.freeze({ ...description.observation }),
+      observed_effect: observedEffectInformation(description.keyInformation),
       keyframe_evidence: Object.freeze({
         coverage,
         image_count: keyframes.length,

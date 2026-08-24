@@ -1,5 +1,26 @@
 # 动感排版自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `layoutMode` | 排版模式 |
+| `strength` | 跳动强度 |
+| `jumpDuration` | 跳动时长 |
+| `text` | 文字内容 |
+| `fontSize` | 字号 |
+| `positionX` | 横向位置 |
+| `positionY` | 纵向位置 |
+| `color` | 文字颜色 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入为四字段自检 JSON 和最终 MP4 的 `keyframe_contact_sheet`。只审查实际可见文字、排版变化、节奏、完整性和质量。
@@ -43,4 +64,3 @@
 - 不输出节奏数组、缩放数组、时间计划、字形数组或公式。
 - 不用内部排版记录替代最终画面证据。
 - 不暴露资源、路径、后端或实现信息。
-

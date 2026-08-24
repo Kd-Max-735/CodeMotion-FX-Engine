@@ -1,5 +1,26 @@
 # paint_on 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `duration` | 绘制时长 |
+| `coverage` | 绘制覆盖率 |
+| `strokeOrder` | 笔触顺序 |
+| `brushShape` | 笔刷形状 |
+| `brushSize` | 笔刷尺寸 |
+| `hardness` | 笔刷硬度 |
+| `spacing` | 笔触间距 |
+| `feather` | 边缘羽化 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 检查四字段自检 JSON 与最终视频 `keyframe_contact_sheet`。用户对逐笔顺序、覆盖范围、笔触质感、完成程度和保持状态的要求决定验收标准。
@@ -11,7 +32,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：笔触推进、已绘制范围和连续性的实际结果。
-- `summary.key_information`：笔触推进、已绘制范围、绘制区域、笔触连续性和完成保持。
 - `summary.missing_information`：缺少原画面对照时无法确认的项目。
 - `metadata.media`：最终视频规格。
 - `metadata.quality`：基础质量和时间连续性。

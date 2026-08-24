@@ -6,7 +6,7 @@ import { runObservedFixture, testFrame } from "./observed-motion-test-helpers.js
 
 describe("dolly independent self-check", () => {
   it("keeps track start, travel stages, midpoint, height, and endpoint evidence", async () => {
-    const result = await runObservedFixture(runDollySelfCheck, (time, duration, width, height) => {
+    const result = await runObservedFixture("dolly", runDollySelfCheck, (time, duration, width, height) => {
       const progress = time / duration;
       return testFrame(width, height, { y: -progress * 0.08, scale: 1 + progress * 0.32 });
     }, "沿轨道升高推进");

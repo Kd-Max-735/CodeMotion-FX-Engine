@@ -1,5 +1,24 @@
 # 路径修剪自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `target` | 修剪目标 |
+| `mode` | 修剪模式 |
+| `duration` | 修剪时长 |
+| `direction` | 修剪方向 |
+| `strokeWidth` | 描边宽度 |
+| `strokeColor` | 描边颜色 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 审查输入为四字段自检 JSON 与最终 MP4 的 `keyframe_contact_sheet`。只描述可见路径推进、方向、覆盖变化、连续性及起终状态。
@@ -39,6 +58,6 @@
 
 ## 禁止事项
 
-- 不输出路径点、遮罩、轮廓数组、时间计划、公式或内部参数。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不用路径输入或遮罩正确代替成片推进证据。
 - 不暴露资源、路径、后端或实现信息。

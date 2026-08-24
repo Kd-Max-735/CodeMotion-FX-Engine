@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import { ARK_V1_MODEL, ProviderError } from "@codemotion/ai-planner";
+import { observedEffectInformation, selfCheckParameterInformation } from "./self-check-parameter-summary.js";
 import { selfCheckDisplacementMap } from "./self-checks/displacement-map-self-check.js";
 import { selfCheckFractal } from "./self-checks/fractal-self-check.js";
 import { selfCheckGlass } from "./self-checks/glass-self-check.js";
@@ -376,6 +377,7 @@ function publicView(request: Readonly<{
   durationSeconds: number;
   frameCount: number;
   bytes: number;
+  effectiveParams: Readonly<Record<string, unknown>>;
   facts: EffectFacts;
   candidates: readonly AnalyzedFrame[];
 }>): Readonly<Record<string, unknown>> {
@@ -387,7 +389,7 @@ function publicView(request: Readonly<{
     original_request: request.userRequest.slice(0, 4_000),
     summary: Object.freeze({
       description: request.facts.description,
-      key_information: request.facts.keyInformation,
+      key_information: selfCheckParameterInformation(request.toolName, request.effectiveParams),
       missing_information: Object.freeze([])
     }),
     metadata: Object.freeze({
@@ -397,6 +399,7 @@ function publicView(request: Readonly<{
         duration_seconds: rounded(request.durationSeconds, 3), frame_count: request.frameCount,
         file_size_bytes: request.bytes, encoding_completed: true, decodable: true, has_audio: false
       }),
+      observed_effect: observedEffectInformation(request.facts.keyInformation),
       quality: Object.freeze({
         black_frame_ratio: rounded(darkFrames / Math.max(1, request.candidates.length), 6),
         decode_failure_count: 0,
@@ -448,6 +451,7 @@ export async function runVisualEffectSelfCheck(request: Readonly<{
   durationSeconds: number;
   frameCount: number;
   bytes: number;
+  effectiveParams: Readonly<Record<string, unknown>>;
   reviewer?: VisualSelfCheckReviewer;
   ffmpegPath?: string;
   frameExtractor?: (inputPath: string, outputPath: string, width: number, height: number,
@@ -495,6 +499,7 @@ export async function runVisualEffectSelfCheck(request: Readonly<{
       durationSeconds: request.durationSeconds,
       frameCount: request.frameCount,
       bytes: request.bytes,
+      effectiveParams: request.effectiveParams,
       facts,
       candidates: analyzed
     });

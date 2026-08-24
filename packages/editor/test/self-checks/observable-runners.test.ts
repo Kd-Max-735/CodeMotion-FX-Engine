@@ -18,6 +18,7 @@ import {
   type ObservableSelfCheckRequest
 } from "../../src/self-checks/index.js";
 import { expectNoInternalParticleData, observation } from "./observable-test-helpers.js";
+import { effectiveParamsFor } from "../self-check-test-helpers.js";
 
 const runners = [
   ["particle_dissolve", runParticleDissolveSelfCheck, "溶解"],
@@ -77,6 +78,7 @@ describe("independent observable-effect runners", () => {
       durationSeconds: 1.1,
       frameCount: 11,
       bytes: 2048,
+      effectiveParams: effectiveParamsFor(toolName),
       observations: observations(toolName),
       frameExtractor: async (_input, output) => { await writeFile(output, png); },
       reviewer: { review: async (reviewRequest) => {

@@ -1,5 +1,25 @@
 # noise_field 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `gridSize` | 网格尺寸 |
+| `scale` | 噪声尺度 |
+| `octaves` | 噪声层数 |
+| `persistence` | 层级保持度 |
+| `speed` | 噪声速度 |
+| `lowColor` | 低值颜色 |
+| `highColor` | 高值颜色 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入为程序生成的 `file_name`、`original_request`、`summary`、`metadata` 自检 JSON，以及从最终编码视频抽取的一张 `keyframe_contact_sheet`。JSON 描述最终纹理的可观察尺度、层次和时间变化。
@@ -16,7 +36,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户原始需求。
 - `summary.description`：实际噪声场描述。
-- `summary.key_information`：纹理尺度、明暗层次、空间分布、时间变化和稳定性。
 - `summary.missing_information`：不可可靠判断项。
 - `metadata.media`：格式、尺寸、帧率、时长、帧数和可解码状态。
 - `metadata.quality`：黑帧、跨帧变化与亮度跳变。

@@ -1,5 +1,23 @@
 # handheld 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `intensity` | 手持强度 |
+| `frequency` | 晃动频率 |
+| `translationJitter` | 平移抖动 |
+| `rotationJitterDegrees` | 旋转抖动 |
+| `smoothing` | 运动平滑度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约和核心原则
 
 验收输入只有一份顶层为 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及一张由最终 MP4 关键帧组成的 `keyframe_contact_sheet`。
@@ -11,7 +29,6 @@
 - `file_name`：最终视频文件名，仅用于识别产物。
 - `original_request`：用户原话，是确定验收维度的唯一需求来源。
 - `summary.description`：对实际晃动幅度、节奏、多方向变化和起终状态的通俗描述。
-- `summary.key_information`：实际观察到的手持类型、晃动幅度、晃动节奏和起终状态。
 - `summary.missing_information`：无法可靠确认的视觉事实，不得据此虚构结论。
 - `metadata.media`：最终 MP4 的尺寸、帧率、时长、帧数、编码和可解码状态。
 - `metadata.quality`：黑帧、冻结、闪变、突切和尺寸一致性等成片质量事实。
@@ -50,7 +67,7 @@
 
 ## 禁止事项
 
-- 不读取、比较或输出函数参数、轨迹公式、采样安排、内部算法、后端或资源信息。
+- 不把算法、公式、后端、资源身份、路径或中间数据混入参数摘要。
 - 不用预期运动证明实际运动正确。
 - 不把正常手持变化误判成闪烁，也不把逐帧随机跳动美化为自然手持。
 - 不因个人偏好要求用户未提出的稳定器风格。

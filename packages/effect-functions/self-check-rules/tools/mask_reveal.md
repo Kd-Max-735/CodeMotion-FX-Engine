@@ -1,5 +1,27 @@
 # mask_reveal 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `progress` | 显现进度 |
+| `feather` | 遮罩羽化 |
+| `invert` | 反转遮罩 |
+| `shape` | 遮罩形状 |
+| `motion` | 遮罩运动 |
+| `centerX` | 中心横坐标 |
+| `centerY` | 中心纵坐标 |
+| `size` | 遮罩尺寸 |
+| `duration` | 显现时长 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 检查四字段自检 JSON 和最终视频 `keyframe_contact_sheet`。用户对遮罩形状、覆盖方向、目标显现范围、未覆盖区域和边缘质感的要求是验收目标。
@@ -11,7 +33,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：遮罩覆盖、目标画面、源画面保留和边缘结果。
-- `summary.key_information`：遮罩覆盖、目标画面、未覆盖区域、遮罩边缘和显现过程。
 - `summary.missing_information`：缺少源或目标对照时的缺项。
 - `metadata.media`：最终视频规格。
 - `metadata.quality`：基础质量和异常静止。

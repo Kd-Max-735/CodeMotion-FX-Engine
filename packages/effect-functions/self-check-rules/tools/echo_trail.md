@@ -1,5 +1,24 @@
 # echo_trail 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `trailCount` | 拖影数量 |
+| `spacing` | 拖影间隔 |
+| `decay` | 拖影衰减 |
+| `offsetX` | 横向偏移 |
+| `offsetY` | 纵向偏移 |
+| `blendMode` | 混合模式 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 - 自检 JSON 顶层只有 `file_name`、`original_request`、`summary`、`metadata`。
@@ -15,7 +34,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户对拖影数量感、长短、间隔、方向和亮度风格的要求。
 - `summary.description`：描述拖影形成、可见度、延展趋势和后段状态。
-- `summary.key_information`：记录形成过程、可见度与延展方向。
 - `metadata.media`：成片媒体事实和完整解码结果。
 - `metadata.quality`：技术可用性，不把预期残影计作故障。
 - `metadata.effect_observation`：拖影形成、方向、可见度和完成观察。
@@ -49,6 +67,5 @@
 ## 禁止事项
 
 - 不把重复人物、错位轮廓、残影或频闪分身判为编码重影。
-- 不输出参数、历史帧缓存、算法、后端或资源信息。
 - 不用当前画面复制或整页背景叠加冒充历史拖影通过证据。
 - 不要求用户未提出的拖影数量或明暗风格。

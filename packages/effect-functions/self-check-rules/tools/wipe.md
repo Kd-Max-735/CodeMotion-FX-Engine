@@ -1,5 +1,23 @@
 # wipe 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `direction` | 擦除方向 |
+| `softness` | 边缘柔和度 |
+| `angle` | 擦除角度 |
+| `progress` | 擦除进度 |
+| `duration` | 擦除时长 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 - 自检 JSON 顶层只有 `file_name`、`original_request`、`summary`、`metadata`。
@@ -15,7 +33,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户对推进方向、斜度、边界软硬和节奏的要求。
 - `summary.description`：描述推进方向、阶段覆盖、边界表现和完成状态。
-- `summary.key_information`：记录方向、转场进度与最终完成情况。
 - `metadata.media`：成片媒体事实和完整解码结果。
 - `metadata.quality`：技术完整性，不把大面积画面替换计作损坏。
 - `metadata.effect_observation`：擦除方向、边界可见度、阶段覆盖和完成观察。
@@ -49,6 +66,5 @@
 ## 禁止事项
 
 - 不把移动边界、大面积画面变化或柔化过渡带判为编码损坏。
-- 不输出参数、公式、算法、后端、素材或路径信息。
 - 不用像素块溶解、径向扩张或普通淡化冒充线性擦除。
 - 不以时间到达代替完成帧证据。

@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
+import { observedEffectInformation, selfCheckParameterInformation } from "./self-check-parameter-summary.js";
 
 const execFileAsync = promisify(execFile);
 const FONT_FAMILY = "CMFX Ten Tool Self Check";
@@ -12,6 +13,7 @@ let fontReady: boolean | undefined;
 export interface EffectSelfCheckRequest<ToolName extends string> {
   readonly toolName: ToolName;
   readonly userRequest: string;
+  readonly effectiveParams: Readonly<Record<string, unknown>>;
   readonly videoPath: string;
   readonly fileName?: string;
   readonly baselineVideoPath: string;
@@ -274,13 +276,14 @@ export async function runEffectSelfCheck<T extends string>(spec: SelfCheckSpec<T
   const json = Object.freeze({
     file_name: (request.fileName ?? basename(request.videoPath)).slice(0, 255),
     original_request: request.userRequest.slice(0, 4_000),
-    summary: Object.freeze({ description: analysis.description, key_information: Object.freeze(analysis.keyInformation),
+    summary: Object.freeze({ description: analysis.description, key_information: selfCheckParameterInformation(spec.toolName, request.effectiveParams),
       missing_information: Object.freeze(analysis.missingInformation ?? []) }),
     metadata: Object.freeze({
       media: Object.freeze({ media_type: "video/mp4", container: "mp4", width_px: request.width, height_px: request.height,
         fps: request.fps, duration_seconds: rounded(request.durationSeconds, 3), frame_count: request.frameCount,
         file_size_bytes: request.bytes, encoding_completed: true, decodable: true }),
       effect: analysis.effect,
+      observed_effect: observedEffectInformation(analysis.keyInformation),
       quality: Object.freeze({ black_frame_ratio: rounded(brightness.filter((value) => value < 0.01).length / Math.max(1, brightness.length), 6),
         dimension_consistent: true, abrupt_brightness_change: brightness.slice(1).some((value, index) => Math.abs(value - brightness[index]!) > 0.18),
         visible_frame_damage: "未发现无法解码画面" }),

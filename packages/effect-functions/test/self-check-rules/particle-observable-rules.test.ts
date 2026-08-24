@@ -7,6 +7,7 @@ import { PARTICLE_DISSOLVE_DEFINITION, PARTICLE_EMITTER_DEFINITION,
 import { COLLISION_SHATTER_DEFINITION, FLOW_FIELD_DEFINITION,
   ORBIT_FIELD_DEFINITION } from "../../src/batches/batch-04/index.js";
 import { noiseFieldDefinition } from "../../src/batches/batch-07/noise-field.js";
+import { expectValidParameterContract } from "./parameter-contract-test-helper.js";
 
 const tools = [
   ["particle_dissolve", PARTICLE_DISSOLVE_DEFINITION, ["溶解程度", "消散方向"]],
@@ -34,8 +35,7 @@ describe("ten independent observable-effect self-check rules", () => {
     expect(markdown).toMatch(/数量不固定|数量随|帧数|阶段重合/u);
     expect(markdown).toMatch(/最终.*视频|最终 MP4|最终编码视频/u);
     expect(markdown).not.toMatch(/effectId|ruleVersion|evidenceContractVersion|doubao-seed|模型版本/u);
-    for (const parameter of Object.keys(definition.defaults)) {
-      expect(markdown, `${toolName}:${parameter}`).not.toContain(`\`${parameter}\``);
-    }
+    const documented = expectValidParameterContract(markdown, toolName);
+    expect(Object.keys(definition.defaults).some((parameter) => documented.includes(parameter))).toBe(true);
   });
 });

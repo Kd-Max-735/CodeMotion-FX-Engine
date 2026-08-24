@@ -1,5 +1,23 @@
 # bounce 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `height` | 弹跳高度 |
+| `gravity` | 重力 |
+| `bounces` | 弹跳次数 |
+| `damping` | 弹跳阻尼 |
+| `squash` | 挤压幅度 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约和核心原则
 
 验收输入只有顶层为 `file_name`、`original_request`、`summary`、`metadata` 的自检 JSON，以及最终 MP4 生成的 `keyframe_contact_sheet`。
@@ -11,7 +29,6 @@
 - `file_name`：最终视频文件名。
 - `original_request`：用户原话，决定验收目标。
 - `summary.description`：用向上弹起、落下、回弹、衰减和落位描述实际结果。
-- `summary.key_information`：实际观察到的弹跳方向、幅度、峰值数量、节奏与稳定状态。
 - `summary.missing_information`：成片证据无法可靠确认的事项。
 - `metadata.media`：最终视频的格式、尺寸、帧率、时长、帧数和可解码状态。
 - `metadata.quality`：黑帧、冻结、闪变、突切与尺寸一致性。
@@ -50,7 +67,6 @@
 
 ## 禁止事项
 
-- 不输出函数参数、重力公式、采样时刻、内部算法、后端或资源信息。
 - 不用理想抛物线、预期次数或调用成功代替最终画面证据。
 - 不把悬空挤压、穿底、无落地阶段或持续漂移判为正常弹跳。
 - 不把肉眼不可见的小抖动凑成用户要求的弹跳次数。

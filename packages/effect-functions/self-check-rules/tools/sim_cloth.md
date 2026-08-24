@@ -1,5 +1,25 @@
 # sim_cloth 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `resolution` | 布料分辨率 |
+| `clothWidth` | 布面宽度 |
+| `stiffness` | 布料刚度 |
+| `damping` | 运动阻尼 |
+| `gravity` | 重力 |
+| `windStrength` | 风力 |
+| `solverIterations` | 求解迭代次数 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入仅包含一份自检 JSON 和一张 `keyframe_contact_sheet`。JSON 顶层只能有 `file_name`、`original_request`、`summary`、`metadata`；合成图必须完全来自最终 MP4。
@@ -14,7 +34,6 @@
 ## 自检视图字段及含义
 
 - `summary.description`：布面运动、褶皱和连续性的成片概述。
-- `summary.key_information`：包括“特效类型”“可见程度”“布面运动”“褶皱表现”“形变连续性”“锚点稳定”。
 - `metadata.effect.布面运动`：轻微、自然或大幅摆动。
 - `metadata.effect.褶皱表现`：平缓、层次可见或明暗强烈。
 - `metadata.effect.形变连续性`：连续或存在突跳。

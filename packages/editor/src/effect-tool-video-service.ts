@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import {
   executeSelectedEffectTool,
+  validateAndNormalizeEffectEnvelope,
   type AuthorizedEffectInputs,
   type EffectParameterEnvelope,
   type EffectRenderResult,
@@ -992,6 +993,7 @@ export class EffectToolVideoService {
     update({ ...task.view, status: "running", updatedAt: new Date().toISOString() });
     const stopGpuSampling = this.startGpuSampling(task);
     try {
+      const effectiveEnvelope = validateAndNormalizeEffectEnvelope(definition, definition.toolName, envelope);
       await mkdir(join(this.outputRoot, task.view.id), { recursive: true });
       let metadata = preparedOutputMetadata(
         task.prepared?.width ?? task.view.video.width,
@@ -1080,7 +1082,7 @@ export class EffectToolVideoService {
         }
       });
       const samplingPlan = definition.toolName === "wave_path"
-        ? wavePathSamplingPlan(metadata.durationSeconds, metadata.fps, envelope.data)
+        ? wavePathSamplingPlan(metadata.durationSeconds, metadata.fps, effectiveEnvelope.data)
         : Object.freeze([]);
       const samplingByFrame = new Map(samplingPlan.map((item) => [item.frame, item]));
       const wavePathSnapshots: WavePathRenderSnapshot[] = [];
@@ -1125,7 +1127,7 @@ export class EffectToolVideoService {
                 preparedMedia.set(assetId, media);
               }
               if (media.asset.type !== "video") continue;
-              const params = envelope.data as Readonly<Record<string, unknown>>;
+              const params = effectiveEnvelope.data as Readonly<Record<string, unknown>>;
               let sampleTime = request.time;
               if (definition.toolName === "video_freeze_frame") {
                 const freezeAt = Number(params.freezeAt ?? 2);
@@ -1227,7 +1229,7 @@ export class EffectToolVideoService {
           };
           let result: EffectRenderResult | undefined;
           try {
-            result = await executeSelectedEffectTool(definition, definition.toolName, envelope, context);
+            result = await executeSelectedEffectTool(definition, definition.toolName, effectiveEnvelope, context);
           } catch (error) {
             if (!mayUsePreviewFallback(error)) throw error;
           }
@@ -1296,7 +1298,7 @@ export class EffectToolVideoService {
           tenantId: task.owner.tenantId,
           userId: task.owner.userId,
           userRequest: task.selfCheckPrompt ?? "",
-          envelope,
+          envelope: effectiveEnvelope,
           videoPath: task.outputPath,
           fileName: completedVideo.downloadName,
           baselineVideoPath,
@@ -1354,6 +1356,7 @@ export class EffectToolVideoService {
           tenantId: task.owner.tenantId,
           userId: task.owner.userId,
           userRequest: task.selfCheckPrompt ?? "",
+          effectiveParams: effectiveEnvelope.data,
           videoPath: task.outputPath,
           fileName: completedVideo.downloadName,
           baselineVideoPath,
@@ -1399,6 +1402,7 @@ export class EffectToolVideoService {
           tenantId: task.owner.tenantId,
           userId: task.owner.userId,
           userRequest: task.selfCheckPrompt ?? "",
+          effectiveParams: effectiveEnvelope.data,
           videoPath: task.outputPath,
           fileName: completedVideo.downloadName,
           outputDirectory: join(this.outputRoot, task.view.id),
@@ -1450,7 +1454,7 @@ export class EffectToolVideoService {
         });
         const artifacts = await this.finalVideoSelfCheckRunners[definition.toolName]({
           userRequest: task.selfCheckPrompt ?? "",
-          envelope,
+          envelope: effectiveEnvelope,
           videoPath: task.outputPath,
           fileName: completedVideo.downloadName,
           baselineVideoPath,
@@ -1491,7 +1495,7 @@ export class EffectToolVideoService {
           tenantId: task.owner.tenantId,
           userId: task.owner.userId,
           userRequest: task.selfCheckPrompt ?? "",
-          envelope,
+          envelope: effectiveEnvelope,
           videoPath: task.outputPath,
           fileName: completedVideo.downloadName,
           outputDirectory: join(this.outputRoot, task.view.id),
@@ -1534,6 +1538,7 @@ export class EffectToolVideoService {
           tenantId: task.owner.tenantId,
           userId: task.owner.userId,
           userRequest: task.selfCheckPrompt ?? "",
+          effectiveParams: effectiveEnvelope.data,
           videoPath: task.outputPath,
           fileName: completedVideo.downloadName,
           outputDirectory: join(this.outputRoot, task.view.id),
@@ -1574,6 +1579,7 @@ export class EffectToolVideoService {
           userId: task.owner.userId,
           toolName: definition.toolName,
           userRequest: task.selfCheckPrompt ?? "",
+          effectiveParams: effectiveEnvelope.data,
           videoPath: task.outputPath,
           fileName: completedVideo.downloadName,
           outputDirectory: join(this.outputRoot, task.view.id),
@@ -1618,7 +1624,7 @@ export class EffectToolVideoService {
           durationSeconds: metadata.durationSeconds,
           frameCount: metadata.frameCount,
           bytes,
-          effectParams: envelope.data,
+          effectParams: effectiveEnvelope.data,
           ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
           signal: task.controller.signal
         });

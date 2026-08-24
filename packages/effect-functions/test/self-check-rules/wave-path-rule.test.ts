@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { WAVE_PATH_DEFINITION } from "../../src/batches/batch-01/wave-path.js";
+import { expectValidParameterContract } from "./parameter-contract-test-helper.js";
 
 const RULE_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -10,11 +11,12 @@ const RULE_PATH = resolve(
 );
 
 describe("wave_path self-check rule", () => {
-  it("keeps only the effect-specific acceptance guidance", async () => {
+  it("keeps effect-specific acceptance guidance and real important parameters", async () => {
     const markdown = await readFile(RULE_PATH, "utf8");
     expect(markdown).toMatch(/^# wave_path 自检规则/u);
-    for (const parameter of Object.keys(WAVE_PATH_DEFINITION.defaults))
-      expect(markdown, parameter).not.toContain(`\`${parameter}\``);
+    const parameters = expectValidParameterContract(markdown, "wave_path");
+    expect(parameters).toContain("amplitude");
+    expect(parameters.every((parameter) => Object.hasOwn(WAVE_PATH_DEFINITION.defaults, parameter))).toBe(true);
     expect(markdown).not.toMatch(/model|ruleVersion|evidenceContractVersion|effectId/u);
     expect(markdown.split(/\r?\n/u).length).toBeLessThan(120);
   });

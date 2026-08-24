@@ -1,5 +1,27 @@
 # particle_trail 自检规则
 
+<!-- self-check-parameter-contract:start -->
+## 重要参数契约
+
+- `summary.key_information` 必须是对象；每个 key 都必须逐字等于本工具 Registry Schema 中真实存在的参数名。
+- 这里只显示对最终视频变化有直接判断价值的重要参数：
+
+| JSON key | 中文名称 |
+| --- | --- |
+| `emissionRate` | 发射速率 |
+| `trailLength` | 拖尾长度 |
+| `speed` | 运动速度 |
+| `width` | 拖尾宽度 |
+| `fade` | 拖尾衰减 |
+| `waviness` | 轨迹波动 |
+| `trajectory` | 轨迹类型 |
+| `direction` | 运动方向 |
+| `hue` | 拖尾色相 |
+
+- 每项结构固定为 `{ "label": "中文名称", "value": 最终生效值 }`。`value` 来自补齐默认值、验证并标准化后真正用于渲染的参数，禁止猜测、改名或新增参数。
+- `metadata.effect` 与 `metadata.observed_effect` 记录从最终 MP4 和关键帧得到的成片观察证据；它们不是参数，不得混入 `summary.key_information`。
+<!-- self-check-parameter-contract:end -->
+
 ## 输入契约
 
 输入是程序生成的 `file_name`、`original_request`、`summary`、`metadata` 自检 JSON，以及从最终 MP4 动态抽帧的一张 `keyframe_contact_sheet`。不得用轨迹计算结果代替最终画面。
@@ -16,7 +38,6 @@
 - `file_name`：最终视频名称。
 - `original_request`：用户原始需求。
 - `summary.description`：实际拖尾表现。
-- `summary.key_information`：粒子数量感、拖尾长度感、轨迹形态、运动方向和衰减表现。
 - `summary.missing_information`：无法可靠判断项。
 - `metadata.media`：成片规格和可解码状态。
 - `metadata.quality`：黑帧、时间变化和亮度跳变。

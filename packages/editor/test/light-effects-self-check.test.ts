@@ -14,6 +14,7 @@ import { runScanBeamSelfCheck, scanBeamSamplingPlan } from "../src/scan-beam-sel
 import { runVolumetricRaySelfCheck } from "../src/volumetric-ray-self-check.js";
 import { runHologramSelfCheck, hologramSamplingPlan } from "../src/hologram-self-check.js";
 import type { FinalVideoSelfCheckArtifacts, FinalVideoSelfCheckRequest } from "../src/final-video-self-check.js";
+import { importantParameterDefinitions } from "../src/self-check-parameter-summary.js";
 
 type ToolName = FinalVideoSelfCheckRequest["envelope"]["type"];
 type Runner = (request: FinalVideoSelfCheckRequest) => Promise<FinalVideoSelfCheckArtifacts>;
@@ -130,9 +131,19 @@ describe("ten independent final-MP4 light-effect self-check functions", () => {
       expect(artifacts.view.evidenceImages[0]?.evidenceId).toBe("keyframe_contact_sheet");
       expect(artifacts.view.macroView).toBeDefined();
       expect(Object.keys(artifacts.view.macroView!)).toEqual(["file_name", "original_request", "summary", "metadata"]);
-      const summary = artifacts.view.macroView!.summary as { key_information: readonly { label: string }[] };
-      for (const label of entry.expectedLabels) expect(summary.key_information.map((item) => item.label)).toContain(label);
-      const metadata = artifacts.view.macroView!.metadata as { keyframe_evidence: { image_count: number } };
+      const summary = artifacts.view.macroView!.summary as {
+        key_information: Record<string, { label: string; value: unknown }>;
+      };
+      expect(Object.keys(summary.key_information)).toEqual(
+        importantParameterDefinitions(entry.toolName).map(([name]) => name)
+      );
+      const metadata = artifacts.view.macroView!.metadata as {
+        keyframe_evidence: { image_count: number };
+        observed_effect: { key_information: ReadonlyArray<{ label: string; value: string }> };
+      };
+      for (const label of entry.expectedLabels) {
+        expect(metadata.observed_effect.key_information.map((item) => item.label)).toContain(label);
+      }
       expect(metadata.keyframe_evidence.image_count).toBeGreaterThanOrEqual(2);
       expect(metadata.keyframe_evidence.image_count).toBeLessThanOrEqual(8);
       const serialized = JSON.stringify(artifacts.view.macroView);
@@ -159,9 +170,9 @@ describe("ten independent final-MP4 light-effect self-check functions", () => {
   it("fails aura_field when the observed location conflicts with an explicit requested corner", async () => {
     const entry = CASES.find((item) => item.toolName === "aura_field")!;
     const artifacts = await runCase(entry, "让光场位于右上角");
-    const information = (artifacts.view.macroView!.summary as {
-      key_information: readonly { label: string; value: string }[];
-    }).key_information;
+    const information = (artifacts.view.macroView!.metadata as {
+      observed_effect: { key_information: readonly { label: string; value: string }[] };
+    }).observed_effect.key_information;
 
     expect(artifacts.view.status).toBe("fail");
     expect(information).toEqual(expect.arrayContaining([
