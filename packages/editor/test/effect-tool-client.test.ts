@@ -79,7 +79,7 @@ describe("selected effect-tool browser client", () => {
     ].map((ruleId) => ({
       ruleId,
       status: "pass",
-      evidenceRefs: ["evidence_board_01"],
+      evidenceRefs: ["keyframe_contact_sheet"],
       reason: "证据一致。"
     }));
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
@@ -100,13 +100,13 @@ describe("selected effect-tool browser client", () => {
           status: "pass",
           automatic: true,
           toolName: "wave_path",
-          ruleVersion: "1.0.0",
-          evidenceContractVersion: "1.0.0",
+          ruleVersion: "1.1.0",
+          evidenceContractVersion: "1.1.0",
           evidenceStatus: "sufficient",
           macroView: { normalizedParams: { amplitude: 48 }, output: { encodingCompleted: true } },
           evidenceImages: [{
-            evidenceId: "evidence_board_01", label: "最终成片关键帧证据板", mime: "image/png",
-            width: 1092, height: 710
+            evidenceId: "keyframe_contact_sheet", label: "最终 MP4 关键帧合成图", mime: "image/png",
+            width: 928, height: 317
           }],
           result: { status: "pass", summary: "全部通过。", checks, issues: [] }
         }
@@ -118,12 +118,12 @@ describe("selected effect-tool browser client", () => {
       selfCheck: {
         status: "pass",
         evidenceStatus: "sufficient",
-        evidenceImages: [{ evidenceId: "evidence_board_01" }],
+        evidenceImages: [{ evidenceId: "keyframe_contact_sheet" }],
         result: { status: "pass" }
       }
     });
     expect(execution.selfCheck?.result?.checks[0]?.ruleId).toBe("WP_EXECUTION_INTEGRITY");
-    expect(selectedEffectToolApi.selfCheckEvidenceUrl("execution-wave-path", "evidence_board_01"))
-      .toBe("/api/effect-tools/v3/executions/execution-wave-path/self-check/evidence/evidence_board_01");
+    expect(selectedEffectToolApi.selfCheckEvidenceUrl("execution-wave-path", "keyframe_contact_sheet"))
+      .toBe("/api/effect-tools/v3/executions/execution-wave-path/self-check/evidence/keyframe_contact_sheet");
   });
 });

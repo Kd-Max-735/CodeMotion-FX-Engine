@@ -42,7 +42,7 @@ describe("wave_path automatic self-check contract", () => {
       checks: RULE_IDS.map((ruleId) => ({
         ruleId,
         status: "pass",
-        evidenceRefs: ["evidence_board_01"],
+        evidenceRefs: ["keyframe_contact_sheet"],
         reason: "参数、宏观指标和最终成片关键帧相互一致。"
       })),
       issues: []
@@ -69,7 +69,7 @@ describe("wave_path automatic self-check contract", () => {
       checks: RULE_IDS.map((ruleId) => ({
         ruleId,
         status: "pass",
-        evidenceRefs: ["evidence_board_01"],
+        evidenceRefs: ["keyframe_contact_sheet"],
         reason: "证据板与宏观指标一致。"
       })),
       issues: []
@@ -87,7 +87,7 @@ describe("wave_path automatic self-check contract", () => {
       userRequest: "生成路径波浪",
       normalizedParams: {},
       rule: "test rule",
-      macroView: { samplingPlan: [], evidenceImages: [{ evidenceId: "evidence_board_01" }] },
+      macroView: { samplingPlan: [], evidenceImages: [{ evidenceId: "keyframe_contact_sheet" }] },
       evidencePng: Buffer.from("png")
     })).resolves.toMatchObject({ status: "pass", summary: "路径波浪全部规则通过。" });
   });
@@ -129,7 +129,7 @@ describe("wave_path automatic self-check contract", () => {
       checks: RULE_IDS.map((ruleId) => ({
         ruleId,
         status: "pass" as const,
-        evidenceRefs: ["evidence_board_01"],
+        evidenceRefs: ["keyframe_contact_sheet"],
         reason: "宏观指标与关键帧证据一致。"
       })),
       issues: []
@@ -141,7 +141,7 @@ describe("wave_path automatic self-check contract", () => {
       userRequest: "生成一条细密、静止并自然收束的路径波浪",
       envelope: { type: "wave_path", data: params },
       videoPath: join(outputDirectory, "output.mp4"),
-      sourcePath: fixturePath,
+      baselineVideoPath: join(outputDirectory, "self-check-codec-baseline.mp4"),
       outputDirectory,
       width: 640,
       height: 360,
@@ -161,14 +161,101 @@ describe("wave_path automatic self-check contract", () => {
       macroView: {
         output: { encodingCompleted: true, decodable: true },
         render: { sampledFrameCount: 3, degraded: false },
-        technicalQuality: { decodeFailureCount: 0 }
+        technicalQuality: {
+          comparisonBasis: "same_codec_control",
+          baselineFrameCount: 3,
+          decodeFailureCount: 0,
+          nonLocalChangeRatio: 0
+        }
       },
-      evidenceImages: [{ evidenceId: "evidence_board_01", width: 1092 }]
+      evidenceImages: [{ evidenceId: "keyframe_contact_sheet", width: 928, height: 317 }]
     });
-    const boardPath = artifacts.evidenceFiles.get("evidence_board_01");
+    const boardPath = artifacts.evidenceFiles.get("keyframe_contact_sheet");
     expect(boardPath).toBeTypeOf("string");
     const board = await loadImage(boardPath!);
-    expect(board.width).toBe(1092);
-    expect(board.height).toBeGreaterThan(1_000);
+    expect(board.width).toBe(928);
+    expect(board.height).toBe(317);
+  });
+
+  it("compares against the same-codec control and still reports real changes outside the path", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "cmfx-wave-control-baseline-"));
+    const baselineFixture = join(outputDirectory, "baseline.png");
+    const finalFixture = join(outputDirectory, "final.png");
+    const baseline = createCanvas(100, 100);
+    const baselineContext = baseline.getContext("2d");
+    baselineContext.fillStyle = "#30363a";
+    baselineContext.fillRect(0, 0, 100, 100);
+    await writeFile(baselineFixture, baseline.toBuffer("image/png"));
+    const final = createCanvas(100, 100);
+    const finalContext = final.getContext("2d");
+    finalContext.drawImage(baseline, 0, 0);
+    finalContext.fillStyle = "#ffffff";
+    finalContext.fillRect(0, 0, 20, 20);
+    await writeFile(finalFixture, final.toBuffer("image/png"));
+    const params = {
+      amplitude: 4, wavelength: 80, phase: 0, speed: 0, taper: 0,
+      sampleSpacing: 8, startX: 0.4, startY: 0.5, endX: 0.6, endY: 0.5
+    };
+    const sourcePoints = [{ x: 40, y: 50 }, { x: 60, y: 50 }];
+    const snapshots = wavePathSamplingPlan(1, 30, params).map((item) => ({
+      ...item,
+      algorithm: "arc_length_normal_wave",
+      backendId: "effect-functions-existing-cpu-v1",
+      degraded: false,
+      warnings: [],
+      sourcePoints,
+      points: sourcePoints,
+      rawPointCount: sourcePoints.length,
+      rawSourcePointCount: sourcePoints.length,
+      phaseRadiansFromRenderer: item.phaseRadians
+    }));
+    const decision = {
+      status: "pass" as const,
+      summary: "测试审查器只回传宏观指标。",
+      checks: RULE_IDS.map((ruleId) => ({
+        ruleId,
+        status: "pass" as const,
+        evidenceRefs: ["keyframe_contact_sheet"],
+        reason: "测试判断。"
+      })),
+      issues: []
+    };
+    let reviewedMacro: Readonly<Record<string, unknown>> | undefined;
+    const baselineVideoPath = join(outputDirectory, "self-check-codec-baseline.mp4");
+    await runWavePathSelfCheck({
+      requestId: "test-wave-path-control-baseline",
+      tenantId: "tenant-test",
+      userId: "user-test",
+      userRequest: "保持路径外画面干净",
+      envelope: { type: "wave_path", data: params },
+      videoPath: join(outputDirectory, "output.mp4"),
+      baselineVideoPath,
+      outputDirectory,
+      width: 100,
+      height: 100,
+      fps: 30,
+      durationSeconds: 1,
+      frameCount: 30,
+      bytes: 1024,
+      backendId: "effect-functions-existing-cpu-v1",
+      snapshots,
+      reviewer: {
+        review: async (request) => {
+          reviewedMacro = request.macroView;
+          return decision;
+        }
+      },
+      frameExtractor: async (inputPath, outputPath) => copyFile(
+        inputPath === baselineVideoPath ? baselineFixture : finalFixture,
+        outputPath
+      )
+    });
+
+    expect(reviewedMacro?.technicalQuality).toMatchObject({
+      comparisonBasis: "same_codec_control",
+      baselineFrameCount: 3
+    });
+    expect((reviewedMacro?.technicalQuality as Record<string, unknown>).nonLocalChangeRatio)
+      .toBeGreaterThan(0.005);
   });
 });

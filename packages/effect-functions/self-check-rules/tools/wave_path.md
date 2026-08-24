@@ -2,8 +2,8 @@
 
 - `toolName`: `wave_path`
 - `effectId`: `fx.vector.wavePath`
-- `ruleVersion`: `1.0.0`
-- `evidenceContractVersion`: `1.0.0`
+- `ruleVersion`: `1.1.0`
+- `evidenceContractVersion`: `1.1.0`
 - `decision`: exactly `pass` or `fail`
 - `model`: `doubao-seed-2-0-lite-260428`
 
@@ -43,24 +43,17 @@
 | `samplingPlan` | 每张证据帧的 `evidenceId`、时间、帧号、角色和相位 |
 | `geometry` | 基准路径、波浪路径及其解析得到的几何一致性指标 |
 | `temporal` | 跨帧相位推进、中心线运动、方向和静态稳定性指标 |
-| `technicalQuality` | 黑帧、破图、重复帧、闪烁、裁切和非局部污染指标 |
+| `technicalQuality` | 黑帧、破图、重复帧、闪烁、裁切和基于同编码控制帧的非局部污染指标 |
 | `evidenceImages` | 模型实际收到的图片及其中包含的 `evidenceId`，不得含路径或 URL |
 | `evidenceStatus` | 必须严格等于 `sufficient` |
 
 `normalizedParams` 必须完整包含：`amplitude`、`wavelength`、`phase`、`speed`、`taper`、`sampleSpacing`、`startX`、`startY`、`endX`、`endY`。不得使用默认值替代已经归一化的实际值。
 
-### 3.2 固定参考帧
+### 3.2 同编码控制基线
 
-证据图必须包含一张 `source_reference`：最终输出尺寸下的授权源图片。其上只允许绘制诊断覆盖层：
+服务器必须使用与最终成片完全相同的尺寸、FPS、时长、视频编码器、质量参数和像素格式，把授权源图片编码为无特效控制视频。每个最终关键帧都必须在控制视频中抽取相同时间的控制帧。
 
-- `S`：由 `startX/startY` 转换得到的基准起点；
-- `E`：由 `endX/endY` 转换得到的基准终点；
-- 从 `S` 指向 `E` 的方向箭头；
-- 基准直线路径；
-- 最大波幅包络；
-- 用户原始需求的安全截断摘要。
-
-诊断覆盖层必须与干净的最终帧分区展示，不能伪装成最终渲染内容。
+控制帧只用于服务器计算确定性指标，不加入关键帧合成图，也不向模型暴露视频、路径或资源标识。`technicalQuality.comparisonBasis` 必须严格等于 `same_codec_control`，`baselineFrameCount` 必须等于最终关键帧数量。
 
 ### 3.3 动态抽帧策略
 
@@ -86,34 +79,21 @@
 2. `motion_end`：`0.95 × duration`；
 3. 最多三个 `phase_probe`：优先选择相对 `motion_start` 理论相位推进最接近 `90°`、`180°`、`270°` 的有效时刻。
 
-若视频时长不足以覆盖某个相位探针，只保留实际可达的探针。一个理论探针都不可达时，必须以 `0.50 × duration` 增加 `motion_middle`，保证动态帧总数为 `3..5`；不得为了凑数量复制同一帧。所有图片必须按时间从左到右排列，并标注时间、帧号、累计相位和传播方向。
+若视频时长不足以覆盖某个相位探针，只保留实际可达的探针。一个理论探针都不可达时，必须以 `0.50 × duration` 增加 `motion_middle`，保证动态帧总数为 `3..5`；不得为了凑数量复制同一帧。所有图片必须按时间从左到右排列，并标注角色、时间、帧号和 `evidenceId`。相位和传播方向保留在宏观自检 JSON 中，不重复绘制到图片。
 
-### 3.4 局部证据
+### 3.4 证据边界
 
-满足以下任一条件时，必须增加一张不插值放大的 `path_detail`：
-
-- `amplitude < 12`；
-- `wavelength < 80`；
-- `sampleSpacing > 16`；
-- 路径包围盒短边小于画面短边的 `25%`；
-- 路径离任一画面边缘小于 `max(8, amplitude)` 像素；
-- 自动指标报告路径断裂、严重裁切或局部闪烁候选。
-
-局部证据必须同时显示干净裁剪和诊断裁剪，且标出其在全帧中的位置。
+本版本只处理证据充分的既定流程。几何公式、相位、方向、端点误差和技术指标使用宏观自检 JSON 表达；关键帧合成图只承载必须进行视觉判断的最终像素，不生成额外诊断帧、局部放大图或指标图。
 
 ## 4. 证据图片布局
 
-第一张证据图片必须是一张可读的证据板，按以下顺序组成：
+证据图片必须是一张 `keyframe_contact_sheet`，只包含从最终编码 MP4 抽取的干净关键帧：
 
-1. 标题区：tool、规则版本、输出尺寸、FPS、时长；
-2. `source_reference`；
-3. 按时间排序的干净最终帧；
-4. 与最终帧一一对应的诊断帧；
-5. 关键指标摘要与图例。
-
-诊断帧必须标出基准路径、实际中心线、`S/E`、波幅包络、越界区和 `evidenceId`。不得仅提供诊断帧；模型必须能看到未经覆盖层遮挡的最终像素。
-
-当单张证据板会导致单帧有效显示宽度低于 `320px` 时，拆成最多两张图片：第一张放参考帧和干净时序帧，第二张放诊断帧和局部证据。
+1. 所有关键帧按时间从左到右排列；
+2. 每帧只标注顺序、角色、时间、帧号和 `evidenceId`；
+3. 不绘制基准线、包络、路径诊断、裁剪框、确定性指标或用户需求文字；
+4. 图片中不得嵌入宏观自检 JSON，JSON 必须在前端作为独立视图展示；
+5. 不得用源图片、控制帧或中间渲染结果冒充最终关键帧。
 
 ## 5. 确定性指标
 
@@ -137,7 +117,9 @@
 | `technicalQuality.blackFrameRatio` | 抽样帧中近黑帧比例 |
 | `technicalQuality.decodeFailureCount` | 证据帧解码失败数量 |
 | `technicalQuality.dimensionMismatchCount` | 抽样帧尺寸不一致数量 |
-| `technicalQuality.nonLocalChangeRatio` | 最大波幅包络外，与源图相比发生显著变化的像素比例 |
+| `technicalQuality.comparisonBasis` | 必须为 `same_codec_control`，表示控制帧与成片帧经过相同视频编码链路 |
+| `technicalQuality.baselineFrameCount` | 与最终关键帧逐一配对的同编码控制帧数量 |
+| `technicalQuality.nonLocalChangeRatio` | 最大波幅包络外，最终关键帧与相同时间同编码控制帧相比发生显著变化的像素比例 |
 | `technicalQuality.flickerScore` | 对齐中心线后，非路径区域相邻证据帧的异常亮度变化 |
 
 波浪公式必须与实际实现一致：
@@ -170,10 +152,10 @@
 - `baselineStartErrorPx <= 0.5`；
 - `baselineEndErrorPx <= 0.5`；
 - `S` 与 `E` 未被交换；
-- 诊断箭头从参数起点指向参数终点；
-- 视觉上 `S/E` 分别落在用户描述的可见对象、部位或区域上。
+- 宏观 JSON 中的基准方向从参数起点指向参数终点；
+- 干净关键帧中可见路径的起止区域与用户描述的对象、部位或区域一致。
 
-最后一项由模型结合用户需求与 `source_reference` 判断，其余项目使用宏观 JSON。
+最后一项由模型结合用户需求与 `keyframe_contact_sheet` 判断，其余项目使用宏观 JSON。
 
 ### `WP_WAVE_GEOMETRY`
 
@@ -215,6 +197,7 @@
 - `decodeFailureCount = 0`；
 - `dimensionMismatchCount = 0`；
 - `blackFrameRatio = 0`，除非源图片本身在对应区域为黑且宏观 JSON 明确证明；
+- `comparisonBasis = same_codec_control` 且 `baselineFrameCount` 等于抽样关键帧数量；
 - 路径连续，无断裂、NaN 拉丝、随机尖峰、整帧闪白或无法解释的跳变；
 - `nonLocalChangeRatio <= 0.005`；
 - `flickerScore` 不超过服务器按相同源图和编码档位校准的上限；
@@ -256,7 +239,7 @@
     {
       "ruleId": "WP_BASELINE_AND_DIRECTION",
       "status": "pass",
-      "evidenceRefs": ["macro.geometry", "source_reference"],
+      "evidenceRefs": ["macro.geometry", "motion_start"],
       "reason": "起终点及方向与参数和用户指定区域一致。"
     },
     {
@@ -274,19 +257,19 @@
     {
       "ruleId": "WP_TAPER_BEHAVIOR",
       "status": "pass",
-      "evidenceRefs": ["macro.geometry", "diagnostic_middle"],
+      "evidenceRefs": ["macro.geometry", "phase_probe_180"],
       "reason": "端点收束符合 taper 参数。"
     },
     {
       "ruleId": "WP_FRAME_SAFETY",
       "status": "pass",
-      "evidenceRefs": ["macro.technicalQuality", "evidence_board_01"],
+      "evidenceRefs": ["macro.technicalQuality", "keyframe_contact_sheet"],
       "reason": "未见黑帧、破图、断裂、异常闪烁或非局部污染。"
     },
     {
       "ruleId": "WP_USER_INTENT",
       "status": "pass",
-      "evidenceRefs": ["source_reference", "evidence_board_01"],
+      "evidenceRefs": ["macro.samplingPlan", "keyframe_contact_sheet"],
       "reason": "最终视觉表现符合用户明确提出的要求。"
     }
   ],
@@ -307,7 +290,8 @@
 
 ## 8. 禁止的误判
 
-- 不得把诊断覆盖层当成最终画面内容。
+- 不得要求关键帧合成图重复宏观自检 JSON 中已有的字符串或数值信息。
+- 不得把 PNG 源图与 H.264 成片之间的编码误差当成非局部污染；该判断只能使用同编码控制帧指标。
 - 不得把正常的周期相位变化判为随机闪烁。
 - 不得把 `speed=0` 时不改变中心线的装饰光点变化判为波浪传播。
 - 不得要求实际采样峰值无条件等于 `amplitude`。

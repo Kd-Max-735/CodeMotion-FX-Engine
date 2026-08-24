@@ -33,8 +33,10 @@ describe("wave_path self-check rule", () => {
     const markdown = await readFile(RULE_PATH, "utf8");
     expect(markdown).toContain("宏观自检 JSON");
     expect(markdown).toContain("抽帧从最终编码视频解码");
-    expect(markdown).toContain("source_reference");
-    expect(markdown).toContain("path_detail");
+    expect(markdown).toContain("keyframe_contact_sheet");
+    expect(markdown).toContain("same_codec_control");
+    expect(markdown).not.toContain("source_reference");
+    expect(markdown).not.toContain("path_detail");
     for (const ruleId of RULE_IDS) expect(markdown, ruleId).toContain(ruleId);
   });
 

@@ -562,20 +562,20 @@ describe("server single effect-tool service", () => {
       }
     };
     const selfCheckRunner = vi.fn(async (request: { outputDirectory: string; userRequest: string }) => {
-      const evidencePath = join(request.outputDirectory, "evidence_board_01.png");
+      const evidencePath = join(request.outputDirectory, "keyframe_contact_sheet.png");
       await writeFile(evidencePath, Buffer.from("test-evidence-png"));
       return {
         view: {
           status: "pass" as const,
           automatic: true as const,
           toolName: "wave_path" as const,
-          ruleVersion: "1.0.0" as const,
-          evidenceContractVersion: "1.0.0" as const,
+          ruleVersion: "1.1.0" as const,
+          evidenceContractVersion: "1.1.0" as const,
           evidenceStatus: "sufficient" as const,
           macroView: { userRequest: request.userRequest, output: { encodingCompleted: true } },
           evidenceImages: [{
-            evidenceId: "evidence_board_01", label: "最终视频关键帧证据板", mime: "image/png" as const,
-            width: 1092, height: 710
+            evidenceId: "keyframe_contact_sheet", label: "最终 MP4 关键帧合成图", mime: "image/png" as const,
+            width: 928, height: 317
           }],
           result: {
             status: "pass" as const,
@@ -584,7 +584,7 @@ describe("server single effect-tool service", () => {
             issues: []
           }
         },
-        evidenceFiles: new Map([["evidence_board_01", evidencePath]])
+        evidenceFiles: new Map([["keyframe_contact_sheet", evidencePath]])
       };
     });
     const video = await testVideoService({ wavePathSelfCheckRunner: selfCheckRunner as never });
@@ -605,18 +605,22 @@ describe("server single effect-tool service", () => {
         status: "pass",
         evidenceStatus: "sufficient",
         macroView: { userRequest: prompt },
-        evidenceImages: [{ evidenceId: "evidence_board_01" }]
+        evidenceImages: [{ evidenceId: "keyframe_contact_sheet" }]
       }
     });
     expect(selfCheckRunner).toHaveBeenCalledOnce();
-    expect(selfCheckRunner.mock.calls[0]![0]).toMatchObject({ userRequest: prompt });
-    const evidence = await service.openSelfCheckEvidence(principal, turn.execution.id, "evidence_board_01");
-    expect(evidence).toMatchObject({ bytes: 17, name: "evidence_board_01.png", mime: "image/png" });
+    expect(selfCheckRunner.mock.calls[0]![0]).toMatchObject({
+      userRequest: prompt,
+      baselineVideoPath: expect.stringContaining("self-check-codec-baseline.mp4")
+    });
+    expect(video.exportFrames).toHaveBeenCalledTimes(2);
+    const evidence = await service.openSelfCheckEvidence(principal, turn.execution.id, "keyframe_contact_sheet");
+    expect(evidence).toMatchObject({ bytes: 17, name: "keyframe_contact_sheet.png", mime: "image/png" });
     await evidence.close();
     await expect(service.openSelfCheckEvidence(
       { ...principal, tenantId: "tenant-other" },
       turn.execution.id,
-      "evidence_board_01"
+      "keyframe_contact_sheet"
     )).rejects.toThrow(/access denied/u);
     await service.close();
   });

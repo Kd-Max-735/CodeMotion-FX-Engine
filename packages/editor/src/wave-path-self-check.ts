@@ -18,8 +18,8 @@ const RULE_IDS = Object.freeze([
   "WP_USER_INTENT"
 ] as const);
 const TOOL_NAME = "wave_path";
-const RULE_VERSION = "1.0.0";
-const EVIDENCE_CONTRACT_VERSION = "1.0.0";
+const RULE_VERSION = "1.1.0";
+const EVIDENCE_CONTRACT_VERSION = "1.1.0";
 const DEFAULT_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
 const MAX_REVIEW_TEXT = 2_000;
 const EVIDENCE_FONT_FAMILY = "CMFX CJK";
@@ -88,8 +88,8 @@ export interface EffectToolSelfCheckView {
   readonly status: "queued" | "running" | "pass" | "fail";
   readonly automatic: true;
   readonly toolName: "wave_path";
-  readonly ruleVersion: "1.0.0";
-  readonly evidenceContractVersion: "1.0.0";
+  readonly ruleVersion: "1.1.0";
+  readonly evidenceContractVersion: "1.1.0";
   readonly evidenceStatus: "pending" | "sufficient";
   readonly macroView?: Readonly<Record<string, unknown>>;
   readonly evidenceImages: readonly Readonly<{
@@ -383,146 +383,6 @@ function drawFitted(ctx: SKRSContext2D, image: Awaited<ReturnType<typeof loadIma
   return { x: left, y: top, width: targetWidth, height: targetHeight };
 }
 
-function drawUnscaledCrop(
-  ctx: SKRSContext2D,
-  image: Awaited<ReturnType<typeof loadImage>>,
-  crop: Readonly<{ x: number; y: number; width: number; height: number }>,
-  x: number,
-  y: number,
-  width: number,
-  height: number
-): Readonly<{ x: number; y: number; width: number; height: number }> {
-  const scale = Math.min(1, width / crop.width, height / crop.height);
-  const targetWidth = crop.width * scale;
-  const targetHeight = crop.height * scale;
-  const left = x + (width - targetWidth) / 2;
-  const top = y + (height - targetHeight) / 2;
-  ctx.fillStyle = "#070b12";
-  ctx.fillRect(x, y, width, height);
-  ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, left, top, targetWidth, targetHeight);
-  return { x: left, y: top, width: targetWidth, height: targetHeight };
-}
-
-function overlayPath(
-  ctx: SKRSContext2D,
-  box: Readonly<{ x: number; y: number; width: number; height: number }>,
-  sourceWidth: number,
-  sourceHeight: number,
-  sourcePoints: readonly Point[],
-  points: readonly Point[],
-  params: Readonly<Record<string, unknown>>,
-  viewport: Readonly<{ x: number; y: number; width: number; height: number }> = {
-    x: 0, y: 0, width: sourceWidth, height: sourceHeight
-  }
-): void {
-  const map = (point: Point): Point => ({
-    x: box.x + (point.x - viewport.x) / Math.max(1, viewport.width - 1) * box.width,
-    y: box.y + (point.y - viewport.y) / Math.max(1, viewport.height - 1) * box.height
-  });
-  const line = (values: readonly Point[], color: string, width: number): void => {
-    if (values.length < 2) return;
-    ctx.beginPath();
-    const first = map(values[0]!);
-    ctx.moveTo(first.x, first.y);
-    for (const point of values.slice(1)) {
-      const mapped = map(point);
-      ctx.lineTo(mapped.x, mapped.y);
-    }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.stroke();
-  };
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(box.x, box.y, box.width, box.height);
-  ctx.clip();
-  const envelope = sourcePoints.map((point, index) => {
-    const previous = sourcePoints[Math.max(0, index - 1)] ?? point;
-    const next = sourcePoints[Math.min(sourcePoints.length - 1, index + 1)] ?? point;
-    const dx = next.x - previous.x;
-    const dy = next.y - previous.y;
-    const length = Math.hypot(dx, dy) || 1;
-    const progress = sourcePoints.length <= 1 ? 0 : index / (sourcePoints.length - 1);
-    const distance = finite(params.amplitude) * (1 - finite(params.taper) * Math.abs(progress * 2 - 1));
-    return Object.freeze({
-      upper: { x: point.x - dy / length * distance, y: point.y + dx / length * distance },
-      lower: { x: point.x + dy / length * distance, y: point.y - dx / length * distance }
-    });
-  });
-  line(envelope.map((item) => item.upper), "rgba(251,191,36,.65)", 1);
-  line(envelope.map((item) => item.lower), "rgba(251,191,36,.65)", 1);
-  line(sourcePoints, "rgba(255,255,255,.7)", 1.5);
-  line(points, "#5eead4", 2.5);
-  const start = sourcePoints[0];
-  const end = sourcePoints.at(-1);
-  for (const [point, label, color] of [[start, "S", "#67e8f9"], [end, "E", "#fbbf24"]] as const) {
-    if (point === undefined) continue;
-    const mapped = map(point);
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(mapped.x, mapped.y, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#041018";
-    ctx.font = `bold 10px ${evidenceFont()}`;
-    ctx.fillText(label, mapped.x - 3.2, mapped.y + 3.5);
-  }
-  if (sourcePoints.length >= 2) {
-    const tip = map(sourcePoints.at(-1)!);
-    const before = map(sourcePoints[Math.max(0, sourcePoints.length - 3)]!);
-    const angle = Math.atan2(tip.y - before.y, tip.x - before.x);
-    ctx.beginPath();
-    ctx.moveTo(tip.x, tip.y);
-    ctx.lineTo(tip.x - Math.cos(angle - 0.55) * 13, tip.y - Math.sin(angle - 0.55) * 13);
-    ctx.moveTo(tip.x, tip.y);
-    ctx.lineTo(tip.x - Math.cos(angle + 0.55) * 13, tip.y - Math.sin(angle + 0.55) * 13);
-    ctx.strokeStyle = "#fbbf24";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-  for (const point of points.filter((point) => point.x < 0 || point.y < 0 || point.x >= sourceWidth || point.y >= sourceHeight)) {
-    const mapped = map({
-      x: Math.max(viewport.x, Math.min(viewport.x + viewport.width - 1, point.x)),
-      y: Math.max(viewport.y, Math.min(viewport.y + viewport.height - 1, point.y))
-    });
-    ctx.fillStyle = "#fb4b4b";
-    ctx.fillRect(mapped.x - 4, mapped.y - 4, 8, 8);
-  }
-  ctx.restore();
-}
-
-function pathDetailCrop(
-  snapshot: WavePathRenderSnapshot | undefined,
-  params: Readonly<Record<string, unknown>>,
-  width: number,
-  height: number,
-  discontinuityCount: number
-): Readonly<{ x: number; y: number; width: number; height: number }> | undefined {
-  if (snapshot === undefined) return undefined;
-  const points = [...snapshot.sourcePoints, ...snapshot.points];
-  if (points.length === 0) return undefined;
-  const minX = Math.min(...points.map((point) => point.x));
-  const maxX = Math.max(...points.map((point) => point.x));
-  const minY = Math.min(...points.map((point) => point.y));
-  const maxY = Math.max(...points.map((point) => point.y));
-  const shortSide = Math.min(maxX - minX, maxY - minY);
-  const edgeDistance = Math.min(minX, minY, width - 1 - maxX, height - 1 - maxY);
-  const needsDetail = finite(params.amplitude) < 12 || finite(params.wavelength) < 80
-    || finite(params.sampleSpacing) > 16 || shortSide < Math.min(width, height) * 0.25
-    || edgeDistance < Math.max(8, finite(params.amplitude)) || discontinuityCount > 0;
-  if (!needsDetail) return undefined;
-  const margin = Math.max(12, Math.min(64, finite(params.amplitude) + 8));
-  let cropWidth = Math.min(width, Math.max(320, maxX - minX + margin * 2));
-  let cropHeight = Math.min(height, Math.max(203, maxY - minY + margin * 2));
-  const targetAspect = 340 / 216;
-  if (cropWidth / cropHeight < targetAspect) cropWidth = Math.min(width, cropHeight * targetAspect);
-  else cropHeight = Math.min(height, cropWidth / targetAspect);
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-  const x = Math.max(0, Math.min(width - cropWidth, centerX - cropWidth / 2));
-  const y = Math.max(0, Math.min(height - cropHeight, centerY - cropHeight / 2));
-  return Object.freeze({ x: rounded(x), y: rounded(y), width: rounded(cropWidth), height: rounded(cropHeight) });
-}
-
 async function imagePixels(path: string, width: number, height: number): Promise<Uint8ClampedArray> {
   const image = await loadImage(path);
   const canvas = createCanvas(width, height);
@@ -532,13 +392,16 @@ async function imagePixels(path: string, width: number, height: number): Promise
 }
 
 async function technicalMetrics(
-  sourcePath: string,
+  baselinePaths: readonly string[],
   samplePaths: readonly string[],
   width: number,
   height: number,
   params: Readonly<Record<string, unknown>>
 ): Promise<Readonly<Record<string, unknown>>> {
-  const source = await imagePixels(sourcePath, width, height);
+  if (baselinePaths.length !== samplePaths.length || baselinePaths.length === 0) {
+    throw new Error("wave_path 同编码基线与最终关键帧数量不一致。");
+  }
+  const baselines = await Promise.all(baselinePaths.map((path) => imagePixels(path, width, height)));
   const samples = await Promise.all(samplePaths.map((path) => imagePixels(path, width, height)));
   const startX = finite(params.startX) * width;
   const startY = finite(params.startY) * height;
@@ -556,6 +419,7 @@ async function technicalMetrics(
   let blackFrames = 0;
   for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
     const pixels = samples[sampleIndex]!;
+    const baseline = baselines[sampleIndex]!;
     let luminanceTotal = 0;
     for (let pixel = 0; pixel < width * height; pixel += 1) {
       const offset = pixel * 4;
@@ -564,8 +428,9 @@ async function technicalMetrics(
       const y = Math.floor(pixel / width);
       if (x >= left && x <= right && y >= top && y <= bottom) continue;
       outsidePixels += 1;
-      const difference = Math.max(Math.abs(pixels[offset]! - source[offset]!),
-        Math.abs(pixels[offset + 1]! - source[offset + 1]!), Math.abs(pixels[offset + 2]! - source[offset + 2]!));
+      const difference = Math.max(Math.abs(pixels[offset]! - baseline[offset]!),
+        Math.abs(pixels[offset + 1]! - baseline[offset + 1]!),
+        Math.abs(pixels[offset + 2]! - baseline[offset + 2]!));
       if (difference > 32) changedOutside += 1;
       const previous = samples[sampleIndex - 1];
       if (previous !== undefined) {
@@ -577,6 +442,8 @@ async function technicalMetrics(
     if (luminanceTotal / Math.max(1, width * height) < 3) blackFrames += 1;
   }
   return Object.freeze({
+    comparisonBasis: "same_codec_control",
+    baselineFrameCount: baselines.length,
     blackFrameRatio: samples.length === 0 ? 1 : rounded(blackFrames / samples.length, 6),
     decodeFailureCount: 0,
     dimensionMismatchCount: 0,
@@ -586,137 +453,64 @@ async function technicalMetrics(
   });
 }
 
-async function evidenceBoard(
-  sourcePath: string,
+const ROLE_LABELS: Readonly<Record<WavePathSamplingItem["role"], string>> = Object.freeze({
+  static_early: "前段静态帧",
+  static_middle: "中段静态帧",
+  static_late: "后段静态帧",
+  motion_start: "运动开始帧",
+  motion_middle: "运动中间帧",
+  motion_end: "运动结束帧",
+  phase_probe: "相位检查帧"
+});
+
+async function keyframeContactSheet(
   samplePaths: ReadonlyMap<string, string>,
   snapshots: readonly WavePathRenderSnapshot[],
   outputPath: string,
   width: number,
-  height: number,
-  userRequest: string,
-  params: Readonly<Record<string, unknown>>,
-  geometry: Readonly<Record<string, unknown>>,
-  temporal: Readonly<Record<string, unknown>>,
-  technicalQuality: Readonly<Record<string, unknown>>
+  height: number
 ): Promise<Readonly<{ width: number; height: number }>> {
-  const sourceImage = await loadImage(sourcePath);
-  const byEvidence = new Map(snapshots.map((snapshot) => [snapshot.evidenceId, snapshot]));
-  type Panel = Readonly<{ label: string; image: Awaited<ReturnType<typeof loadImage>>;
-    diagnostic?: WavePathRenderSnapshot | "source";
-    crop?: Readonly<{ x: number; y: number; width: number; height: number }>;
-    detailRegion?: Readonly<{ x: number; y: number; width: number; height: number }> }>;
-  const panels: Panel[] = [
-    { label: "source_reference · S → E 基准", image: sourceImage, diagnostic: "source" },
-    { label: "source_original · 授权源图", image: sourceImage }
-  ];
-  const cleanPanels: Panel[] = [];
-  const diagnosticPanels: Panel[] = [];
-  const middleEvidenceId = snapshots[Math.floor(snapshots.length / 2)]?.evidenceId;
-  for (const [evidenceId, path] of samplePaths) {
-    const image = await loadImage(path);
-    const snapshot = byEvidence.get(evidenceId);
-    cleanPanels.push({ label: `${evidenceId} · 干净最终帧`, image });
-    if (snapshot !== undefined) diagnosticPanels.push({
-      label: `${evidenceId === middleEvidenceId
-        ? `diagnostic_middle / diagnostic_${evidenceId}` : `diagnostic_${evidenceId}`} · 路径诊断`,
-      image,
-      diagnostic: snapshot
-    });
-  }
-  panels.push(...cleanPanels, ...diagnosticPanels);
-  const detailSnapshot = snapshots[Math.floor(snapshots.length / 2)];
-  const detailCrop = pathDetailCrop(detailSnapshot, params, width, height,
-    finite(geometry.discontinuityCount));
-  const detailPath = detailSnapshot === undefined ? undefined : samplePaths.get(detailSnapshot.evidenceId);
-  if (detailCrop !== undefined && detailSnapshot !== undefined && detailPath !== undefined) {
-    const detailImage = await loadImage(detailPath);
-    panels[0] = { ...panels[0]!, detailRegion: detailCrop };
-    panels.push({ label: "path_detail_clean · 原始像素局部证据", image: detailImage, crop: detailCrop });
-    panels.push({ label: "path_detail · 局部路径诊断", image: detailImage, diagnostic: detailSnapshot, crop: detailCrop });
-  }
-  const columns = 3;
-  const panelWidth = 340;
-  const panelHeight = 216;
-  const labelHeight = 36;
-  const gap = 18;
-  const headerHeight = 112;
-  const metricsHeight = 92;
-  const rows = Math.ceil(panels.length / columns);
-  const boardWidth = columns * panelWidth + (columns + 1) * gap;
-  const boardHeight = headerHeight + rows * (panelHeight + labelHeight + gap) + metricsHeight + gap;
+  const ordered = [...snapshots].sort((a, b) => a.time - b.time);
+  const panels = await Promise.all(ordered.map(async (snapshot) => {
+    const path = samplePaths.get(snapshot.evidenceId);
+    if (path === undefined) throw new Error(`wave_path 缺少关键帧 ${snapshot.evidenceId}。`);
+    return Object.freeze({ snapshot, image: await loadImage(path) });
+  }));
+  const panelWidth = 288;
+  const panelHeight = Math.max(162, Math.round(panelWidth * height / width));
+  const labelHeight = 55;
+  const gap = 16;
+  const headerHeight = 68;
+  const boardWidth = panels.length * panelWidth + (panels.length + 1) * gap;
+  const boardHeight = headerHeight + panelHeight + labelHeight + gap * 2;
   const canvas = createCanvas(boardWidth, boardHeight);
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#080c14";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, boardWidth, boardHeight);
-  ctx.fillStyle = "#ecfeff";
-  ctx.font = `bold 26px ${evidenceFont()}`;
-  ctx.fillText("wave_path · 自动宏观自检证据", gap, 38);
-  ctx.fillStyle = "#6ee7d8";
-  ctx.font = `14px ${evidenceFont()}`;
-  ctx.fillText(`最终编码视频抽帧 · ${width} × ${height} · ${snapshots.length} 个关键时刻`, gap, 66);
-  ctx.fillStyle = "#a5b4c8";
-  ctx.fillText(`用户要求：${userRequest.replace(/\s+/gu, " ").slice(0, 110)}`, gap, 91);
+  ctx.fillStyle = "#18211d";
+  ctx.font = `bold 22px ${evidenceFont()}`;
+  ctx.fillText("wave_path 关键帧合成图", gap, 29);
+  ctx.fillStyle = "#65706a";
+  ctx.font = `13px ${evidenceFont()}`;
+  ctx.fillText(`从最终 MP4 抽取 · ${width} × ${height} · 按时间从左到右`, gap, 53);
   panels.forEach((panel, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
-    const x = gap + column * (panelWidth + gap);
-    const y = headerHeight + row * (panelHeight + labelHeight + gap);
-    const box = panel.crop === undefined
-      ? drawFitted(ctx, panel.image, x, y, panelWidth, panelHeight)
-      : drawUnscaledCrop(ctx, panel.image, panel.crop, x, y, panelWidth, panelHeight);
-    if (panel.diagnostic === "source") {
-      const first = snapshots[0];
-      if (first !== undefined) overlayPath(ctx, box, width, height, first.sourcePoints, first.sourcePoints, params);
-    } else if (panel.diagnostic !== undefined) {
-      overlayPath(ctx, box, width, height, panel.diagnostic.sourcePoints, panel.diagnostic.points, params,
-        panel.crop ?? { x: 0, y: 0, width, height });
-    }
-    if (panel.detailRegion !== undefined) {
-      ctx.strokeStyle = "#f97316";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(
-        box.x + panel.detailRegion.x / width * box.width,
-        box.y + panel.detailRegion.y / height * box.height,
-        panel.detailRegion.width / width * box.width,
-        panel.detailRegion.height / height * box.height
-      );
-    }
-    ctx.strokeStyle = panel.diagnostic === undefined ? "#263244" : "#2dd4bf";
-    ctx.lineWidth = panel.diagnostic === undefined ? 1 : 2;
+    const x = gap + index * (panelWidth + gap);
+    const y = headerHeight;
+    drawFitted(ctx, panel.image, x, y, panelWidth, panelHeight);
+    ctx.strokeStyle = "#d7ddd9";
+    ctx.lineWidth = 1;
     ctx.strokeRect(x, y, panelWidth, panelHeight);
-    ctx.fillStyle = panel.diagnostic === undefined ? "#b9c5d6" : "#7ff8e8";
-    ctx.font = panel.diagnostic === undefined ? `13px ${evidenceFont()}` : `bold 13px ${evidenceFont()}`;
-    ctx.fillText(panel.label, x + 2, y + panelHeight + 23);
+    ctx.fillStyle = "#27312c";
+    ctx.font = `bold 13px ${evidenceFont()}`;
+    ctx.fillText(`${index + 1}. ${ROLE_LABELS[panel.snapshot.role]}`, x, y + panelHeight + 21);
+    ctx.fillStyle = "#6d7872";
+    ctx.font = `11px ${evidenceFont()}`;
+    ctx.fillText(
+      `${panel.snapshot.evidenceId} · ${panel.snapshot.time.toFixed(3)}s · frame ${panel.snapshot.frame}`,
+      x,
+      y + panelHeight + 42
+    );
   });
-  const metricsY = headerHeight + rows * (panelHeight + labelHeight + gap);
-  ctx.strokeStyle = "#263244";
-  ctx.beginPath();
-  ctx.moveTo(gap, metricsY);
-  ctx.lineTo(boardWidth - gap, metricsY);
-  ctx.stroke();
-  ctx.fillStyle = "#7ff8e8";
-  ctx.font = `bold 13px ${evidenceFont()}`;
-  ctx.fillText("METRICS · 服务器确定性指标", gap, metricsY + 25);
-  ctx.fillStyle = "#b9c5d6";
-  ctx.font = `12px ${evidenceFont()}`;
-  ctx.fillText(
-    `finite=${String(geometry.finitePointRatio)}  formulaError=${String(geometry.maxFormulaErrorPx)}px  `
-      + `outOfFrame=${String(geometry.outOfFramePointRatio)}  discontinuities=${String(geometry.discontinuityCount)}`,
-    gap, metricsY + 48
-  );
-  ctx.fillText(
-    `phaseError=${String(temporal.phaseAdvanceErrorRadians)}rad  direction=${String(temporal.directionMatches)}  `
-      + `blackFrames=${String(technicalQuality.blackFrameRatio)}  nonLocalChange=${String(technicalQuality.nonLocalChangeRatio)}`,
-    gap, metricsY + 69
-  );
-  ctx.fillStyle = "#fbbf24";
-  ctx.fillRect(boardWidth - 310, metricsY + 18, 24, 2);
-  ctx.fillStyle = "#a5b4c8";
-  ctx.fillText("波幅包络", boardWidth - 278, metricsY + 23);
-  ctx.fillStyle = "#5eead4";
-  ctx.fillRect(boardWidth - 190, metricsY + 18, 24, 3);
-  ctx.fillStyle = "#a5b4c8";
-  ctx.fillText("实际路径", boardWidth - 158, metricsY + 23);
   await writeFile(outputPath, canvas.toBuffer("image/png"));
   return Object.freeze({ width: boardWidth, height: boardHeight });
 }
@@ -828,18 +622,14 @@ function assertActualEvidenceRefs(
 ): void {
   const allowed = new Set([
     "macro.output", "macro.render", "macro.samplingPlan", "macro.geometry", "macro.temporal",
-    "macro.technicalQuality", "source_reference", "diagnostic_middle", "path_detail", "path_detail_clean",
-    "evidence_board_01"
+    "macro.technicalQuality", "keyframe_contact_sheet"
   ]);
   const samplingPlan = macroView.samplingPlan;
   if (Array.isArray(samplingPlan)) {
     for (const entry of samplingPlan) {
       if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
       const evidenceId = (entry as Record<string, unknown>).evidenceId;
-      if (typeof evidenceId === "string") {
-        allowed.add(evidenceId);
-        allowed.add(`diagnostic_${evidenceId}`);
-      }
+      if (typeof evidenceId === "string") allowed.add(evidenceId);
     }
   }
   for (const item of [...result.checks, ...result.issues]) {
@@ -931,7 +721,7 @@ export class VolcengineArkWavePathSelfCheckReviewer implements WavePathSelfCheck
 
 export async function loadWavePathSelfCheckRule(): Promise<string> {
   const rule = await readFile(new URL("../../effect-functions/self-check-rules/tools/wave_path.md", import.meta.url), "utf8");
-  if (!rule.includes("`toolName`: `wave_path`") || !rule.includes("`ruleVersion`: `1.0.0`")) {
+  if (!rule.includes("`toolName`: `wave_path`") || !rule.includes("`ruleVersion`: `1.1.0`")) {
     throw new Error("wave_path self-check rule identity is invalid.");
   }
   return rule;
@@ -965,7 +755,7 @@ export async function runWavePathSelfCheck(request: Readonly<{
   userRequest: string;
   envelope: EffectParameterEnvelope;
   videoPath: string;
-  sourcePath: string;
+  baselineVideoPath: string;
   outputDirectory: string;
   width: number;
   height: number;
@@ -999,27 +789,30 @@ export async function runWavePathSelfCheck(request: Readonly<{
     }
     const directory = join(request.outputDirectory, "self-check");
     await mkdir(directory, { recursive: true });
-    const sourcePath = join(directory, "source_reference.png");
     const extractFrame = request.frameExtractor ?? ((inputPath, outputPath, width, height, time, signal) =>
       extractImage(request.ffmpegPath, inputPath, outputPath, width, height, time, signal));
-    await extractFrame(request.sourcePath, sourcePath, request.width, request.height, undefined, request.signal);
     const samplePaths = new Map<string, string>();
+    const baselinePaths = new Map<string, string>();
     for (const snapshot of request.snapshots) {
       const path = join(directory, `${snapshot.evidenceId}.png`);
+      const baselinePath = join(directory, `${snapshot.evidenceId}_codec_baseline.png`);
       await extractFrame(request.videoPath, path, request.width, request.height, snapshot.time, request.signal);
+      await extractFrame(request.baselineVideoPath, baselinePath,
+        request.width, request.height, snapshot.time, request.signal);
       samplePaths.set(snapshot.evidenceId, path);
+      baselinePaths.set(snapshot.evidenceId, baselinePath);
     }
-    const technicalQuality = await technicalMetrics(sourcePath, [...samplePaths.values()],
+    const technicalQuality = await technicalMetrics([...baselinePaths.values()], [...samplePaths.values()],
       request.width, request.height, request.envelope.data);
     const geometry = geometryMetrics(request.snapshots, request.envelope.data, request.width, request.height);
     const temporal = temporalMetrics(request.snapshots, request.envelope.data);
-    const boardPath = join(directory, "evidence_board_01.png");
-    const board = await evidenceBoard(sourcePath, samplePaths, request.snapshots, boardPath,
-      request.width, request.height, request.userRequest, request.envelope.data, geometry, temporal, technicalQuality);
-    evidenceFiles.set("evidence_board_01", boardPath);
+    const boardPath = join(directory, "keyframe_contact_sheet.png");
+    const board = await keyframeContactSheet(samplePaths, request.snapshots, boardPath,
+      request.width, request.height);
+    evidenceFiles.set("keyframe_contact_sheet", boardPath);
     evidenceImages = Object.freeze([Object.freeze({
-      evidenceId: "evidence_board_01",
-      label: "最终视频关键帧与路径诊断证据板",
+      evidenceId: "keyframe_contact_sheet",
+      label: "最终 MP4 关键帧合成图",
       mime: "image/png" as const,
       width: board.width,
       height: board.height

@@ -242,23 +242,9 @@ function SelfCheckPanel({
         <span>{selfCheck.evidenceStatus === "sufficient" ? "证据充分" : "证据生成失败"} · 规则 v{selfCheck.ruleVersion}</span>
       </header>
 
-      {selfCheck.result !== undefined && (
-        <section className="self-check-checks" aria-label="自检规则判定">
-          <div className="self-check-section-title"><ShieldCheck size={14} /><strong>规则判定</strong><span>{selfCheck.result.checks.length} 项</span></div>
-          <div className="self-check-check-grid">
-            {selfCheck.result.checks.map((check) => (
-              <article key={check.ruleId} className={check.status}>
-                {check.status === "pass" ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-                <div><code>{check.ruleId}</code><p>{check.reason}</p></div>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
-
       {selfCheck.evidenceImages.length > 0 && (
-        <section className="self-check-evidence" aria-label="自检证据图片">
-          <div className="self-check-section-title"><Image size={14} /><strong>关键帧证据</strong><span>最终 MP4 抽帧</span></div>
+        <section className="self-check-evidence" aria-label="关键帧合成图">
+          <div className="self-check-section-title"><Image size={14} /><strong>关键帧合成图</strong><span>从最终 MP4 抽帧并按时间合并</span></div>
           {selfCheck.evidenceImages.map((item) => (
             <figure key={item.evidenceId}>
               <img
@@ -273,6 +259,27 @@ function SelfCheckPanel({
         </section>
       )}
 
+      {selfCheck.macroView !== undefined && (
+        <section className="self-check-json" aria-label="宏观自检 JSON">
+          <div className="self-check-section-title"><Braces size={14} /><strong>宏观自检 JSON</strong><span>参数、渲染、几何、时序、技术质量</span></div>
+          <pre>{JSON.stringify(selfCheck.macroView, null, 2)}</pre>
+        </section>
+      )}
+
+      {selfCheck.result !== undefined && (
+        <section className="self-check-checks" aria-label="自检规则判定">
+          <div className="self-check-section-title"><ShieldCheck size={14} /><strong>规则判定</strong><span>{selfCheck.result.checks.length} 项</span></div>
+          <div className="self-check-check-grid">
+            {selfCheck.result.checks.map((check) => (
+              <article key={check.ruleId} className={check.status}>
+                {check.status === "pass" ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                <div><code>{check.ruleId}</code><p>{check.reason}</p></div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       {selfCheck.result !== undefined && selfCheck.result.issues.length > 0 && (
         <section className="self-check-issues">
           <div className="self-check-section-title"><XCircle size={14} /><strong>发现的问题</strong><span>{selfCheck.result.issues.length} 项</span></div>
@@ -284,12 +291,6 @@ function SelfCheckPanel({
         </section>
       )}
 
-      {selfCheck.macroView !== undefined && (
-        <section className="self-check-json">
-          <div className="self-check-section-title"><Braces size={14} /><strong>宏观自检 JSON</strong><span>参数、渲染、几何、时序、技术质量</span></div>
-          <pre>{JSON.stringify(selfCheck.macroView, null, 2)}</pre>
-        </section>
-      )}
     </div>
   );
 }

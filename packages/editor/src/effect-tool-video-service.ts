@@ -932,12 +932,17 @@ export class EffectToolVideoService {
           video: completedVideo,
           selfCheck: Object.freeze({ ...queuedWavePathSelfCheck(), status: "running" as const })
         });
-        if (task.view.source === undefined) throw new Error("wave_path self-check requires its source image.");
-        const sourceMedia = await this.options.media.resolve(
-          task.owner,
-          task.view.source.assetId,
-          task.controller.signal
-        );
+        if (sourcePixels === undefined) throw new Error("wave_path self-check requires its authorized source pixels.");
+        const baselinePixels = sourcePixels;
+        const baselineVideoPath = join(this.outputRoot, task.view.id, "self-check-codec-baseline.mp4");
+        await this.exportFrames({
+          preset,
+          duration: metadata.durationSeconds,
+          outputPath: baselineVideoPath,
+          ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
+          signal: task.controller.signal,
+          renderFrame: async () => baselinePixels
+        });
         const artifacts = await this.wavePathSelfCheckRunner({
           requestId: task.view.id,
           tenantId: task.owner.tenantId,
@@ -945,7 +950,7 @@ export class EffectToolVideoService {
           userRequest: task.selfCheckPrompt ?? "",
           envelope,
           videoPath: task.outputPath,
-          sourcePath: sourceMedia.storedPath,
+          baselineVideoPath,
           outputDirectory: join(this.outputRoot, task.view.id),
           width: metadata.width,
           height: metadata.height,
