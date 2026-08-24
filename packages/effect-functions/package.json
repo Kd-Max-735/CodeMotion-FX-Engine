@@ -17,7 +17,8 @@
     "dist/**/*.d.ts",
     "dist/**/*.d.ts.map",
     "README.md",
-    "field-specs/**/*.md"
+    "field-specs/**/*.md",
+    "self-check-rules/**/*.md"
   ],
   "dependencies": {
     "@codemotion/core": "0.3.0",
