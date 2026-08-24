@@ -20,6 +20,15 @@ import {
   type VerifiedStoredMedia
 } from "@codemotion/exporter";
 import { composeEffectToolFrame } from "./effect-tool-frame-compositor.js";
+import {
+  captureWavePathSnapshot,
+  queuedWavePathSelfCheck,
+  runWavePathSelfCheck,
+  wavePathSamplingPlan,
+  type EffectToolSelfCheckView,
+  type WavePathRenderSnapshot,
+  type WavePathSelfCheckReviewer
+} from "./wave-path-self-check.js";
 
 const DEFAULT_VIDEO_DURATION_SECONDS = 5;
 const DEFAULT_VIDEO_FPS = 30;
@@ -74,6 +83,7 @@ export interface EffectToolVideoExecutionView {
     readonly downloadName?: string;
   };
   readonly gpu: EffectToolGpuTelemetryView;
+  readonly selfCheck?: EffectToolSelfCheckView;
   readonly failure?: {
     readonly code: "VIDEO_RENDER_FAILED";
     readonly message: string;
@@ -92,6 +102,8 @@ interface StoredVideoTask {
   readonly sourceAssetIds: readonly string[];
   readonly outputPath: string;
   readonly controller: AbortController;
+  readonly selfCheckPrompt?: string;
+  readonly selfCheckEvidenceFiles: Map<string, string>;
   readonly prepared?: {
     readonly inputs: AuthorizedEffectInputs;
     readonly inputIds?: Readonly<Record<string, string | readonly string[]>>;
@@ -111,6 +123,16 @@ export interface EffectToolVideoServiceOptions {
   readonly fps?: number;
   readonly gpuSampler?: () => Promise<NvidiaGpuSample>;
   readonly gpuSampleIntervalMs?: number;
+  readonly wavePathSelfCheckReviewer?: WavePathSelfCheckReviewer;
+  readonly wavePathSelfCheckRunner?: typeof runWavePathSelfCheck;
+}
+
+export interface EffectToolEvidenceFile {
+  readonly stream: ReadStream;
+  readonly bytes: number;
+  readonly name: string;
+  readonly mime: "image/png";
+  readonly close: () => Promise<void>;
 }
 
 function taskKey(owner: OwnerContext, id: string): string {
@@ -327,6 +349,7 @@ export class EffectToolVideoService {
   private readonly fps: number;
   private readonly gpuSampler: () => Promise<NvidiaGpuSample>;
   private readonly gpuSampleIntervalMs: number;
+  private readonly wavePathSelfCheckRunner: typeof runWavePathSelfCheck;
 
   constructor(private readonly options: EffectToolVideoServiceOptions) {
     this.outputRoot = resolve(options.outputRoot);
@@ -339,6 +362,7 @@ export class EffectToolVideoService {
       options.gpuSampleIntervalMs ?? DEFAULT_GPU_SAMPLE_INTERVAL_MS,
       "GPU sample interval"
     );
+    this.wavePathSelfCheckRunner = options.wavePathSelfCheckRunner ?? runWavePathSelfCheck;
     if (this.durationSeconds > MAX_VIDEO_DURATION_SECONDS || !Number.isInteger(this.fps) || this.fps > 120) {
       throw new RangeError("Video output settings exceed the effect render limit.");
     }
@@ -371,6 +395,7 @@ export class EffectToolVideoService {
       sourceAssetIds: Object.freeze([sourceAssetId]),
       outputPath,
       controller: new AbortController(),
+      selfCheckEvidenceFiles: new Map(),
       view: {
         id,
         status: "queued",
@@ -406,7 +431,8 @@ export class EffectToolVideoService {
     sourceImageId?: string,
     fps = this.fps,
     inputIds?: Readonly<Record<string, string | readonly string[]>>,
-    adaptToSourceDuration = false
+    adaptToSourceDuration = false,
+    selfCheckPrompt?: string
   ): Promise<EffectToolVideoExecutionView> {
     if (this.closing) throw new Error("Effect video service is closing.");
     safeNumber(durationSeconds, "Video duration");
@@ -446,6 +472,9 @@ export class EffectToolVideoService {
       sourceAssetIds: Object.freeze([...sourceAssetIds]),
       outputPath,
       controller: new AbortController(),
+      ...(definition.toolName === "wave_path" && selfCheckPrompt !== undefined
+        ? { selfCheckPrompt: selfCheckPrompt.slice(0, 4_000) } : {}),
+      selfCheckEvidenceFiles: new Map(),
       prepared: Object.freeze({ inputs, width: metadata.width, height: metadata.height, ...(inputIds === undefined ? {} : { inputIds }) }),
       view: {
         id,
@@ -463,7 +492,8 @@ export class EffectToolVideoService {
           completedFrames: 0,
           progress: 0
         },
-        gpu: { available: false, message: "等待视频任务开始后采样。" }
+        gpu: { available: false, message: "等待视频任务开始后采样。" },
+        ...(definition.toolName === "wave_path" ? { selfCheck: queuedWavePathSelfCheck() } : {})
       }
     };
     this.tasks.set(taskKey(owner, id), task);
@@ -506,6 +536,44 @@ export class EffectToolVideoService {
       stream,
       bytes: info.size,
       name: task.view.video.downloadName,
+      close: async () => {
+        if (!stream.closed) {
+          const closed = new Promise<void>((resolveClose) => stream.once("close", resolveClose));
+          stream.destroy();
+          await closed;
+        }
+      }
+    };
+  }
+
+  async openSelfCheckEvidence(
+    owner: OwnerContext,
+    id: string,
+    evidenceId: string
+  ): Promise<EffectToolEvidenceFile> {
+    if (!/^[a-z][a-z0-9_]{2,63}$/u.test(evidenceId)) {
+      throw new Error("Task not found or access denied.");
+    }
+    const task = this.tasks.get(taskKey(owner, id));
+    const evidencePath = task?.selfCheckEvidenceFiles.get(evidenceId);
+    const evidence = task?.view.selfCheck?.evidenceImages.find((item) => item.evidenceId === evidenceId);
+    if (task === undefined || task.view.status !== "completed"
+      || task.view.selfCheck?.evidenceStatus !== "sufficient"
+      || evidencePath === undefined || evidence === undefined) {
+      throw new Error("Task not found or access denied.");
+    }
+    const handle = await open(evidencePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    const info = await handle.stat();
+    if (!info.isFile()) {
+      await handle.close();
+      throw new Error("Task not found or access denied.");
+    }
+    const stream = handle.createReadStream({ autoClose: true });
+    return {
+      stream,
+      bytes: info.size,
+      name: `${evidenceId}.png`,
+      mime: evidence.mime,
       close: async () => {
         if (!stream.closed) {
           const closed = new Promise<void>((resolveClose) => stream.once("close", resolveClose));
@@ -677,6 +745,11 @@ export class EffectToolVideoService {
           crf: 18
         }
       });
+      const samplingPlan = definition.toolName === "wave_path"
+        ? wavePathSamplingPlan(metadata.durationSeconds, metadata.fps, envelope.data)
+        : Object.freeze([]);
+      const samplingByFrame = new Map(samplingPlan.map((item) => [item.frame, item]));
+      const wavePathSnapshots: WavePathRenderSnapshot[] = [];
       await this.exportFrames({
         preset,
         duration: metadata.durationSeconds,
@@ -817,6 +890,11 @@ export class EffectToolVideoService {
           } catch (error) {
             if (!mayUsePreviewFallback(error)) throw error;
           }
+          const samplingItem = samplingByFrame.get(request.frame);
+          if (samplingItem !== undefined) {
+            const snapshot = captureWavePathSnapshot(result, samplingItem);
+            if (snapshot !== undefined) wavePathSnapshots.push(snapshot);
+          }
           const completedFrames = request.frame + 1;
           update({
             ...task.view,
@@ -840,17 +918,65 @@ export class EffectToolVideoService {
         }
       });
       const bytes = (await stat(task.outputPath)).size;
+      const completedVideo = Object.freeze({
+        ...task.view.video,
+        completedFrames: metadata.frameCount,
+        progress: 1,
+        bytes,
+        downloadName: `ae-agent-${definition.toolName}-${task.view.id}.mp4`
+      });
+      if (definition.toolName === "wave_path") {
+        update({
+          ...task.view,
+          updatedAt: new Date().toISOString(),
+          video: completedVideo,
+          selfCheck: Object.freeze({ ...queuedWavePathSelfCheck(), status: "running" as const })
+        });
+        if (task.view.source === undefined) throw new Error("wave_path self-check requires its source image.");
+        const sourceMedia = await this.options.media.resolve(
+          task.owner,
+          task.view.source.assetId,
+          task.controller.signal
+        );
+        const artifacts = await this.wavePathSelfCheckRunner({
+          requestId: task.view.id,
+          tenantId: task.owner.tenantId,
+          userId: task.owner.userId,
+          userRequest: task.selfCheckPrompt ?? "",
+          envelope,
+          videoPath: task.outputPath,
+          sourcePath: sourceMedia.storedPath,
+          outputDirectory: join(this.outputRoot, task.view.id),
+          width: metadata.width,
+          height: metadata.height,
+          fps: metadata.fps,
+          durationSeconds: metadata.durationSeconds,
+          frameCount: metadata.frameCount,
+          bytes,
+          backendId: definition.primaryBackend.backendId,
+          snapshots: Object.freeze([...wavePathSnapshots].sort((a, b) => a.frame - b.frame)),
+          ...(this.options.wavePathSelfCheckReviewer === undefined
+            ? {} : { reviewer: this.options.wavePathSelfCheckReviewer }),
+          ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
+          signal: task.controller.signal
+        });
+        for (const [evidenceId, evidencePath] of artifacts.evidenceFiles) {
+          task.selfCheckEvidenceFiles.set(evidenceId, evidencePath);
+        }
+        update({
+          ...task.view,
+          status: "completed",
+          updatedAt: new Date().toISOString(),
+          video: completedVideo,
+          selfCheck: artifacts.view
+        });
+        return;
+      }
       update({
         ...task.view,
         status: "completed",
         updatedAt: new Date().toISOString(),
-        video: {
-          ...task.view.video,
-          completedFrames: metadata.frameCount,
-          progress: 1,
-          bytes,
-          downloadName: `ae-agent-${definition.toolName}-${task.view.id}.mp4`
-        }
+        video: completedVideo
       });
     } catch (error) {
       if (task.controller.signal.aborted && this.closing) return;

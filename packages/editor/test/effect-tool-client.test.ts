@@ -71,4 +71,59 @@ describe("selected effect-tool browser client", () => {
     });
     expect(transport).toHaveBeenCalledOnce();
   });
+
+  it("parses the visible wave_path self-check view and builds an owner-scoped evidence URL", async () => {
+    const checks = [
+      "WP_EXECUTION_INTEGRITY", "WP_BASELINE_AND_DIRECTION", "WP_WAVE_GEOMETRY",
+      "WP_PHASE_AND_MOTION", "WP_TAPER_BEHAVIOR", "WP_FRAME_SAFETY", "WP_USER_INTENT"
+    ].map((ruleId) => ({
+      ruleId,
+      status: "pass",
+      evidenceRefs: ["evidence_board_01"],
+      reason: "证据一致。"
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      execution: {
+        id: "execution-wave-path",
+        status: "completed",
+        toolName: "wave_path",
+        createdAt: "2026-08-24T00:00:00.000Z",
+        updatedAt: "2026-08-24T00:00:01.000Z",
+        source: { kind: "image", assetId: "asset_imageabcdefgh" },
+        video: {
+          format: "mp4", mime: "video/mp4", width: 640, height: 360, fps: 30,
+          durationSeconds: 5, frameCount: 150, completedFrames: 150, progress: 1,
+          audio: false, bytes: 1234, downloadName: "wave-path.mp4"
+        },
+        gpu: { available: false, message: "unavailable" },
+        selfCheck: {
+          status: "pass",
+          automatic: true,
+          toolName: "wave_path",
+          ruleVersion: "1.0.0",
+          evidenceContractVersion: "1.0.0",
+          evidenceStatus: "sufficient",
+          macroView: { normalizedParams: { amplitude: 48 }, output: { encodingCompleted: true } },
+          evidenceImages: [{
+            evidenceId: "evidence_board_01", label: "最终成片关键帧证据板", mime: "image/png",
+            width: 1092, height: 710
+          }],
+          result: { status: "pass", summary: "全部通过。", checks, issues: [] }
+        }
+      }
+    })));
+
+    const execution = await selectedEffectToolApi.execution("execution-wave-path", "wave_path");
+    expect(execution).toMatchObject({
+      selfCheck: {
+        status: "pass",
+        evidenceStatus: "sufficient",
+        evidenceImages: [{ evidenceId: "evidence_board_01" }],
+        result: { status: "pass" }
+      }
+    });
+    expect(execution.selfCheck?.result?.checks[0]?.ruleId).toBe("WP_EXECUTION_INTEGRITY");
+    expect(selectedEffectToolApi.selfCheckEvidenceUrl("execution-wave-path", "evidence_board_01"))
+      .toBe("/api/effect-tools/v3/executions/execution-wave-path/self-check/evidence/evidence_board_01");
+  });
 });

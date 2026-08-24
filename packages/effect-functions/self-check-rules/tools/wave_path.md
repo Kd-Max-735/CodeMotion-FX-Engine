@@ -302,6 +302,7 @@
 - 任一 `checks[*].status = fail` 时，顶层 `status` 必须为 `fail`；
 - 每个判断必须引用真实存在的 `evidenceRefs`；
 - `issues` 在通过时必须为空；失败时每个失败规则至少对应一个 issue，说明可观察现象、预期、实际和证据引用；
+- 每个 issue 必须且只能包含 `ruleId`、`code`、`message`、`evidenceRefs`；`code` 使用大写蛇形命名，`message` 同时说明可观察现象、预期和实际；
 - 即使最终为 `fail`，视频产物仍然输出并在可见界面中标记自检失败。
 
 ## 8. 禁止的误判

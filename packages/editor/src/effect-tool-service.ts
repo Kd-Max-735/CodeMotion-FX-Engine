@@ -51,9 +51,11 @@ import type {
 import { AuthHttpError, type AuthSessionService } from "./auth-session-service.js";
 import {
   EffectToolVideoService,
+  type EffectToolEvidenceFile,
   type EffectToolVideoExecutionView,
   type EffectToolVideoFile
 } from "./effect-tool-video-service.js";
+import { VolcengineArkWavePathSelfCheckReviewer } from "./wave-path-self-check.js";
 import {
   Sam31SegmentationError,
   Sam31SegmentationService,
@@ -1974,7 +1976,8 @@ export class EffectToolService {
         sourceImageId,
         VIDEO_GENERATION_MODE_FPS[nativeArguments.generationMode],
         rawInputIds,
-        explicitOutputDuration.kind === "none"
+        explicitOutputDuration.kind === "none",
+        request.prompt
       );
       const normalizedArguments = Object.freeze({
         effectParams: structuredClone(envelope.data),
@@ -2046,6 +2049,15 @@ export class EffectToolService {
   ): Promise<EffectToolVideoFile> {
     if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
     return this.nativeVideos.open(ownerOf(principal), id, range);
+  }
+
+  openSelfCheckEvidence(
+    principal: EffectToolPrincipal,
+    id: string,
+    evidenceId: string
+  ): Promise<EffectToolEvidenceFile> {
+    if (this.nativeVideos === undefined) throw new Error("Effect video service is unavailable.");
+    return this.nativeVideos.openSelfCheckEvidence(ownerOf(principal), id, evidenceId);
   }
 
   get(principal: EffectToolPrincipal, id: string): EffectToolExecutionView {
@@ -2180,7 +2192,14 @@ export function createProductionEffectToolService(
     new EffectToolVideoService({
       media,
       outputRoot: videoOutputRoot,
-      ...(env.FFMPEG_PATH === undefined ? {} : { ffmpegPath: env.FFMPEG_PATH })
+      ...(env.FFMPEG_PATH === undefined ? {} : { ffmpegPath: env.FFMPEG_PATH }),
+      ...(apiKey === undefined || apiKey.trim().length < 10 ? {} : {
+        wavePathSelfCheckReviewer: new VolcengineArkWavePathSelfCheckReviewer({
+          apiKey,
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
+          audit: (record) => process.stderr.write(`[effect-tool-self-check] ${JSON.stringify(record)}\n`)
+        })
+      })
     })
   );
 }
@@ -2299,6 +2318,32 @@ async function pipeVideo(
   }
 }
 
+async function pipeSelfCheckEvidence(response: ServerResponse, file: EffectToolEvidenceFile): Promise<void> {
+  response.statusCode = 200;
+  response.setHeader("content-type", file.mime);
+  response.setHeader("content-length", String(file.bytes));
+  response.setHeader("cache-control", "private, no-store");
+  response.setHeader("x-content-type-options", "nosniff");
+  response.setHeader("content-disposition", `inline; filename="${file.name}"`);
+  try {
+    await new Promise<void>((resolvePipe, rejectPipe) => {
+      const done = (): void => { cleanup(); resolvePipe(); };
+      const failed = (error: Error): void => { cleanup(); rejectPipe(error); };
+      const cleanup = (): void => {
+        file.stream.off("error", failed);
+        response.off("finish", done);
+        response.off("close", done);
+      };
+      file.stream.once("error", failed);
+      response.once("finish", done);
+      response.once("close", done);
+      file.stream.pipe(response);
+    });
+  } finally {
+    await file.close();
+  }
+}
+
 export function createEffectToolApi(
   service: EffectToolService,
   auth?: Pick<AuthSessionService, "authorize"> & Partial<Pick<AuthSessionService, "verifySameOriginDownload">>
@@ -2319,9 +2364,12 @@ export function createEffectToolApi(
     const selectedExecution = /^\/api\/effect-tools\/v3\/executions\/([^/]+)$/u.exec(url.pathname);
     const selectedVideo = /^\/api\/effect-tools\/v3\/executions\/([^/]+)\/video$/u.exec(url.pathname);
     const selectedDownload = /^\/api\/effect-tools\/v3\/executions\/([^/]+)\/download$/u.exec(url.pathname);
+    const selectedEvidence = /^\/api\/effect-tools\/v3\/executions\/([^/]+)\/self-check\/evidence\/([a-z][a-z0-9_]{2,63})$/u
+      .exec(url.pathname);
     const matched = request.method === "GET" && (collection || nativeTool || selectedTools || execution !== null)
       || request.method === "GET" && (nativeExecution !== null || nativeVideo !== null || nativeDownload !== null
-        || selectedExecution !== null || selectedVideo !== null || selectedDownload !== null)
+        || selectedExecution !== null || selectedVideo !== null || selectedDownload !== null
+        || selectedEvidence !== null)
       || request.method === "POST" && (parameters || executions || nativeTurns || selectedTurns);
     if (!matched) return next();
     try {
@@ -2345,6 +2393,16 @@ export function createEffectToolApi(
         return sendJson(response, 200, {
           execution: service.videoExecution(principal, decodeURIComponent(match[1]!))
         });
+      }
+      if (request.method === "GET" && selectedEvidence) {
+        const principal = await auth.authorize(request, response, "project:preview", false);
+        const file = await service.openSelfCheckEvidence(
+          principal,
+          decodeURIComponent(selectedEvidence[1]!),
+          selectedEvidence[2]!
+        );
+        await pipeSelfCheckEvidence(response, file);
+        return;
       }
       if (request.method === "GET" && (nativeVideo || nativeDownload || selectedVideo || selectedDownload)) {
         const download = nativeDownload !== null || selectedDownload !== null;

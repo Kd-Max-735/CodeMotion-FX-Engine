@@ -17,6 +17,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.3",
     "@codemotion/ai-planner": "0.5.0",
     "@codemotion/core": "0.3.0",
     "@codemotion/effect-functions": "0.1.0",

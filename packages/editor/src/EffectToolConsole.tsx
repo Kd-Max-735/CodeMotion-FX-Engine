@@ -1,6 +1,6 @@
 import {
-  ArrowLeft, ArrowRight, Check, ChevronDown, Clock3, Copy, Download, FileAudio, FileImage, LoaderCircle, Menu, Paperclip,
-  Plus, Search, Send, Settings, Square, Video, Wrench, X
+  ArrowLeft, ArrowRight, Braces, Check, CheckCircle2, ChevronDown, Clock3, Copy, Download, FileAudio, FileImage,
+  Image, LoaderCircle, Menu, Paperclip, Plus, Search, Send, Settings, ShieldCheck, Square, Video, Wrench, X, XCircle
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import {
@@ -223,6 +223,77 @@ function GpuStatus({ gpu }: { gpu: Extract<SelectedEffectTurn, { kind: "tool_cal
   );
 }
 
+function SelfCheckPanel({
+  execution
+}: {
+  execution: Extract<SelectedEffectTurn, { kind: "tool_call" }>["execution"];
+}) {
+  const selfCheck = execution.selfCheck;
+  if (selfCheck === undefined) return <div className="self-check-empty">当前工具尚未配置专属自检视图。</div>;
+  const passed = selfCheck.status === "pass";
+  return (
+    <div className="self-check-panel">
+      <header className={`self-check-summary ${passed ? "passed" : "failed"}`}>
+        {passed ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+        <div>
+          <strong>{passed ? "自动自检通过" : "自动自检未通过"}</strong>
+          <p>{selfCheck.result?.summary ?? selfCheck.failure?.message ?? "自检未返回结论。"}</p>
+        </div>
+        <span>{selfCheck.evidenceStatus === "sufficient" ? "证据充分" : "证据生成失败"} · 规则 v{selfCheck.ruleVersion}</span>
+      </header>
+
+      {selfCheck.result !== undefined && (
+        <section className="self-check-checks" aria-label="自检规则判定">
+          <div className="self-check-section-title"><ShieldCheck size={14} /><strong>规则判定</strong><span>{selfCheck.result.checks.length} 项</span></div>
+          <div className="self-check-check-grid">
+            {selfCheck.result.checks.map((check) => (
+              <article key={check.ruleId} className={check.status}>
+                {check.status === "pass" ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                <div><code>{check.ruleId}</code><p>{check.reason}</p></div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {selfCheck.evidenceImages.length > 0 && (
+        <section className="self-check-evidence" aria-label="自检证据图片">
+          <div className="self-check-section-title"><Image size={14} /><strong>关键帧证据</strong><span>最终 MP4 抽帧</span></div>
+          {selfCheck.evidenceImages.map((item) => (
+            <figure key={item.evidenceId}>
+              <img
+                src={selectedEffectToolApi.selfCheckEvidenceUrl(execution.id, item.evidenceId)}
+                alt={item.label}
+                width={item.width}
+                height={item.height}
+              />
+              <figcaption><b>{item.label}</b><code>{item.evidenceId} · {item.width} × {item.height}</code></figcaption>
+            </figure>
+          ))}
+        </section>
+      )}
+
+      {selfCheck.result !== undefined && selfCheck.result.issues.length > 0 && (
+        <section className="self-check-issues">
+          <div className="self-check-section-title"><XCircle size={14} /><strong>发现的问题</strong><span>{selfCheck.result.issues.length} 项</span></div>
+          {selfCheck.result.issues.map((issue) => (
+            <article key={`${issue.ruleId}:${issue.code}`}>
+              <code>{issue.ruleId} · {issue.code}</code><p>{issue.message}</p>
+            </article>
+          ))}
+        </section>
+      )}
+
+      {selfCheck.macroView !== undefined && (
+        <section className="self-check-json">
+          <div className="self-check-section-title"><Braces size={14} /><strong>宏观自检 JSON</strong><span>参数、渲染、几何、时序、技术质量</span></div>
+          <pre>{JSON.stringify(selfCheck.macroView, null, 2)}</pre>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function VideoResult({
   initial,
   tool
@@ -231,6 +302,9 @@ function VideoResult({
   tool: SelectedEffectToolView;
 }) {
   const [execution, setExecution] = useState(initial);
+  const [activeView, setActiveView] = useState<"video" | "self-check">(
+    initial.selfCheck === undefined ? "video" : "self-check"
+  );
   useEffect(() => {
     if (execution.status !== "queued" && execution.status !== "running") return;
     const controller = new AbortController();
@@ -256,22 +330,40 @@ function VideoResult({
     return <><div className="artifact-error">{execution.failure?.message ?? "视频渲染失败。"}</div><GpuStatus gpu={execution.gpu} /></>;
   }
   if (execution.status !== "completed") {
+    const checking = execution.selfCheck?.status === "running";
     return (
       <div className="video-progress">
         <div className="video-progress-bar"><i style={{ width: `${Math.round(execution.video.progress * 100)}%` }} /></div>
-        <span>{execution.status === "queued" ? "等待视频渲染" : "正在逐帧渲染"}</span>
-        <b>{execution.video.completedFrames} / {execution.video.frameCount}</b>
+        <span>{checking ? "正在抽帧并执行 Ark 自动自检" : execution.status === "queued" ? "等待视频渲染" : "正在逐帧渲染"}</span>
+        <b>{checking ? "证据生成中" : `${execution.video.completedFrames} / ${execution.video.frameCount}`}</b>
         <GpuStatus gpu={execution.gpu} />
       </div>
     );
   }
   return (
-    <div className="video-result">
-      <video controls preload="metadata" src={selectedEffectToolApi.videoUrl(execution.id)} aria-label={`${tool.displayName}视频预览`} />
-      <GpuStatus gpu={execution.gpu} />
-      <a className="video-download" href={selectedEffectToolApi.downloadUrl(execution.id)} download={execution.video.downloadName}>
-        <Download size={14} />下载 MP4
-      </a>
+    <div className="execution-result">
+      <nav className="execution-tabs" aria-label="执行结果视图">
+        <button type="button" className={activeView === "video" ? "active" : ""} onClick={() => setActiveView("video")}>
+          <Video size={14} />视频结果
+        </button>
+        {execution.selfCheck !== undefined && (
+          <button type="button" className={activeView === "self-check" ? "active" : ""} onClick={() => setActiveView("self-check")}>
+            <ShieldCheck size={14} />宏观自检
+            <i className={execution.selfCheck.status}>{execution.selfCheck.status === "pass" ? "通过" : "失败"}</i>
+          </button>
+        )}
+      </nav>
+      {activeView === "self-check" && execution.selfCheck !== undefined ? (
+        <SelfCheckPanel execution={execution} />
+      ) : (
+        <div className="video-result">
+          <video controls preload="metadata" src={selectedEffectToolApi.videoUrl(execution.id)} aria-label={`${tool.displayName}视频预览`} />
+          <GpuStatus gpu={execution.gpu} />
+          <a className="video-download" href={selectedEffectToolApi.downloadUrl(execution.id)} download={execution.video.downloadName}>
+            <Download size={14} />下载 MP4
+          </a>
+        </div>
+      )}
     </div>
   );
 }

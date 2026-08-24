@@ -115,7 +115,9 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   throw new Error("Condition was not reached within the deterministic turn budget.");
 }
 
-async function testVideoService() {
+async function testVideoService(
+  overrides: Partial<ConstructorParameters<typeof EffectToolVideoService>[0]> = {}
+) {
   const outputRoot = await mkdtemp(join(tmpdir(), "cmfx-effect-video-"));
   const media: VerifiedStoredMedia = {
     asset: {
@@ -160,7 +162,8 @@ async function testVideoService() {
       memoryUsedMiB: 256,
       memoryTotalMiB: 8_192,
       utilizationPercent: 42
-    }))
+    })),
+    ...overrides
   });
   return { service, exportFrames, decodeFrame };
 }
@@ -541,6 +544,81 @@ describe("server single effect-tool service", () => {
       prompt: "再次执行",
       inputIds: { source_frame: "asset_imageabcdefgh" }
     })).rejects.toMatchObject({ code: "security" });
+  });
+
+  it("automatically completes the wave_path self-check and exposes its owner-scoped evidence", async () => {
+    const definition = EFFECT_TOOL_REGISTRY.getByToolName("wave_path")!;
+    const provider = new NativeRecordingProvider();
+    provider.turn = {
+      reasoningContent: "用户要求执行路径波浪。",
+      content: "准备调用路径波浪工具。",
+      toolCall: {
+        id: "call-wave-path-self-check",
+        name: "wave_path",
+        arguments: {
+          effectParams: definition.defaults,
+          output: { durationSeconds: 1, generationMode: "fine" }
+        }
+      }
+    };
+    const selfCheckRunner = vi.fn(async (request: { outputDirectory: string; userRequest: string }) => {
+      const evidencePath = join(request.outputDirectory, "evidence_board_01.png");
+      await writeFile(evidencePath, Buffer.from("test-evidence-png"));
+      return {
+        view: {
+          status: "pass" as const,
+          automatic: true as const,
+          toolName: "wave_path" as const,
+          ruleVersion: "1.0.0" as const,
+          evidenceContractVersion: "1.0.0" as const,
+          evidenceStatus: "sufficient" as const,
+          macroView: { userRequest: request.userRequest, output: { encodingCompleted: true } },
+          evidenceImages: [{
+            evidenceId: "evidence_board_01", label: "最终视频关键帧证据板", mime: "image/png" as const,
+            width: 1092, height: 710
+          }],
+          result: {
+            status: "pass" as const,
+            summary: "全部规则通过。",
+            checks: [],
+            issues: []
+          }
+        },
+        evidenceFiles: new Map([["evidence_board_01", evidencePath]])
+      };
+    });
+    const video = await testVideoService({ wavePathSelfCheckRunner: selfCheckRunner as never });
+    const service = new EffectToolService(provider, new TestInputResolver(), EFFECT_TOOL_REGISTRY, video.service);
+
+    const prompt = "让路径从左下向右上产生柔和波浪";
+    const turn = await service.selectedTurn(principal, {
+      toolName: "wave_path",
+      prompt,
+      inputIds: { source_image: "asset_imageabcdefgh" }
+    });
+    if (turn.kind !== "tool_call") throw new Error("Expected a tool call.");
+    expect(turn.execution.selfCheck).toMatchObject({ status: "queued", automatic: true });
+    await waitFor(() => service.videoExecution(principal, turn.execution.id).status === "completed");
+    expect(service.videoExecution(principal, turn.execution.id)).toMatchObject({
+      status: "completed",
+      selfCheck: {
+        status: "pass",
+        evidenceStatus: "sufficient",
+        macroView: { userRequest: prompt },
+        evidenceImages: [{ evidenceId: "evidence_board_01" }]
+      }
+    });
+    expect(selfCheckRunner).toHaveBeenCalledOnce();
+    expect(selfCheckRunner.mock.calls[0]![0]).toMatchObject({ userRequest: prompt });
+    const evidence = await service.openSelfCheckEvidence(principal, turn.execution.id, "evidence_board_01");
+    expect(evidence).toMatchObject({ bytes: 17, name: "evidence_board_01.png", mime: "image/png" });
+    await evidence.close();
+    await expect(service.openSelfCheckEvidence(
+      { ...principal, tenantId: "tenant-other" },
+      turn.execution.id,
+      "evidence_board_01"
+    )).rejects.toThrow(/access denied/u);
+    await service.close();
   });
 
   it("passes server-derived material dimensions into the selected-tool video task", async () => {

@@ -97,7 +97,42 @@ export interface SelectedExecutionView {
   readonly source?: { readonly kind: "image"; readonly assetId: string };
   readonly video: NativeExecutionView["video"];
   readonly gpu: GpuTelemetryView;
+  readonly selfCheck?: EffectToolSelfCheckView;
   readonly failure?: NativeExecutionView["failure"];
+}
+
+export interface EffectToolSelfCheckView {
+  readonly status: "queued" | "running" | "pass" | "fail";
+  readonly automatic: true;
+  readonly toolName: "wave_path";
+  readonly ruleVersion: string;
+  readonly evidenceContractVersion: string;
+  readonly evidenceStatus: "pending" | "sufficient";
+  readonly macroView?: Readonly<Record<string, unknown>>;
+  readonly evidenceImages: readonly Readonly<{
+    evidenceId: string;
+    label: string;
+    mime: "image/png";
+    width: number;
+    height: number;
+  }>[];
+  readonly result?: Readonly<{
+    status: "pass" | "fail";
+    summary: string;
+    checks: readonly Readonly<{
+      ruleId: string;
+      status: "pass" | "fail";
+      evidenceRefs: readonly string[];
+      reason: string;
+    }>[];
+    issues: readonly Readonly<{
+      ruleId: string;
+      code: string;
+      message: string;
+      evidenceRefs: readonly string[];
+    }>[];
+  }>;
+  readonly failure?: Readonly<{ code: string; message: string }>;
 }
 
 export interface SelectedExecutionInputView {
@@ -337,6 +372,94 @@ function execution(value: unknown): NativeExecutionView {
   };
 }
 
+function stringArray(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  return Object.freeze([...(value as string[])]);
+}
+
+function effectToolSelfCheck(value: unknown): EffectToolSelfCheckView {
+  const raw = object(value);
+  if (!["queued", "running", "pass", "fail"].includes(String(raw.status))
+    || raw.automatic !== true || raw.toolName !== "wave_path"
+    || typeof raw.ruleVersion !== "string" || typeof raw.evidenceContractVersion !== "string"
+    || !["pending", "sufficient"].includes(String(raw.evidenceStatus))
+    || !Array.isArray(raw.evidenceImages)) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  const evidenceImages = raw.evidenceImages.map((value) => {
+    const image = object(value);
+    if (typeof image.evidenceId !== "string" || !/^[a-z][a-z0-9_]{2,63}$/u.test(image.evidenceId)
+      || typeof image.label !== "string" || image.mime !== "image/png"
+      || ![image.width, image.height].every((item) => typeof item === "number" && Number.isInteger(item) && item > 0)) {
+      throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+    }
+    return Object.freeze({
+      evidenceId: image.evidenceId,
+      label: image.label,
+      mime: "image/png" as const,
+      width: image.width as number,
+      height: image.height as number
+    });
+  });
+  const resultRaw = raw.result === undefined ? undefined : object(raw.result);
+  const result = resultRaw === undefined ? undefined : (() => {
+    if ((resultRaw.status !== "pass" && resultRaw.status !== "fail")
+      || typeof resultRaw.summary !== "string" || !Array.isArray(resultRaw.checks)
+      || !Array.isArray(resultRaw.issues)) {
+      throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+    }
+    const checks = resultRaw.checks.map((value) => {
+      const check = object(value);
+      if (typeof check.ruleId !== "string" || (check.status !== "pass" && check.status !== "fail")
+        || typeof check.reason !== "string") throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+      return Object.freeze({
+        ruleId: check.ruleId,
+        status: check.status,
+        evidenceRefs: stringArray(check.evidenceRefs),
+        reason: check.reason
+      });
+    });
+    const issues = resultRaw.issues.map((value) => {
+      const issue = object(value);
+      if (typeof issue.ruleId !== "string" || typeof issue.code !== "string"
+        || typeof issue.message !== "string") throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+      return Object.freeze({
+        ruleId: issue.ruleId,
+        code: issue.code,
+        message: issue.message,
+        evidenceRefs: stringArray(issue.evidenceRefs)
+      });
+    });
+    return Object.freeze({
+      status: resultRaw.status as "pass" | "fail",
+      summary: resultRaw.summary,
+      checks: Object.freeze(checks),
+      issues: Object.freeze(issues)
+    });
+  })();
+  const failureRaw = raw.failure === undefined ? undefined : object(raw.failure);
+  if (failureRaw !== undefined && (typeof failureRaw.code !== "string" || typeof failureRaw.message !== "string")) {
+    throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+  }
+  const macroView = raw.macroView === undefined ? undefined : object(raw.macroView);
+  return Object.freeze({
+    status: raw.status as EffectToolSelfCheckView["status"],
+    automatic: true,
+    toolName: "wave_path",
+    ruleVersion: raw.ruleVersion,
+    evidenceContractVersion: raw.evidenceContractVersion,
+    evidenceStatus: raw.evidenceStatus as EffectToolSelfCheckView["evidenceStatus"],
+    ...(macroView === undefined ? {} : { macroView: structuredClone(macroView) }),
+    evidenceImages: Object.freeze(evidenceImages),
+    ...(result === undefined ? {} : { result }),
+    ...(failureRaw === undefined ? {} : {
+      failure: Object.freeze({ code: failureRaw.code as string, message: failureRaw.message as string })
+    })
+  });
+}
+
 function selectedExecution(value: unknown, expectedToolName?: string): SelectedExecutionView {
   const raw = object(value);
   const video = object(raw.video);
@@ -362,6 +485,7 @@ function selectedExecution(value: unknown, expectedToolName?: string): SelectedE
   if (failure !== undefined && (failure.code !== "VIDEO_RENDER_FAILED" || typeof failure.message !== "string")) {
     throw new BrowserApiError(500, "INVALID_RESPONSE", false);
   }
+  const selfCheck = raw.selfCheck === undefined ? undefined : effectToolSelfCheck(raw.selfCheck);
   return {
     id: raw.id,
     status: status as SelectedExecutionView["status"],
@@ -384,6 +508,7 @@ function selectedExecution(value: unknown, expectedToolName?: string): SelectedE
       ...(video.downloadName === undefined ? {} : { downloadName: video.downloadName as string })
     },
     gpu,
+    ...(selfCheck === undefined ? {} : { selfCheck }),
     ...(failure === undefined ? {} : {
       failure: { code: "VIDEO_RENDER_FAILED" as const, message: failure.message as string }
     })
@@ -589,5 +714,7 @@ export const selectedEffectToolApi = {
     return selectedExecution(body.execution, expectedToolName);
   },
   videoUrl: (executionId: string): string => `/api/effect-tools/v3/executions/${encodeURIComponent(executionId)}/video`,
+  selfCheckEvidenceUrl: (executionId: string, evidenceId: string): string =>
+    `/api/effect-tools/v3/executions/${encodeURIComponent(executionId)}/self-check/evidence/${encodeURIComponent(evidenceId)}`,
   downloadUrl: (executionId: string): string => `/api/effect-tools/v3/executions/${encodeURIComponent(executionId)}/download`
 };
