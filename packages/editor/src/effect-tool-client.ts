@@ -104,7 +104,7 @@ export interface SelectedExecutionView {
 export interface EffectToolSelfCheckView {
   readonly status: "queued" | "running" | "pass" | "fail";
   readonly automatic: true;
-  readonly toolName: "wave_path";
+  readonly toolName: string;
   readonly ruleVersion: string;
   readonly evidenceContractVersion: string;
   readonly evidenceStatus: "pending" | "sufficient";
@@ -120,16 +120,17 @@ export interface EffectToolSelfCheckView {
     status: "pass" | "fail";
     summary: string;
     checks: readonly Readonly<{
-      ruleId: string;
+      ruleId?: string;
+      name?: string;
       status: "pass" | "fail";
-      evidenceRefs: readonly string[];
+      evidenceRefs?: readonly string[];
       reason: string;
     }>[];
     issues: readonly Readonly<{
-      ruleId: string;
-      code: string;
+      ruleId?: string;
+      code?: string;
       message: string;
-      evidenceRefs: readonly string[];
+      evidenceRefs?: readonly string[];
     }>[];
   }>;
   readonly failure?: Readonly<{ code: string; message: string }>;
@@ -379,10 +380,10 @@ function stringArray(value: unknown): readonly string[] {
   return Object.freeze([...(value as string[])]);
 }
 
-function effectToolSelfCheck(value: unknown): EffectToolSelfCheckView {
+function effectToolSelfCheck(value: unknown, expectedToolName: string): EffectToolSelfCheckView {
   const raw = object(value);
   if (!["queued", "running", "pass", "fail"].includes(String(raw.status))
-    || raw.automatic !== true || raw.toolName !== "wave_path"
+    || raw.automatic !== true || raw.toolName !== expectedToolName
     || typeof raw.ruleVersion !== "string" || typeof raw.evidenceContractVersion !== "string"
     || !["pending", "sufficient"].includes(String(raw.evidenceStatus))
     || !Array.isArray(raw.evidenceImages)) {
@@ -412,24 +413,37 @@ function effectToolSelfCheck(value: unknown): EffectToolSelfCheckView {
     }
     const checks = resultRaw.checks.map((value) => {
       const check = object(value);
-      if (typeof check.ruleId !== "string" || (check.status !== "pass" && check.status !== "fail")
-        || typeof check.reason !== "string") throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+      const ruleId = typeof check.ruleId === "string" ? check.ruleId : undefined;
+      const name = typeof check.name === "string" ? check.name : undefined;
+      if ((ruleId === undefined && name === undefined)
+        || (check.status !== "pass" && check.status !== "fail") || typeof check.reason !== "string"
+        || (check.evidenceRefs !== undefined && (!Array.isArray(check.evidenceRefs)
+          || check.evidenceRefs.some((item) => typeof item !== "string")))) {
+        throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+      }
       return Object.freeze({
-        ruleId: check.ruleId,
+        ...(ruleId === undefined ? {} : { ruleId }),
+        ...(name === undefined ? {} : { name }),
         status: check.status,
-        evidenceRefs: stringArray(check.evidenceRefs),
+        ...(check.evidenceRefs === undefined ? {} : { evidenceRefs: stringArray(check.evidenceRefs) }),
         reason: check.reason
       });
     });
     const issues = resultRaw.issues.map((value) => {
+      if (typeof value === "string") return Object.freeze({ message: value });
       const issue = object(value);
-      if (typeof issue.ruleId !== "string" || typeof issue.code !== "string"
-        || typeof issue.message !== "string") throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+      if (typeof issue.message !== "string"
+        || (issue.ruleId !== undefined && typeof issue.ruleId !== "string")
+        || (issue.code !== undefined && typeof issue.code !== "string")
+        || (issue.evidenceRefs !== undefined && (!Array.isArray(issue.evidenceRefs)
+          || issue.evidenceRefs.some((item) => typeof item !== "string")))) {
+        throw new BrowserApiError(500, "INVALID_RESPONSE", false);
+      }
       return Object.freeze({
-        ruleId: issue.ruleId,
-        code: issue.code,
+        ...(issue.ruleId === undefined ? {} : { ruleId: issue.ruleId as string }),
+        ...(issue.code === undefined ? {} : { code: issue.code as string }),
         message: issue.message,
-        evidenceRefs: stringArray(issue.evidenceRefs)
+        ...(issue.evidenceRefs === undefined ? {} : { evidenceRefs: stringArray(issue.evidenceRefs) })
       });
     });
     return Object.freeze({
@@ -447,7 +461,7 @@ function effectToolSelfCheck(value: unknown): EffectToolSelfCheckView {
   return Object.freeze({
     status: raw.status as EffectToolSelfCheckView["status"],
     automatic: true,
-    toolName: "wave_path",
+    toolName: raw.toolName as string,
     ruleVersion: raw.ruleVersion,
     evidenceContractVersion: raw.evidenceContractVersion,
     evidenceStatus: raw.evidenceStatus as EffectToolSelfCheckView["evidenceStatus"],
@@ -485,7 +499,7 @@ function selectedExecution(value: unknown, expectedToolName?: string): SelectedE
   if (failure !== undefined && (failure.code !== "VIDEO_RENDER_FAILED" || typeof failure.message !== "string")) {
     throw new BrowserApiError(500, "INVALID_RESPONSE", false);
   }
-  const selfCheck = raw.selfCheck === undefined ? undefined : effectToolSelfCheck(raw.selfCheck);
+  const selfCheck = raw.selfCheck === undefined ? undefined : effectToolSelfCheck(raw.selfCheck, raw.toolName as string);
   return {
     id: raw.id,
     status: status as SelectedExecutionView["status"],

@@ -52,7 +52,8 @@ function messageFor(status: number, code: string): string {
   if (status === 415) return "不支持此文件格式。";
   if (status === 422) return "文件未通过安全验证。";
   if (status === 429) return "上传过于频繁，请稍后重试。";
-  if (status === 500) return "服务响应不可用，请重新登录。";
+  if (code === "INVALID_RESPONSE") return "服务返回了无法识别的响应，请刷新后重试。";
+  if (status === 500) return "服务处理失败，请稍后重试。";
   if (status === 503) return "服务暂时不可用，请稍后重试。";
   return "服务请求失败。";
 }

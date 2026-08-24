@@ -6,8 +6,8 @@
 
 ## 服务器资源要求与接入状态
 
-- 用户上传输入：`foreground_video` 和 `background_image`。`foreground_matte` 由服务器对已授权前景视频逐帧派生并锁定，不占用第三个上传位，也不进入模型参数。
-- 接入状态：**PASS**。当前服务端逐帧解码前景视频，以派生 matte 执行边缘收缩/羽化、溢色抑制和背景合成，输出真实 RGBA 帧。
+- 用户上传输入：`foreground_video` 和 `background_image`。`foreground_video` 可绑定视频，也可绑定一张静态前景图片并在成片各帧复用，因此允许直接上传“前景图片 + 背景图片”两张图片。`foreground_matte` 由服务器对已授权前景素材逐帧派生并锁定，不占用第三个上传位，也不进入模型参数。
+- 接入状态：**PASS**。当前服务端逐帧解码前景素材，以派生 matte 执行边缘收缩/羽化、溢色抑制和背景合成，输出真实 RGBA 帧。
 
 ## JSON 示例
 

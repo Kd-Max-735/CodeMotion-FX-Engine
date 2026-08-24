@@ -50,14 +50,35 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败。";
 }
 
+export function selfCheckViewJson(view: Readonly<Record<string, unknown>>): string {
+  return `${JSON.stringify(view, null, 2)}\n`;
+}
+
+export function selfCheckViewDownloadName(view: Readonly<Record<string, unknown>>): string {
+  const source = typeof view.file_name === "string" ? view.file_name : "wave_path";
+  const leaf = source.split(/[\\/]/u).at(-1) ?? "wave_path";
+  const stem = leaf.replace(/\.[^.]+$/u, "").replace(/[<>:|?*\u0000-\u001f]/gu, "-")
+    .replaceAll("\"", "-").replaceAll("/", "-").replaceAll("\\", "-").trim();
+  return `${(stem || "wave_path").slice(0, 120)}.self-check-view.json`;
+}
+
+function downloadSelfCheckView(view: Readonly<Record<string, unknown>>): void {
+  const url = URL.createObjectURL(new Blob([selfCheckViewJson(view)], { type: "application/json;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = selfCheckViewDownloadName(view);
+  anchor.hidden = true;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 const MIN_MANY_IMAGES = 2;
 const MAX_MANY_IMAGES = 32;
 
 export function imageUploadRequirement(tool: SelectedEffectToolView): Readonly<{ min: number; max: number }> {
-  const required = tool.inputRequirements.filter((slot) => slot.required);
-  const slots = (required.length > 0 ? required : tool.inputRequirements.filter((slot) => !slot.required))
-    .filter((slot) => slot.acceptsUploadedImage || slot.acceptsUploadedVideo || slot.acceptsUploadedAudio);
-  return Object.freeze(slots.reduce((range, slot) => ({
+  return Object.freeze(uploadSlots(tool).reduce((range, slot) => ({
     min: range.min + (slot.required ? slot.cardinality === "many" ? MIN_MANY_IMAGES : 1 : 0),
     max: range.max + (slot.cardinality === "many" ? MAX_MANY_IMAGES : 1)
   }), { min: 0, max: 0 }));
@@ -65,27 +86,35 @@ export function imageUploadRequirement(tool: SelectedEffectToolView): Readonly<{
 
 function uploadSlots(tool: SelectedEffectToolView) {
   const required = tool.inputRequirements.filter((slot) => slot.required);
-  return (required.length > 0 ? required : tool.inputRequirements.filter((slot) => !slot.required))
+  const optional = tool.inputRequirements.filter((slot) => !slot.required);
+  return [...required, ...optional]
     .filter((slot) => slot.acceptsUploadedImage || slot.acceptsUploadedVideo || slot.acceptsUploadedAudio);
 }
 
 function uploadAccept(tool: SelectedEffectToolView): string {
-  const mimes = new Set(uploadSlots(tool).flatMap((slot) => slot.acceptedMimeTypes));
-  if (mimes.size > 0) return [...mimes].join(",");
-  const accepted = new Set<string>();
+  const accepted = new Set(uploadSlots(tool).flatMap((slot) => slot.acceptedMimeTypes));
   uploadSlots(tool).forEach((slot) => {
-    if (slot.acceptsUploadedImage) accepted.add("image/*");
-    if (slot.acceptsUploadedVideo) accepted.add("video/*");
-    if (slot.acceptsUploadedAudio) accepted.add("audio/*");
+    if (slot.acceptsUploadedImage && !slot.acceptedMimeTypes.some((mime) => mime.startsWith("image/"))) {
+      accepted.add("image/*");
+    }
+    if (slot.acceptsUploadedVideo && !slot.acceptedMimeTypes.some((mime) => mime.startsWith("video/"))) {
+      accepted.add("video/*");
+    }
+    if (slot.acceptsUploadedAudio && !slot.acceptedMimeTypes.some((mime) => mime.startsWith("audio/"))) {
+      accepted.add("audio/*");
+    }
   });
   return [...accepted].join(",");
 }
 
 function assetMatchesSlot(asset: BrowserAssetSummaryV1, slot: SelectedEffectToolView["inputRequirements"][number]): boolean {
-  if (slot.acceptedMimeTypes.length > 0 && !slot.acceptedMimeTypes.includes(asset.mime)) return false;
-  if (asset.kind === "audio") return slot.acceptsUploadedAudio || slot.kind === "audio";
-  if (asset.kind === "video") return slot.acceptsUploadedVideo || slot.kind === "video";
-  return (asset.kind === "image" || asset.kind === "svg") && slot.acceptsUploadedImage;
+  const mediaType = asset.kind === "audio" ? "audio" : asset.kind === "video" ? "video" : "image";
+  const acceptsKind = mediaType === "audio" ? slot.acceptsUploadedAudio || slot.kind === "audio"
+    : mediaType === "video" ? slot.acceptsUploadedVideo || slot.kind === "video"
+      : (asset.kind === "image" || asset.kind === "svg") && slot.acceptsUploadedImage;
+  if (!acceptsKind) return false;
+  const sameTypeMimeRestrictions = slot.acceptedMimeTypes.filter((mime) => mime.startsWith(`${mediaType}/`));
+  return sameTypeMimeRestrictions.length === 0 || sameTypeMimeRestrictions.includes(asset.mime);
 }
 
 export type UploadedAssetBinding = Readonly<{
@@ -110,6 +139,10 @@ export function assetBindingsForAssets(
 }
 
 export function inputSlotDisplayName(toolName: string, slotName: string): string {
+  if (toolName === "background_remove_compose") {
+    if (slotName === "foreground_video") return "前景图片或视频";
+    if (slotName === "background_image") return "替换背景图片";
+  }
   if (toolName === "datamosh") {
     if (slotName === "source_frame") return "当前正确画面";
     if (slotName === "previous_frame") return "错帧来源画面";
@@ -180,7 +213,7 @@ export function turnInputIds(
       return;
     }
     const reserved = slots.slice(index + 1).reduce((count, remaining) =>
-      count + (remaining.cardinality === "many" ? MIN_MANY_IMAGES : 1), 0);
+      count + (remaining.required ? remaining.cardinality === "many" ? MIN_MANY_IMAGES : 1 : 0), 0);
     const count = Math.min(MAX_MANY_IMAGES, Math.max(0, selectedAssetIds.length - offset - reserved));
     if (count > 0) output[slot.name] = Object.freeze(selectedAssetIds.slice(offset, offset + count));
     offset += count;
@@ -192,8 +225,18 @@ export function turnInputIdsForAssets(
   tool: SelectedEffectToolView,
   assets: readonly BrowserAssetSummaryV1[]
 ): Readonly<Record<string, string | readonly string[]>> {
-  const ordered = assetBindingsForAssets(tool, assets).map(({ asset }) => asset.assetId);
-  return turnInputIds(tool, ordered);
+  const bindings = assetBindingsForAssets(tool, assets);
+  const output: Record<string, string | readonly string[]> = {};
+  for (const slot of uploadSlots(tool)) {
+    const ids = bindings.filter((binding) => binding.slot.name === slot.name)
+      .map((binding) => binding.asset.assetId);
+    if (slot.cardinality === "one") {
+      if (ids[0] !== undefined) output[slot.name] = ids[0];
+    } else if (ids.length > 0) {
+      output[slot.name] = Object.freeze(ids);
+    }
+  }
+  return Object.freeze(output);
 }
 
 export function filterEffectTools(
@@ -231,15 +274,16 @@ function SelfCheckPanel({
   const selfCheck = execution.selfCheck;
   if (selfCheck === undefined) return <div className="self-check-empty">当前工具尚未配置专属自检视图。</div>;
   const passed = selfCheck.status === "pass";
+  const pipelineFailed = selfCheck.failure !== undefined;
   return (
     <div className="self-check-panel">
       <header className={`self-check-summary ${passed ? "passed" : "failed"}`}>
         {passed ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
         <div>
-          <strong>{passed ? "自动自检通过" : "自动自检未通过"}</strong>
+          <strong>{passed ? "自动自检通过" : pipelineFailed ? "自动自检执行失败" : "自动自检未通过"}</strong>
           <p>{selfCheck.result?.summary ?? selfCheck.failure?.message ?? "自检未返回结论。"}</p>
         </div>
-        <span>{selfCheck.evidenceStatus === "sufficient" ? "证据充分" : "证据生成失败"} · 规则 v{selfCheck.ruleVersion}</span>
+        <span>{selfCheck.evidenceStatus === "sufficient" ? "证据充分" : "证据生成失败"}</span>
       </header>
 
       {selfCheck.evidenceImages.length > 0 && (
@@ -260,32 +304,24 @@ function SelfCheckPanel({
       )}
 
       {selfCheck.macroView !== undefined && (
-        <section className="self-check-json" aria-label="宏观自检 JSON">
-          <div className="self-check-section-title"><Braces size={14} /><strong>宏观自检 JSON</strong><span>参数、渲染、几何、时序、技术质量</span></div>
-          <pre>{JSON.stringify(selfCheck.macroView, null, 2)}</pre>
-        </section>
-      )}
-
-      {selfCheck.result !== undefined && (
-        <section className="self-check-checks" aria-label="自检规则判定">
-          <div className="self-check-section-title"><ShieldCheck size={14} /><strong>规则判定</strong><span>{selfCheck.result.checks.length} 项</span></div>
-          <div className="self-check-check-grid">
-            {selfCheck.result.checks.map((check) => (
-              <article key={check.ruleId} className={check.status}>
-                {check.status === "pass" ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-                <div><code>{check.ruleId}</code><p>{check.reason}</p></div>
-              </article>
-            ))}
+        <section className="self-check-json" aria-label="自检视图 JSON">
+          <div className="self-check-section-title">
+            <Braces size={14} /><strong>自检视图 JSON</strong>
+            <span>成片、实际效果、质量与关键帧；不含函数内部参数</span>
+            <button type="button" className="self-check-json-download" onClick={() => downloadSelfCheckView(selfCheck.macroView!)}>
+              <Download size={13} />下载 JSON
+            </button>
           </div>
+          <pre>{JSON.stringify(selfCheck.macroView, null, 2)}</pre>
         </section>
       )}
 
       {selfCheck.result !== undefined && selfCheck.result.issues.length > 0 && (
         <section className="self-check-issues">
           <div className="self-check-section-title"><XCircle size={14} /><strong>发现的问题</strong><span>{selfCheck.result.issues.length} 项</span></div>
-          {selfCheck.result.issues.map((issue) => (
-            <article key={`${issue.ruleId}:${issue.code}`}>
-              <code>{issue.ruleId} · {issue.code}</code><p>{issue.message}</p>
+          {selfCheck.result.issues.map((issue, index) => (
+            <article key={`${issue.ruleId ?? "issue"}:${issue.code ?? index}`}>
+              <p>{issue.message}</p>
             </article>
           ))}
         </section>
@@ -335,7 +371,7 @@ function VideoResult({
     return (
       <div className="video-progress">
         <div className="video-progress-bar"><i style={{ width: `${Math.round(execution.video.progress * 100)}%` }} /></div>
-        <span>{checking ? "正在抽帧并执行 Ark 自动自检" : execution.status === "queued" ? "等待视频渲染" : "正在逐帧渲染"}</span>
+        <span>{checking ? "正在抽帧并生成自动自检证据" : execution.status === "queued" ? "等待视频渲染" : "正在逐帧渲染"}</span>
         <b>{checking ? "证据生成中" : `${execution.video.completedFrames} / ${execution.video.frameCount}`}</b>
         <GpuStatus gpu={execution.gpu} />
       </div>
@@ -349,7 +385,7 @@ function VideoResult({
         </button>
         {execution.selfCheck !== undefined && (
           <button type="button" className={activeView === "self-check" ? "active" : ""} onClick={() => setActiveView("self-check")}>
-            <ShieldCheck size={14} />宏观自检
+            <ShieldCheck size={14} />自检视图
             <i className={execution.selfCheck.status}>{execution.selfCheck.status === "pass" ? "通过" : "失败"}</i>
           </button>
         )}

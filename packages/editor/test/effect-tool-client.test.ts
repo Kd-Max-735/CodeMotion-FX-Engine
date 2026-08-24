@@ -100,10 +100,15 @@ describe("selected effect-tool browser client", () => {
           status: "pass",
           automatic: true,
           toolName: "wave_path",
-          ruleVersion: "1.1.0",
-          evidenceContractVersion: "1.1.0",
+          ruleVersion: "1.2.0",
+          evidenceContractVersion: "1.2.0",
           evidenceStatus: "sufficient",
-          macroView: { normalizedParams: { amplitude: 48 }, output: { encodingCompleted: true } },
+          macroView: {
+            file_name: "wave_path.mp4",
+            original_request: "生成路径波浪",
+            summary: { key_information: [{ label: "波动强度", value: "明显" }] },
+            metadata: { quality: { black_frame_ratio: 0 } }
+          },
           evidenceImages: [{
             evidenceId: "keyframe_contact_sheet", label: "最终 MP4 关键帧合成图", mime: "image/png",
             width: 928, height: 317
@@ -125,5 +130,48 @@ describe("selected effect-tool browser client", () => {
     expect(execution.selfCheck?.result?.checks[0]?.ruleId).toBe("WP_EXECUTION_INTEGRITY");
     expect(selectedEffectToolApi.selfCheckEvidenceUrl("execution-wave-path", "keyframe_contact_sheet"))
       .toBe("/api/effect-tools/v3/executions/execution-wave-path/self-check/evidence/keyframe_contact_sheet");
+  });
+
+  it("parses an observed beat_pulse self-check without treating it as an authentication failure", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      execution: {
+        id: "execution-beat-pulse",
+        status: "completed",
+        toolName: "beat_pulse",
+        createdAt: "2026-08-24T00:00:00.000Z",
+        updatedAt: "2026-08-24T00:00:01.000Z",
+        video: {
+          format: "mp4", mime: "video/mp4", width: 640, height: 360, fps: 30,
+          durationSeconds: 5, frameCount: 150, completedFrames: 150, progress: 1,
+          audio: false, bytes: 1234, downloadName: "beat-pulse.mp4"
+        },
+        gpu: { available: false, message: "unavailable" },
+        selfCheck: {
+          status: "fail",
+          automatic: true,
+          toolName: "beat_pulse",
+          ruleVersion: "1.0.0",
+          evidenceContractVersion: "1.0.0",
+          evidenceStatus: "sufficient",
+          macroView: { file_name: "beat-pulse.mp4", original_request: "跟随节拍脉冲" },
+          evidenceImages: [{
+            evidenceId: "keyframe_contact_sheet", label: "节拍脉冲关键帧", mime: "image/png",
+            width: 928, height: 317
+          }],
+          result: {
+            status: "fail",
+            summary: "脉冲不够明显。",
+            checks: [{ name: "visible_effect", status: "fail", reason: "未观察到清晰脉冲。" }],
+            issues: ["节拍峰值没有形成清晰可见的脉冲。"]
+          }
+        }
+      }
+    })));
+
+    const execution = await selectedEffectToolApi.execution("execution-beat-pulse", "beat_pulse");
+    expect(execution.selfCheck?.result).toMatchObject({
+      checks: [{ name: "visible_effect", status: "fail" }],
+      issues: [{ message: "节拍峰值没有形成清晰可见的脉冲。" }]
+    });
   });
 });

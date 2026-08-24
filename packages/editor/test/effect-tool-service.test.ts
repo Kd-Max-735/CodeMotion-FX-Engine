@@ -569,10 +569,15 @@ describe("server single effect-tool service", () => {
           status: "pass" as const,
           automatic: true as const,
           toolName: "wave_path" as const,
-          ruleVersion: "1.1.0" as const,
-          evidenceContractVersion: "1.1.0" as const,
+          ruleVersion: "1.2.0" as const,
+          evidenceContractVersion: "1.2.0" as const,
           evidenceStatus: "sufficient" as const,
-          macroView: { userRequest: request.userRequest, output: { encodingCompleted: true } },
+          macroView: {
+            file_name: "wave_path.mp4",
+            original_request: request.userRequest,
+            summary: { key_information: [{ label: "特效类型", value: "路径波浪" }] },
+            metadata: { quality: { black_frame_ratio: 0 } }
+          },
           evidenceImages: [{
             evidenceId: "keyframe_contact_sheet", label: "最终 MP4 关键帧合成图", mime: "image/png" as const,
             width: 928, height: 317
@@ -604,7 +609,7 @@ describe("server single effect-tool service", () => {
       selfCheck: {
         status: "pass",
         evidenceStatus: "sufficient",
-        macroView: { userRequest: prompt },
+        macroView: { original_request: prompt },
         evidenceImages: [{ evidenceId: "keyframe_contact_sheet" }]
       }
     });
@@ -1962,7 +1967,7 @@ describe("server single effect-tool service", () => {
       }
       expect(catalog.tools.find((item) => item.toolName === "background_remove_compose")).toMatchObject({
         inputRequirements: [
-          { name: "foreground_video", acceptsUploadedVideo: true },
+          { name: "foreground_video", acceptsUploadedImage: true, acceptsUploadedVideo: true },
           { name: "foreground_matte", acceptsUploadedImage: false, acceptsUploadedVideo: false },
           { name: "background_image", acceptsUploadedImage: true, acceptsUploadedVideo: false }
         ]
@@ -1975,13 +1980,13 @@ describe("server single effect-tool service", () => {
       });
       expect(catalog.tools.find((item) => item.toolName === "smart_crop_animate")).toMatchObject({
         inputRequirements: [
-          { name: "source_video", acceptsUploadedVideo: true },
+          { name: "source_video", acceptsUploadedImage: false, acceptsUploadedVideo: true },
           { name: "subject_tracks", acceptsUploadedImage: false, acceptsUploadedVideo: false }
         ]
       });
       for (const toolName of ["speed_ramp", "video_freeze_frame"]) {
         expect(catalog.tools.find((item) => item.toolName === toolName)).toMatchObject({
-          inputRequirements: [{ name: "source_video", acceptsUploadedVideo: true }]
+          inputRequirements: [{ name: "source_video", acceptsUploadedImage: false, acceptsUploadedVideo: true }]
         });
       }
 

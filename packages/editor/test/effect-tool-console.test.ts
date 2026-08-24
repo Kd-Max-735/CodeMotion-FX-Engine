@@ -6,6 +6,8 @@ import {
   imageUploadRequirement,
   inputSlotDisplayName,
   reconcileSelectedAssetIds,
+  selfCheckViewDownloadName,
+  selfCheckViewJson,
   turnInputIds,
   turnInputIdsForAssets
 } from "../src/EffectToolConsole.js";
@@ -43,6 +45,12 @@ function input(
 }
 
 describe("120-tool selector helpers", () => {
+  it("serializes the visible self-check view with a safe JSON download name", () => {
+    const view = { file_name: "wave:path preview.mp4", summary: { description: "波浪路径" } };
+    expect(selfCheckViewDownloadName(view)).toBe("wave-path preview.self-check-view.json");
+    expect(selfCheckViewJson(view)).toBe(`${JSON.stringify(view, null, 2)}\n`);
+  });
+
   it("searches Chinese display names, snake_case names, and categories", () => {
     const tools = [
       tool(),
@@ -222,6 +230,37 @@ describe("120-tool selector helpers", () => {
     }) as BrowserAssetSummaryV1;
     expect(turnInputIdsForAssets(compose, [asset("asset_bg00000000", "image"), asset("asset_fg00000000", "video")]))
       .toEqual({ foreground_video: "asset_fg00000000", background_image: "asset_bg00000000" });
+  });
+
+  it("binds two uploaded images to the compatible foreground and background slots", () => {
+    const compose = tool({
+      toolName: "background_remove_compose",
+      inputRequirements: [
+        {
+          ...input("foreground_video", "video", true, true, "one", true),
+          acceptedMimeTypes: ["video/mp4", "video/webm"]
+        },
+        input("foreground_matte", "mask", true, false),
+        {
+          ...input("background_image", "image"),
+          acceptedMimeTypes: ["image/png", "image/jpeg", "image/webp"]
+        }
+      ]
+    });
+    const image = (assetId: string): BrowserAssetSummaryV1 => ({
+      assetId,
+      kind: "image",
+      displayName: assetId,
+      mime: "image/png",
+      codec: "png",
+      bytes: 100,
+      uploadedAt: new Date(0).toISOString(),
+      allowedPurposes: ["reference-image"]
+    });
+
+    expect(imageUploadRequirement(compose)).toEqual({ min: 2, max: 2 });
+    expect(turnInputIdsForAssets(compose, [image("asset_fgimage000"), image("asset_bgimage000")]))
+      .toEqual({ foreground_video: "asset_fgimage000", background_image: "asset_bgimage000" });
   });
 
   it("requires one upload when the server derives depth or stroke geometry", () => {

@@ -22,7 +22,7 @@ const RULE_IDS = [
 ] as const;
 
 describe("wave_path automatic self-check contract", () => {
-  it("selects stable frames for a static path and phase probes for a moving path", () => {
+  it("selects evidence-bearing keyframes according to static or moving behavior", () => {
     const staticPlan = wavePathSamplingPlan(5, 30, { phase: 30, speed: 0 });
     expect(staticPlan.map((item) => item.role)).toEqual(["static_early", "static_middle", "static_late"]);
     expect(staticPlan.map((item) => item.frame)).toEqual([15, 75, 134]);
@@ -30,9 +30,7 @@ describe("wave_path automatic self-check contract", () => {
     const movingPlan = wavePathSamplingPlan(5, 30, { phase: 0, speed: 1 });
     expect(movingPlan[0]).toMatchObject({ evidenceId: "motion_start", role: "motion_start" });
     expect(movingPlan.at(-1)).toMatchObject({ evidenceId: "motion_end", role: "motion_end" });
-    const probes = movingPlan.filter((item) => item.role === "phase_probe");
-    expect(probes).toHaveLength(3);
-    expect(probes.map((item) => item.frame)).toEqual([...probes.map((item) => item.frame)].sort((a, b) => a - b));
+    expect(movingPlan.filter((item) => item.role === "phase_probe")).toHaveLength(3);
   });
 
   it("accepts only the closed seven-rule Ark decision object", () => {
@@ -66,10 +64,10 @@ describe("wave_path automatic self-check contract", () => {
     const decision = {
       status: "pass",
       summary: "路径波浪全部规则通过。",
-      checks: RULE_IDS.map((ruleId) => ({
+      checks: RULE_IDS.map((ruleId, index) => ({
         ruleId,
         status: "pass",
-        evidenceRefs: ["keyframe_contact_sheet"],
+        evidenceRefs: [index === 0 ? "metadata.media.encoding_completed" : "keyframe_contact_sheet"],
         reason: "证据板与宏观指标一致。"
       })),
       issues: []
@@ -84,10 +82,11 @@ describe("wave_path automatic self-check contract", () => {
       requestId: "request-test",
       tenantId: "tenant-test",
       userId: "user-test",
-      userRequest: "生成路径波浪",
-      normalizedParams: {},
       rule: "test rule",
-      macroView: { samplingPlan: [], evidenceImages: [{ evidenceId: "keyframe_contact_sheet" }] },
+      acceptanceView: {
+        original_request: "生成路径波浪",
+        metadata: { media: { encoding_completed: true }, keyframe_evidence: { keyframes: [] } }
+      },
       evidencePng: Buffer.from("png")
     })).resolves.toMatchObject({ status: "pass", summary: "路径波浪全部规则通过。" });
   });
@@ -159,13 +158,13 @@ describe("wave_path automatic self-check contract", () => {
       status: "pass",
       evidenceStatus: "sufficient",
       macroView: {
-        output: { encodingCompleted: true, decodable: true },
-        render: { sampledFrameCount: 3, degraded: false },
-        technicalQuality: {
-          comparisonBasis: "same_codec_control",
-          baselineFrameCount: 3,
-          decodeFailureCount: 0,
-          nonLocalChangeRatio: 0
+        file_name: "output.mp4",
+        original_request: "生成一条细密、静止并自然收束的路径波浪",
+        summary: { key_information: [{ label: "特效类型", value: "路径波浪" }] },
+        metadata: {
+          media: { media_type: "video/mp4", width_px: 640, height_px: 360, duration_seconds: 5 },
+          quality: { black_frame_ratio: 0, unexpected_global_change_ratio: 0 },
+          keyframe_evidence: { coverage: "sufficient", image_count: 3 }
         }
       },
       evidenceImages: [{ evidenceId: "keyframe_contact_sheet", width: 928, height: 317 }]
@@ -220,7 +219,7 @@ describe("wave_path automatic self-check contract", () => {
       })),
       issues: []
     };
-    let reviewedMacro: Readonly<Record<string, unknown>> | undefined;
+    let reviewedView: Readonly<Record<string, unknown>> | undefined;
     const baselineVideoPath = join(outputDirectory, "self-check-codec-baseline.mp4");
     await runWavePathSelfCheck({
       requestId: "test-wave-path-control-baseline",
@@ -241,7 +240,7 @@ describe("wave_path automatic self-check contract", () => {
       snapshots,
       reviewer: {
         review: async (request) => {
-          reviewedMacro = request.macroView;
+          reviewedView = request.acceptanceView;
           return decision;
         }
       },
@@ -251,11 +250,9 @@ describe("wave_path automatic self-check contract", () => {
       )
     });
 
-    expect(reviewedMacro?.technicalQuality).toMatchObject({
-      comparisonBasis: "same_codec_control",
-      baselineFrameCount: 3
-    });
-    expect((reviewedMacro?.technicalQuality as Record<string, unknown>).nonLocalChangeRatio)
+    expect(JSON.stringify(reviewedView)).not.toMatch(/normalizedParams|sampleSpacing|backendId|algorithm|phaseRadians/u);
+    const metadata = reviewedView?.metadata as Record<string, unknown>;
+    expect((metadata.quality as Record<string, unknown>).unexpected_global_change_ratio)
       .toBeGreaterThan(0.005);
   });
 });

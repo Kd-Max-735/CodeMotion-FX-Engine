@@ -56,6 +56,10 @@ import {
   type EffectToolVideoFile
 } from "./effect-tool-video-service.js";
 import { VolcengineArkWavePathSelfCheckReviewer } from "./wave-path-self-check.js";
+import { VolcengineArkObservedMotionSelfCheckReviewer } from "./observed-motion-self-check.js";
+import { VolcengineArkDedicatedSelfCheckReviewer } from "./dedicated-effect-self-check-common.js";
+import { VolcengineArkVisualSelfCheckReviewer } from "./visual-effect-self-check.js";
+import { VolcengineArkObservableSelfCheckReviewer } from "./self-checks/index.js";
 import {
   Sam31SegmentationError,
   Sam31SegmentationService,
@@ -129,6 +133,9 @@ const MAX_MATERIAL_OUTPUT_EDGE = 640;
 const VIDEO_IN_IMAGE_SLOT_TOOLS = new Set([
   "live_binding", "particle_emitter", "particle_flow_field", "particle_orbit_field",
   "particle_snow_rain", "particle_spark", "particle_trail"
+]);
+const STRICT_VIDEO_INPUT_TOOLS = new Set([
+  "smart_crop_animate", "speed_ramp", "video_freeze_frame"
 ]);
 export const NATIVE_EFFECT_TOOL_NAME = "film_grain" as const;
 
@@ -444,6 +451,7 @@ function acceptsUploadedImage(
   slot: EffectInputSlotDefinition
 ): boolean {
   if (isServerDerivedInputSlot(definition, slot)) return false;
+  if (slot.kind === "video" && STRICT_VIDEO_INPUT_TOOLS.has(definition.toolName)) return false;
   // The current picker accepts visual files for every non-audio required slot;
   // the server converts data, mask, LUT, depth, model and texture slots after authorization.
   return slot.kind !== "audio" && slot.kind !== "font";
@@ -1548,8 +1556,7 @@ export class TenantMediaEffectToolInputResolver implements EffectToolInputResolv
     if (kind === undefined) {
       throw new TypeError(`${slot.name} requires an authorized ${slot.kind} visual resource.`);
     }
-    if (["background_remove_compose", "smart_crop_animate", "speed_ramp", "video_freeze_frame"]
-      .includes(definition.toolName) && slot.kind === "video" && kind !== "video") {
+    if (STRICT_VIDEO_INPUT_TOOLS.has(definition.toolName) && slot.kind === "video" && kind !== "video") {
       throw new TypeError(`${slot.name} requires an authorized video asset.`);
     }
     if (["background_remove_compose", "image_depth_parallax", "ken_burns", "object_explode", "photo_stack", "text_logo_reveal"]
@@ -1812,7 +1819,8 @@ export class EffectToolService {
         envelope,
         20260814,
         nativeArguments.durationSeconds,
-        VIDEO_GENERATION_MODE_FPS[nativeArguments.generationMode]
+        VIDEO_GENERATION_MODE_FPS[nativeArguments.generationMode],
+        request.prompt
       );
       const normalizedArguments = Object.freeze({
         effectParams: structuredClone(envelope.data),
@@ -2194,7 +2202,29 @@ export function createProductionEffectToolService(
       outputRoot: videoOutputRoot,
       ...(env.FFMPEG_PATH === undefined ? {} : { ffmpegPath: env.FFMPEG_PATH }),
       ...(apiKey === undefined || apiKey.trim().length < 10 ? {} : {
+        requestedSelfCheckApiKey: apiKey,
+        ...(fetchImpl === undefined ? {} : { requestedSelfCheckFetchImpl: fetchImpl }),
         wavePathSelfCheckReviewer: new VolcengineArkWavePathSelfCheckReviewer({
+          apiKey,
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
+          audit: (record) => process.stderr.write(`[effect-tool-self-check] ${JSON.stringify(record)}\n`)
+        }),
+        observedMotionSelfCheckReviewer: new VolcengineArkObservedMotionSelfCheckReviewer({
+          apiKey,
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
+          audit: (record) => process.stderr.write(`[effect-tool-self-check] ${JSON.stringify(record)}\n`)
+        }),
+        dedicatedSelfCheckReviewer: new VolcengineArkDedicatedSelfCheckReviewer({
+          apiKey,
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
+          audit: (record) => process.stderr.write(`[effect-tool-self-check] ${JSON.stringify(record)}\n`)
+        }),
+        visualSelfCheckReviewer: new VolcengineArkVisualSelfCheckReviewer({
+          apiKey,
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
+          audit: (record) => process.stderr.write(`[effect-tool-self-check] ${JSON.stringify(record)}\n`)
+        }),
+        observableSelfCheckReviewer: new VolcengineArkObservableSelfCheckReviewer({
           apiKey,
           ...(fetchImpl === undefined ? {} : { fetchImpl }),
           audit: (record) => process.stderr.write(`[effect-tool-self-check] ${JSON.stringify(record)}\n`)
