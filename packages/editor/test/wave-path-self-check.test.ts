@@ -7,6 +7,7 @@ import { ProviderError } from "@codemotion/ai-planner";
 import {
   parseWavePathSelfCheckResult,
   runWavePathSelfCheck,
+  VolcengineArkWavePathSelfCheckReviewer,
   wavePathSamplingPlan
 } from "../src/wave-path-self-check.js";
 
@@ -59,6 +60,36 @@ describe("wave_path automatic self-check contract", () => {
       status: "fail",
       checks: value.checks.map((check, index) => index === 2 ? { ...check, status: "fail" } : check)
     })).toThrow(/inconsistent/u);
+  });
+
+  it("recovers a contract-valid JSON object from an Ark fenced response", async () => {
+    const decision = {
+      status: "pass",
+      summary: "路径波浪全部规则通过。",
+      checks: RULE_IDS.map((ruleId) => ({
+        ruleId,
+        status: "pass",
+        evidenceRefs: ["evidence_board_01"],
+        reason: "证据板与宏观指标一致。"
+      })),
+      issues: []
+    };
+    const reviewer = new VolcengineArkWavePathSelfCheckReviewer({
+      apiKey: "test-api-key-long-enough",
+      fetchImpl: async () => new Response(JSON.stringify({
+        choices: [{ message: { content: `\`\`\`json\n${JSON.stringify(decision)}\n\`\`\`` } }]
+      }), { status: 200, headers: { "content-type": "application/json" } })
+    });
+    await expect(reviewer.review({
+      requestId: "request-test",
+      tenantId: "tenant-test",
+      userId: "user-test",
+      userRequest: "生成路径波浪",
+      normalizedParams: {},
+      rule: "test rule",
+      macroView: { samplingPlan: [], evidenceImages: [{ evidenceId: "evidence_board_01" }] },
+      evidencePng: Buffer.from("png")
+    })).resolves.toMatchObject({ status: "pass", summary: "路径波浪全部规则通过。" });
   });
 
   it("builds a sufficient macro JSON and a readable final-frame evidence board", async () => {

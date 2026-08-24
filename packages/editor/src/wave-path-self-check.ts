@@ -611,11 +611,17 @@ async function evidenceBoard(
   ];
   const cleanPanels: Panel[] = [];
   const diagnosticPanels: Panel[] = [];
+  const middleEvidenceId = snapshots[Math.floor(snapshots.length / 2)]?.evidenceId;
   for (const [evidenceId, path] of samplePaths) {
     const image = await loadImage(path);
     const snapshot = byEvidence.get(evidenceId);
     cleanPanels.push({ label: `${evidenceId} · 干净最终帧`, image });
-    if (snapshot !== undefined) diagnosticPanels.push({ label: `diagnostic_${evidenceId} · 路径诊断`, image, diagnostic: snapshot });
+    if (snapshot !== undefined) diagnosticPanels.push({
+      label: `${evidenceId === middleEvidenceId
+        ? `diagnostic_middle / diagnostic_${evidenceId}` : `diagnostic_${evidenceId}`} · 路径诊断`,
+      image,
+      diagnostic: snapshot
+    });
   }
   panels.push(...cleanPanels, ...diagnosticPanels);
   const detailSnapshot = snapshots[Math.floor(snapshots.length / 2)];
@@ -803,10 +809,17 @@ function arkBodyContent(body: unknown): unknown {
   if (typeof message.content !== "string") {
     throw new ProviderError("provider_response", "Ark returned no self-check JSON content.");
   }
-  try { return JSON.parse(message.content) as unknown; }
-  catch (cause) {
-    throw new ProviderError("provider_response", "Ark returned invalid self-check JSON.", { cause });
+  const content = message.content.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(content)?.[1];
+  const firstBrace = content.indexOf("{");
+  const lastBrace = content.lastIndexOf("}");
+  const embedded = firstBrace >= 0 && lastBrace > firstBrace ? content.slice(firstBrace, lastBrace + 1) : undefined;
+  let cause: unknown;
+  for (const candidate of [...new Set([content, fenced, embedded].filter((item): item is string => item !== undefined))]) {
+    try { return JSON.parse(candidate) as unknown; }
+    catch (error) { cause = error; }
   }
+  throw new ProviderError("provider_response", "Ark returned invalid self-check JSON.", { cause });
 }
 
 function assertActualEvidenceRefs(
@@ -815,7 +828,8 @@ function assertActualEvidenceRefs(
 ): void {
   const allowed = new Set([
     "macro.output", "macro.render", "macro.samplingPlan", "macro.geometry", "macro.temporal",
-    "macro.technicalQuality", "source_reference", "path_detail", "path_detail_clean", "evidence_board_01"
+    "macro.technicalQuality", "source_reference", "diagnostic_middle", "path_detail", "path_detail_clean",
+    "evidence_board_01"
   ]);
   const samplingPlan = macroView.samplingPlan;
   if (Array.isArray(samplingPlan)) {
