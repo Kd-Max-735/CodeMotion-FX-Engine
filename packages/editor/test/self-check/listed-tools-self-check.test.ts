@@ -126,6 +126,9 @@ function drawFixture(toolName: ObservedSelfCheckToolName, time: number): Buffer 
 async function execute(item: typeof CASES[number]): Promise<ObservedSelfCheckArtifacts> {
   const outputDirectory = await mkdtemp(join(tmpdir(), `cmfx-${item.toolName}-`));
   return item.runner({
+    requestId: `request-${item.toolName}`,
+    tenantId: "tenant-test",
+    userId: "user-test",
     userRequest: item.request,
     videoPath: join(outputDirectory, `${item.toolName}.mp4`),
     outputDirectory,
@@ -136,6 +139,23 @@ async function execute(item: typeof CASES[number]): Promise<ObservedSelfCheckArt
     frameCount: 40,
     bytes: 4_096,
     effectParams: item.params,
+    reviewer: {
+      review: async ({ ruleIds }) => {
+        const mismatch = item.toolName === "beat_pulse" && item.request.includes("较弱");
+        return {
+          status: mismatch ? "fail" as const : "pass" as const,
+          summary: mismatch ? "实际脉冲明显强于用户要求。" : "关键帧显示效果符合用户要求。",
+          checks: ruleIds.map((ruleId) => ({
+            ruleId,
+            status: mismatch && ruleId === "VISIBLE_EFFECT" ? "fail" as const : "pass" as const,
+            evidenceRefs: ["self_check_view", "keyframe_contact_sheet"],
+            reason: mismatch && ruleId === "VISIBLE_EFFECT" ? "用户要求较弱脉冲，但关键帧显示明显脉冲。" : "最终成片证据支持该项判断。"
+          })),
+          issues: mismatch ? [{ ruleId: "VISIBLE_EFFECT", code: "PULSE_STRENGTH_MISMATCH",
+            message: "请减弱脉冲强度以符合用户要求。", evidenceRefs: ["self_check_view", "keyframe_contact_sheet"] }] : []
+        };
+      }
+    },
     frameExtractor: async (_inputPath, outputPath, time) => writeFile(outputPath, drawFixture(item.toolName, time))
   });
 }
@@ -233,6 +253,7 @@ describe("listed tools final-video self-checks", () => {
       return Object.freeze({
         view: Object.freeze({
           status: "pass", automatic: true, toolName, evidenceStatus: "sufficient", macroView,
+          ruleVersion: "1.0.0", evidenceContractVersion: "1.0.0",
           evidenceImages: Object.freeze([Object.freeze({
             evidenceId: "keyframe_contact_sheet", label: toolName, mime: "image/png", width: 64, height: 36
           })]),

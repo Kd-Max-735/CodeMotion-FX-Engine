@@ -14,7 +14,7 @@ describe("datamosh dedicated self-check", () => {
     expect(Object.keys(artifacts.json)).toEqual(["file_name", "original_request", "summary", "metadata"]);
     expect(artifacts.json.summary.description).toMatch(/块状错帧|故障外观/u);
     expect(artifacts.json.metadata.quality).toMatchObject({
-      delivery_status: "pass",
+      full_decode_passed: true,
       intentional_effects_excluded_from_damage_detection: true
     });
     expect(await readFile(artifacts.evidenceFiles.get("keyframe_contact_sheet")!)).not.toHaveLength(0);
@@ -24,6 +24,6 @@ describe("datamosh dedicated self-check", () => {
   it("marks only a real decode failure for repair", async () => {
     const request = await selfCheckFixture("datamosh", {}, { failValidation: true });
     const artifacts = await runDatamoshSelfCheck(request);
-    expect(artifacts.json.metadata.quality).toMatchObject({ delivery_status: "repair", full_decode_passed: false });
+    expect(artifacts.json.metadata.quality).toMatchObject({ full_decode_passed: false });
   });
 });

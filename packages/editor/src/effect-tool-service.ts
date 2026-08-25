@@ -60,6 +60,7 @@ import { VolcengineArkObservedMotionSelfCheckReviewer } from "./observed-motion-
 import { VolcengineArkDedicatedSelfCheckReviewer } from "./dedicated-effect-self-check-common.js";
 import { VolcengineArkVisualSelfCheckReviewer } from "./visual-effect-self-check.js";
 import { VolcengineArkObservableSelfCheckReviewer } from "./self-checks/index.js";
+import { VolcengineArkUnifiedSelfCheckReviewer } from "./unified-self-check-review.js";
 import {
   Sam31SegmentationError,
   Sam31SegmentationService,
@@ -2204,6 +2205,21 @@ export function createProductionEffectToolService(
       ...(apiKey === undefined || apiKey.trim().length < 10 ? {} : {
         requestedSelfCheckApiKey: apiKey,
         ...(fetchImpl === undefined ? {} : { requestedSelfCheckFetchImpl: fetchImpl }),
+        finalVideoSelfCheckReviewer: new VolcengineArkUnifiedSelfCheckReviewer({
+          apiKey,
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
+          audit: (record) => process.stderr.write(`[effect-tool-self-check] ${JSON.stringify(record)}\n`)
+        }),
+        listedToolSelfCheckReviewer: new VolcengineArkUnifiedSelfCheckReviewer({
+          apiKey,
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
+          audit: (record) => process.stderr.write(`[effect-tool-self-check] ${JSON.stringify(record)}\n`)
+        }),
+        additionalSelfCheckReviewer: new VolcengineArkUnifiedSelfCheckReviewer({
+          apiKey,
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
+          audit: (record) => process.stderr.write(`[effect-tool-self-check] ${JSON.stringify(record)}\n`)
+        }),
         wavePathSelfCheckReviewer: new VolcengineArkWavePathSelfCheckReviewer({
           apiKey,
           ...(fetchImpl === undefined ? {} : { fetchImpl }),

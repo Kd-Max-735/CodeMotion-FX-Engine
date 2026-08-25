@@ -5,12 +5,16 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
 import { observedEffectInformation, selfCheckParameterInformation } from "./self-check-parameter-summary.js";
+import { safeSelfCheckFailureMessage, type UnifiedSelfCheckResult, type UnifiedSelfCheckReviewer } from "./unified-self-check-review.js";
 
 const execFileAsync = promisify(execFile);
 const FONT_FAMILY = "CMFX Ten Tool Self Check";
 let fontReady: boolean | undefined;
 
 export interface EffectSelfCheckRequest<ToolName extends string> {
+  readonly requestId?: string;
+  readonly tenantId?: string;
+  readonly userId?: string;
   readonly toolName: ToolName;
   readonly userRequest: string;
   readonly effectiveParams: Readonly<Record<string, unknown>>;
@@ -29,6 +33,22 @@ export interface EffectSelfCheckRequest<ToolName extends string> {
     inputPath: string, outputPath: string, width: number, height: number, time: number, signal?: AbortSignal
   ) => Promise<void>;
   readonly signal?: AbortSignal;
+  readonly reviewer?: UnifiedSelfCheckReviewer;
+}
+
+export interface TenToolSelfCheckView<ToolName extends string = string> {
+  readonly status: "queued" | "running" | "pass" | "fail" | "inconclusive";
+  readonly automatic: true;
+  readonly toolName: ToolName;
+  readonly ruleVersion: "1.0.0";
+  readonly evidenceContractVersion: "1.0.0";
+  readonly evidenceStatus: "pending" | "sufficient";
+  readonly macroView?: Readonly<Record<string, unknown>>;
+  readonly evidenceImages: readonly Readonly<{
+    evidenceId: "keyframe_contact_sheet"; label: string; mime: "image/png"; width: number; height: number;
+  }>[];
+  readonly result?: UnifiedSelfCheckResult;
+  readonly failure?: Readonly<{ code: "SELF_CHECK_PIPELINE_FAILED"; message: string }>;
 }
 
 export interface PixelFrame {
@@ -293,8 +313,40 @@ export async function runEffectSelfCheck<T extends string>(spec: SelfCheckSpec<T
     })
   });
   const jsonPath = join(directory, "self_check.json"); await writeFile(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf8");
+  const evidenceImages = Object.freeze([Object.freeze({ evidenceId: "keyframe_contact_sheet" as const,
+    label: `${spec.displayName}最终 MP4 关键帧合成图`, mime: "image/png" as const, width: board.width, height: board.height })]);
+  let view: TenToolSelfCheckView<T>;
+  try {
+    if (request.reviewer === undefined || request.requestId === undefined
+      || request.tenantId === undefined || request.userId === undefined) {
+      throw new Error("自动自检审查器未配置。");
+    }
+    const rule = await readFile(
+      new URL(`../../effect-functions/self-check-rules/tools/${spec.toolName}.md`, import.meta.url),
+      "utf8"
+    );
+    const result = await request.reviewer.review({
+      requestId: request.requestId,
+      tenantId: request.tenantId,
+      userId: request.userId,
+      toolName: spec.toolName,
+      displayName: spec.displayName,
+      ruleIds: spec.ruleIds,
+      rule,
+      acceptanceView: json,
+      evidencePng: await readFile(boardPath),
+      ...(request.signal === undefined ? {} : { signal: request.signal })
+    });
+    view = Object.freeze({ status: result.status, automatic: true, toolName: spec.toolName, ruleVersion: "1.0.0",
+      evidenceContractVersion: "1.0.0", evidenceStatus: "sufficient", macroView: json, evidenceImages, result });
+  } catch (error) {
+    view = Object.freeze({ status: "fail", automatic: true, toolName: spec.toolName, ruleVersion: "1.0.0",
+      evidenceContractVersion: "1.0.0", evidenceStatus: "sufficient", macroView: json, evidenceImages,
+      failure: Object.freeze({ code: "SELF_CHECK_PIPELINE_FAILED",
+        message: safeSelfCheckFailureMessage(error) }) });
+  }
   return Object.freeze({ json, jsonPath, evidenceFiles: new Map([["keyframe_contact_sheet", boardPath]]),
-    evidenceImage: Object.freeze({ width: board.width, height: board.height }) });
+    evidenceImage: Object.freeze({ width: board.width, height: board.height }), view });
 }
 
 export async function readSelfCheckJson(path: string): Promise<unknown> { return JSON.parse(await readFile(path, "utf8")); }

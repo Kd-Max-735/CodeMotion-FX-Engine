@@ -11,7 +11,7 @@ describe("glitch_slice dedicated self-check", () => {
     const artifacts = await runGlitchSliceSelfCheck(request);
     expect(artifacts.json.summary.description).toMatch(/切片错位|故障切片/u);
     expect(artifacts.json.metadata.effect_observation).toHaveProperty("slice_direction");
-    expect(artifacts.json.metadata.quality.delivery_status).toBe("pass");
+    expect(artifacts.json.metadata.quality.full_decode_passed).toBe(true);
     expect(artifacts.json.metadata.keyframe_evidence.image_count).toBe(4);
   });
 });

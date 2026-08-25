@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, ArrowRight, Braces, Check, CheckCircle2, ChevronDown, Clock3, Copy, Download, FileAudio, FileImage,
+  AlertCircle, ArrowLeft, ArrowRight, Braces, Check, CheckCircle2, ChevronDown, Clock3, Copy, Download, FileAudio, FileImage,
   Image, LoaderCircle, Menu, Paperclip, Plus, Search, Send, Settings, ShieldCheck, Square, Video, Wrench, X, XCircle
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
@@ -274,16 +274,21 @@ function SelfCheckPanel({
   const selfCheck = execution.selfCheck;
   if (selfCheck === undefined) return <div className="self-check-empty">当前工具尚未配置专属自检视图。</div>;
   const passed = selfCheck.status === "pass";
+  const inconclusive = selfCheck.status === "inconclusive";
   const pipelineFailed = selfCheck.failure !== undefined;
+  const heading = passed ? "自动自检通过"
+    : pipelineFailed ? "自动自检执行失败"
+      : inconclusive ? "自动自检证据不足"
+        : "自动自检未通过";
   return (
     <div className="self-check-panel">
-      <header className={`self-check-summary ${passed ? "passed" : "failed"}`}>
-        {passed ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+      <header className={`self-check-summary ${passed ? "passed" : inconclusive ? "inconclusive" : "failed"}`}>
+        {passed ? <CheckCircle2 size={18} /> : inconclusive ? <AlertCircle size={18} /> : <XCircle size={18} />}
         <div>
-          <strong>{passed ? "自动自检通过" : pipelineFailed ? "自动自检执行失败" : "自动自检未通过"}</strong>
+          <strong>{heading}</strong>
           <p>{selfCheck.result?.summary ?? selfCheck.failure?.message ?? "自检未返回结论。"}</p>
         </div>
-        <span>{selfCheck.evidenceStatus === "sufficient" ? "证据充分" : "证据生成失败"}</span>
+        <span>{selfCheck.evidenceStatus === "sufficient" ? "关键帧已生成" : "证据生成失败"}</span>
       </header>
 
       {selfCheck.evidenceImages.length > 0 && (
@@ -386,7 +391,9 @@ function VideoResult({
         {execution.selfCheck !== undefined && (
           <button type="button" className={activeView === "self-check" ? "active" : ""} onClick={() => setActiveView("self-check")}>
             <ShieldCheck size={14} />自检视图
-            <i className={execution.selfCheck.status}>{execution.selfCheck.status === "pass" ? "通过" : "失败"}</i>
+            <i className={execution.selfCheck.status}>
+              {execution.selfCheck.status === "pass" ? "通过" : execution.selfCheck.status === "inconclusive" ? "待确认" : "失败"}
+            </i>
           </button>
         )}
       </nav>

@@ -102,6 +102,9 @@ async function runCase(entry: typeof CASES[number], userRequest = `测试 ${entr
   const videoPath = join(outputDirectory, "output.mp4");
   const baselineVideoPath = join(outputDirectory, "baseline.mp4");
   const artifacts = await entry.runner({
+    requestId: `review-${entry.toolName}`,
+    tenantId: "tenant-test",
+    userId: "user-test",
     userRequest,
     envelope: { type: entry.toolName, data: entry.params },
     videoPath,
@@ -114,6 +117,29 @@ async function runCase(entry: typeof CASES[number], userRequest = `测试 ${entr
     durationSeconds: 3,
     frameCount: 90,
     bytes: 2048,
+    reviewer: {
+      review: async ({ ruleIds }) => {
+        const failedRuleId = userRequest.includes("右上角")
+          ? ruleIds.find((ruleId) => ruleId === "AURA_FIELD_REQUESTED_LOCATION")
+          : undefined;
+        return {
+          status: failedRuleId === undefined ? "pass" as const : "fail" as const,
+          summary: failedRuleId === undefined ? "关键帧显示效果符合用户要求。" : "光场实际位于中央，与用户要求的右上角不符。",
+          checks: ruleIds.map((ruleId) => ({
+            ruleId,
+            status: ruleId === failedRuleId ? "fail" as const : "pass" as const,
+            evidenceRefs: ["self_check_view", "keyframe_contact_sheet"],
+            reason: ruleId === failedRuleId ? "关键帧中的光场位于中央，并非用户要求的右上角。" : "关键帧未显示该项与用户要求冲突。"
+          })),
+          issues: failedRuleId === undefined ? [] : [{
+            ruleId: failedRuleId,
+            code: "REQUESTED_LOCATION_MISMATCH",
+            message: "请将光场从中央移到用户要求的右上角。",
+            evidenceRefs: ["self_check_view", "keyframe_contact_sheet"]
+          }]
+        };
+      }
+    },
     frameExtractor: async (inputPath, outputPath, width, height, time) => {
       await writeFile(outputPath, effectFrame(entry.toolName, width, height, time, inputPath === baselineVideoPath));
     }

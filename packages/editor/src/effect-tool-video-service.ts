@@ -127,6 +127,7 @@ import { runScanBeamSelfCheck } from "./scan-beam-self-check.js";
 import { runVolumetricRaySelfCheck } from "./volumetric-ray-self-check.js";
 import { runHologramSelfCheck } from "./hologram-self-check.js";
 import { type EffectSelfCheckRequest, type EffectSelfCheckView } from "./visual-quality-self-check-common.js";
+import type { UnifiedSelfCheckReviewer } from "./unified-self-check-review.js";
 import { queuedChromaticAberrationSelfCheck, runChromaticAberrationSelfCheck } from "./chromatic-aberration-self-check.js";
 import { queuedColorGradeSelfCheck, runColorGradeSelfCheck } from "./color-grade-self-check.js";
 import { queuedFilmGrainSelfCheck, runFilmGrainSelfCheck } from "./film-grain-self-check.js";
@@ -137,6 +138,30 @@ import { queuedRadialBlurSelfCheck, runRadialBlurSelfCheck } from "./radial-blur
 import { queuedRgbSplitSelfCheck, runRgbSplitSelfCheck } from "./rgb-split-self-check.js";
 import { queuedTextureOverlaySelfCheck, runTextureOverlaySelfCheck } from "./texture-overlay-self-check.js";
 import { queuedTrackMatteSelfCheck, runTrackMatteSelfCheck } from "./track-matte-self-check.js";
+import { runDatamoshSelfCheck } from "./datamosh-self-check.js";
+import { runEchoTrailSelfCheck } from "./echo-trail-self-check.js";
+import { runGlitchSliceSelfCheck } from "./glitch-slice-self-check.js";
+import { runPageTurnSelfCheck } from "./page-turn-self-check.js";
+import { runPixelDissolveSelfCheck } from "./pixel-dissolve-self-check.js";
+import { runPixelSortSelfCheck } from "./pixel-sort-self-check.js";
+import { runPortalSelfCheck } from "./portal-self-check.js";
+import { runVideoFreezeFrameSelfCheck } from "./video-freeze-frame-self-check.js";
+import { runWipeSelfCheck } from "./wipe-self-check.js";
+import { runZoomTunnelSelfCheck } from "./zoom-tunnel-self-check.js";
+import type { EffectSelfCheckArtifacts as EffectVideoSelfCheckArtifacts,
+  EffectSelfCheckRunRequest as EffectVideoSelfCheckRunRequest, EffectVideoSelfCheckView,
+  ListedSelfCheckToolName } from "./effect-video-self-check.js";
+import { runChalkStrokeSelfCheck } from "./chalk-stroke-self-check.js";
+import { runDashFlowSelfCheck } from "./dash-flow-self-check.js";
+import { runDepthOfFieldSelfCheck } from "./depth-of-field-self-check.js";
+import { runDollyZoomSelfCheck } from "./dolly-zoom-self-check.js";
+import { runMarkerStrokeSelfCheck } from "./marker-stroke-self-check.js";
+import { runRadialWipeSelfCheck } from "./radial-wipe-self-check.js";
+import { runShakeSelfCheck } from "./shake-self-check.js";
+import { runSimClothSelfCheck } from "./sim-cloth-self-check.js";
+import { runSimRigidBody2dSelfCheck } from "./sim-rigid-body-2d-self-check.js";
+import { runSimRopeSelfCheck } from "./sim-rope-self-check.js";
+import type { EffectSelfCheckRequest as TenToolSelfCheckRequest, TenToolSelfCheckView } from "./ten-tool-self-check-io.js";
 
 const DEFAULT_VIDEO_DURATION_SECONDS = 5;
 const DEFAULT_VIDEO_FPS = 30;
@@ -145,6 +170,41 @@ const MAX_EFFECT_DIMENSION = 4_096;
 const DEFAULT_GPU_SAMPLE_INTERVAL_MS = 1_000;
 const GPU_QUERY_TIMEOUT_MS = 2_000;
 const MAX_HISTORY_FRAME_CACHE_BYTES = 192 * 1024 * 1024;
+const EFFECT_VIDEO_SELF_CHECK_RUNNERS: Readonly<Record<ListedSelfCheckToolName,
+  (request: EffectVideoSelfCheckRunRequest<Readonly<Record<string, unknown>>>) => Promise<EffectVideoSelfCheckArtifacts>>> = Object.freeze({
+    datamosh: runDatamoshSelfCheck,
+    echo_trail: runEchoTrailSelfCheck,
+    glitch_slice: runGlitchSliceSelfCheck,
+    page_turn: runPageTurnSelfCheck,
+    pixel_dissolve: runPixelDissolveSelfCheck,
+    pixel_sort: runPixelSortSelfCheck,
+    portal: runPortalSelfCheck,
+    video_freeze_frame: runVideoFreezeFrameSelfCheck,
+    wipe: runWipeSelfCheck,
+    zoom_tunnel: runZoomTunnelSelfCheck
+  });
+const EFFECT_VIDEO_SELF_CHECK_TOOL_SET = new Set<string>(Object.keys(EFFECT_VIDEO_SELF_CHECK_RUNNERS));
+const TEN_TOOL_SELF_CHECK_NAMES = Object.freeze([
+  "chalk_stroke", "dash_flow", "depth_of_field", "dolly_zoom", "marker_stroke",
+  "radial_wipe", "shake", "sim_cloth", "sim_rigid_body_2d", "sim_rope"
+] as const);
+type TenToolSelfCheckName = typeof TEN_TOOL_SELF_CHECK_NAMES[number];
+type TenToolRunner = (request: TenToolSelfCheckRequest<TenToolSelfCheckName>) => Promise<Readonly<{
+  view: TenToolSelfCheckView<TenToolSelfCheckName>; evidenceFiles: ReadonlyMap<string, string>;
+}>>;
+const TEN_TOOL_SELF_CHECK_RUNNERS: Readonly<Record<TenToolSelfCheckName, TenToolRunner>> = Object.freeze({
+  chalk_stroke: runChalkStrokeSelfCheck as unknown as TenToolRunner,
+  dash_flow: runDashFlowSelfCheck as unknown as TenToolRunner,
+  depth_of_field: runDepthOfFieldSelfCheck as unknown as TenToolRunner,
+  dolly_zoom: runDollyZoomSelfCheck as unknown as TenToolRunner,
+  marker_stroke: runMarkerStrokeSelfCheck as unknown as TenToolRunner,
+  radial_wipe: runRadialWipeSelfCheck as unknown as TenToolRunner,
+  shake: runShakeSelfCheck as unknown as TenToolRunner,
+  sim_cloth: runSimClothSelfCheck as unknown as TenToolRunner,
+  sim_rigid_body_2d: runSimRigidBody2dSelfCheck as unknown as TenToolRunner,
+  sim_rope: runSimRopeSelfCheck as unknown as TenToolRunner
+});
+const TEN_TOOL_SELF_CHECK_TOOL_SET = new Set<string>(TEN_TOOL_SELF_CHECK_NAMES);
 const DEDICATED_SELF_CHECK_TOOLS = new Set<string>(DEDICATED_SELF_CHECK_TOOL_NAMES);
 const DEFAULT_DEDICATED_SELF_CHECK_RUNNERS: Readonly<Record<DedicatedSelfCheckToolName, DedicatedSelfCheckRunner>> = Object.freeze({
   background_remove_compose: runBackgroundRemoveComposeSelfCheck,
@@ -190,6 +250,20 @@ const REQUESTED_SELF_CHECK_TOOLS = new Set<string>(REQUESTED_SELF_CHECK_TOOL_NAM
 
 function requestedSelfCheckTool(toolName: string): toolName is RequestedSelfCheckToolName {
   return REQUESTED_SELF_CHECK_TOOLS.has(toolName);
+}
+
+function effectVideoSelfCheckTool(toolName: string): toolName is ListedSelfCheckToolName {
+  return EFFECT_VIDEO_SELF_CHECK_TOOL_SET.has(toolName);
+}
+
+function tenToolSelfCheckTool(toolName: string): toolName is TenToolSelfCheckName {
+  return TEN_TOOL_SELF_CHECK_TOOL_SET.has(toolName);
+}
+
+function queuedAdditionalSelfCheck(toolName: ListedSelfCheckToolName | TenToolSelfCheckName):
+EffectVideoSelfCheckView | TenToolSelfCheckView<TenToolSelfCheckName> {
+  return Object.freeze({ status: "queued", automatic: true, toolName, ruleVersion: "1.0.0",
+    evidenceContractVersion: "1.0.0", evidenceStatus: "pending", evidenceImages: Object.freeze([]) });
 }
 
 function queuedRequestedSelfCheck(toolName: RequestedSelfCheckToolName): EffectSelfCheckView<RequestedSelfCheckToolName> {
@@ -321,7 +395,7 @@ export interface EffectToolVideoExecutionView {
   readonly gpu: EffectToolGpuTelemetryView;
   readonly selfCheck?: EffectToolSelfCheckView | DedicatedEffectToolSelfCheckView | VisualEffectSelfCheckView
     | ObservedEffectSelfCheckView | ObservableSelfCheckView | FinalVideoSelfCheckView | ObservedMotionSelfCheckView
-    | EffectSelfCheckView<RequestedSelfCheckToolName>;
+    | EffectSelfCheckView<RequestedSelfCheckToolName> | EffectVideoSelfCheckView | TenToolSelfCheckView;
   readonly failure?: {
     readonly code: "VIDEO_RENDER_FAILED";
     readonly message: string;
@@ -366,11 +440,14 @@ export interface EffectToolVideoServiceOptions {
   readonly visualSelfCheckReviewer?: VisualSelfCheckReviewer;
   readonly visualSelfCheckRunner?: typeof runVisualEffectSelfCheck;
   readonly listedToolSelfCheckRunner?: typeof runListedToolSelfCheck;
+  readonly listedToolSelfCheckReviewer?: UnifiedSelfCheckReviewer;
   readonly observableSelfCheckReviewer?: ObservableSelfCheckReviewer;
   readonly observedMotionSelfCheckReviewer?: ObservedMotionSelfCheckReviewer;
   readonly dedicatedSelfCheckReviewer?: DedicatedSelfCheckReviewer;
   readonly dedicatedSelfCheckRunners?: Partial<Record<DedicatedSelfCheckToolName, DedicatedSelfCheckRunner>>;
   readonly finalVideoSelfCheckRunners?: Partial<Record<FinalVideoSelfCheckToolName, FinalVideoSelfCheckRunner>>;
+  readonly finalVideoSelfCheckReviewer?: UnifiedSelfCheckReviewer;
+  readonly additionalSelfCheckReviewer?: UnifiedSelfCheckReviewer;
   readonly requestedSelfCheckRunner?: RequestedSelfCheckRunner;
   readonly requestedSelfCheckApiKey?: string;
   readonly requestedSelfCheckFetchImpl?: typeof fetch;
@@ -702,7 +779,8 @@ export class EffectToolVideoService {
       sourceAssetIds: Object.freeze([sourceAssetId]),
       outputPath,
       controller: new AbortController(),
-      ...(requestedSelfCheckTool(definition.toolName) && selfCheckPrompt !== undefined
+      ...((requestedSelfCheckTool(definition.toolName) || effectVideoSelfCheckTool(definition.toolName)
+        || tenToolSelfCheckTool(definition.toolName)) && selfCheckPrompt !== undefined
         ? { selfCheckPrompt: selfCheckPrompt.slice(0, 4_000) } : {}),
       selfCheckEvidenceFiles: new Map(),
       view: {
@@ -722,6 +800,8 @@ export class EffectToolVideoService {
         gpu: { available: false, message: "等待视频任务开始后采样。" },
         ...(requestedSelfCheckTool(definition.toolName)
           ? { selfCheck: queuedRequestedSelfCheck(definition.toolName) }
+          : selfCheckPrompt !== undefined && (effectVideoSelfCheckTool(definition.toolName) || tenToolSelfCheckTool(definition.toolName))
+            ? { selfCheck: queuedAdditionalSelfCheck(definition.toolName) }
           : finalVideoSelfCheckTool(definition.toolName)
           ? { selfCheck: queuedFinalVideoSelfCheck(definition.toolName) }
           : observableSelfCheckHandler(definition.toolName) === undefined ? {}
@@ -792,6 +872,7 @@ export class EffectToolVideoService {
         || requestedSelfCheckTool(definition.toolName)
         || dedicatedSelfCheckTool(definition.toolName)
         || isVisualSelfCheckTool(definition.toolName)
+        || effectVideoSelfCheckTool(definition.toolName) || tenToolSelfCheckTool(definition.toolName)
         || isListedSelfCheckTool(definition.toolName) || observableSelfCheckHandler(definition.toolName) !== undefined)
         && selfCheckPrompt !== undefined
         ? { selfCheckPrompt: selfCheckPrompt.slice(0, 4_000) } : {}),
@@ -821,6 +902,8 @@ export class EffectToolVideoService {
             ? { selfCheck: queuedObservedMotionSelfCheck(definition.toolName) }
           : finalVideoSelfCheckTool(definition.toolName)
             ? { selfCheck: queuedFinalVideoSelfCheck(definition.toolName) }
+          : selfCheckPrompt !== undefined && (effectVideoSelfCheckTool(definition.toolName) || tenToolSelfCheckTool(definition.toolName))
+            ? { selfCheck: queuedAdditionalSelfCheck(definition.toolName) }
           : dedicatedSelfCheckTool(definition.toolName)
             ? { selfCheck: queuedDedicatedSelfCheck(definition.toolName) }
           : isVisualSelfCheckTool(definition.toolName)
@@ -1386,6 +1469,77 @@ export class EffectToolVideoService {
         });
         return;
       }
+      if (task.selfCheckPrompt !== undefined && effectVideoSelfCheckTool(definition.toolName)) {
+        update({ ...task.view, updatedAt: new Date().toISOString(), video: completedVideo,
+          selfCheck: Object.freeze({ ...queuedAdditionalSelfCheck(definition.toolName), status: "running" as const }) });
+        const artifacts = await EFFECT_VIDEO_SELF_CHECK_RUNNERS[definition.toolName]({
+          requestId: task.view.id,
+          tenantId: task.owner.tenantId,
+          userId: task.owner.userId,
+          userRequest: task.selfCheckPrompt ?? "",
+          params: effectiveEnvelope.data,
+          videoPath: task.outputPath,
+          fileName: completedVideo.downloadName,
+          outputDirectory: join(this.outputRoot, task.view.id),
+          width: metadata.width,
+          height: metadata.height,
+          fps: metadata.fps,
+          durationSeconds: metadata.durationSeconds,
+          frameCount: metadata.frameCount,
+          bytes,
+          ...(this.options.additionalSelfCheckReviewer === undefined
+            ? {} : { reviewer: this.options.additionalSelfCheckReviewer }),
+          ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
+          signal: task.controller.signal
+        });
+        for (const [evidenceId, evidencePath] of artifacts.evidenceFiles) {
+          task.selfCheckEvidenceFiles.set(evidenceId, evidencePath);
+        }
+        update({ ...task.view, status: "completed", updatedAt: new Date().toISOString(),
+          video: completedVideo, selfCheck: artifacts.view });
+        return;
+      }
+      if (task.selfCheckPrompt !== undefined && tenToolSelfCheckTool(definition.toolName)) {
+        update({ ...task.view, updatedAt: new Date().toISOString(), video: completedVideo,
+          selfCheck: Object.freeze({ ...queuedAdditionalSelfCheck(definition.toolName), status: "running" as const }) });
+        const expectedBytes = metadata.width * metadata.height * 4;
+        const references = selfCheckReferenceFrames(task.prepared?.inputs);
+        const baselinePixels = sourcePixels?.byteLength === expectedBytes ? sourcePixels
+          : Object.values(references).find((pixels) => pixels.byteLength === expectedBytes);
+        if (baselinePixels === undefined) throw new Error(`${definition.toolName} self-check requires authorized source pixels.`);
+        const baselineVideoPath = join(this.outputRoot, task.view.id, `${definition.toolName}-self-check-baseline.mp4`);
+        await this.exportFrames({ preset, duration: metadata.durationSeconds, outputPath: baselineVideoPath,
+          ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
+          signal: task.controller.signal, renderFrame: async () => baselinePixels });
+        const artifacts = await TEN_TOOL_SELF_CHECK_RUNNERS[definition.toolName]({
+          requestId: task.view.id,
+          tenantId: task.owner.tenantId,
+          userId: task.owner.userId,
+          ...(this.options.additionalSelfCheckReviewer === undefined
+            ? {} : { reviewer: this.options.additionalSelfCheckReviewer }),
+          toolName: definition.toolName,
+          userRequest: task.selfCheckPrompt ?? "",
+          effectiveParams: effectiveEnvelope.data,
+          videoPath: task.outputPath,
+          fileName: completedVideo.downloadName,
+          baselineVideoPath,
+          outputDirectory: join(this.outputRoot, task.view.id),
+          width: metadata.width,
+          height: metadata.height,
+          fps: metadata.fps,
+          durationSeconds: metadata.durationSeconds,
+          frameCount: metadata.frameCount,
+          bytes,
+          ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
+          signal: task.controller.signal
+        });
+        for (const [evidenceId, evidencePath] of artifacts.evidenceFiles) {
+          task.selfCheckEvidenceFiles.set(evidenceId, evidencePath);
+        }
+        update({ ...task.view, status: "completed", updatedAt: new Date().toISOString(),
+          video: completedVideo, selfCheck: artifacts.view });
+        return;
+      }
       if (task.prepared !== undefined && task.selfCheckPrompt !== undefined
         && hasObservedMotionSelfCheck(definition.toolName)) {
         update({
@@ -1453,6 +1607,9 @@ export class EffectToolVideoService {
           renderFrame: async () => baselinePixels
         });
         const artifacts = await this.finalVideoSelfCheckRunners[definition.toolName]({
+          requestId: task.view.id,
+          tenantId: task.owner.tenantId,
+          userId: task.owner.userId,
           userRequest: task.selfCheckPrompt ?? "",
           envelope: effectiveEnvelope,
           videoPath: task.outputPath,
@@ -1465,6 +1622,8 @@ export class EffectToolVideoService {
           durationSeconds: metadata.durationSeconds,
           frameCount: metadata.frameCount,
           bytes,
+          ...(this.options.finalVideoSelfCheckReviewer === undefined
+            ? {} : { reviewer: this.options.finalVideoSelfCheckReviewer }),
           ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
           signal: task.controller.signal
         });
@@ -1614,6 +1773,9 @@ export class EffectToolVideoService {
           selfCheck: Object.freeze({ ...queuedListedToolSelfCheck(definition.toolName), status: "running" as const })
         });
         const artifacts = await this.listedToolSelfCheckRunner(definition.toolName, {
+          requestId: task.view.id,
+          tenantId: task.owner.tenantId,
+          userId: task.owner.userId,
           userRequest: task.selfCheckPrompt ?? "",
           videoPath: task.outputPath,
           fileName: completedVideo.downloadName,
@@ -1625,6 +1787,8 @@ export class EffectToolVideoService {
           frameCount: metadata.frameCount,
           bytes,
           effectParams: effectiveEnvelope.data,
+          ...(this.options.listedToolSelfCheckReviewer === undefined
+            ? {} : { reviewer: this.options.listedToolSelfCheckReviewer }),
           ...(this.options.ffmpegPath === undefined ? {} : { ffmpegPath: this.options.ffmpegPath }),
           signal: task.controller.signal
         });

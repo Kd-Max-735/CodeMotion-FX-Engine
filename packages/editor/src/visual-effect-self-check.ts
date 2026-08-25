@@ -4,8 +4,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
-import { ARK_V1_MODEL, ProviderError } from "@codemotion/ai-planner";
+import { ProviderError } from "@codemotion/ai-planner";
 import { observedEffectInformation, selfCheckParameterInformation } from "./self-check-parameter-summary.js";
+import {
+  VolcengineArkUnifiedSelfCheckReviewer,
+  parseUnifiedSelfCheckResult
+} from "./unified-self-check-review.js";
 import { selfCheckDisplacementMap } from "./self-checks/displacement-map-self-check.js";
 import { selfCheckFractal } from "./self-checks/fractal-self-check.js";
 import { selfCheckGlass } from "./self-checks/glass-self-check.js";
@@ -41,11 +45,11 @@ export const VISUAL_SELF_CHECK_TOOLS = Object.freeze([
 export type VisualSelfCheckToolName = typeof VISUAL_SELF_CHECK_TOOLS[number];
 
 export interface VisualSelfCheckResult {
-  readonly status: "pass" | "fail";
+  readonly status: "pass" | "fail" | "inconclusive";
   readonly summary: string;
   readonly checks: readonly Readonly<{
     ruleId: string;
-    status: "pass" | "fail";
+    status: "pass" | "fail" | "inconclusive";
     evidenceRefs: readonly string[];
     reason: string;
   }>[];
@@ -58,7 +62,7 @@ export interface VisualSelfCheckResult {
 }
 
 export interface VisualEffectSelfCheckView {
-  readonly status: "queued" | "running" | "pass" | "fail";
+  readonly status: "queued" | "running" | "pass" | "fail" | "inconclusive";
   readonly automatic: true;
   readonly toolName: VisualSelfCheckToolName;
   readonly ruleVersion: string;
@@ -81,6 +85,8 @@ export interface VisualSelfCheckReviewer {
     requestId: string;
     tenantId: string;
     userId: string;
+    toolName: VisualSelfCheckToolName;
+    displayName: string;
     rule: string;
     acceptanceView: Readonly<Record<string, unknown>>;
     evidencePng: Buffer;
@@ -508,6 +514,8 @@ export async function runVisualEffectSelfCheck(request: Readonly<{
       requestId: request.requestId,
       tenantId: request.tenantId,
       userId: request.userId,
+      toolName: request.toolName,
+      displayName: request.toolName,
       rule: await loadVisualEffectSelfCheckRule(request.toolName),
       acceptanceView: macroView,
       evidencePng: await readFile(boardPath),
@@ -569,34 +577,11 @@ function responseContent(body: unknown): unknown {
 }
 
 function parseReview(value: unknown): VisualSelfCheckResult {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("Review response must be an object.");
-  const raw = value as Record<string, unknown>;
-  if ((raw.status !== "pass" && raw.status !== "fail") || !Array.isArray(raw.repair_suggestions)) {
-    throw new TypeError("Review response contract is invalid.");
-  }
-  const summary = reviewText(raw.summary, "summary");
-  const suggestions = raw.repair_suggestions.map((item, index) => reviewText(item, `repair_suggestions[${index}]`));
-  if (raw.status === "pass" && suggestions.length > 0 || raw.status === "fail" && suggestions.length === 0) {
-    throw new TypeError("Review status and repair suggestions disagree.");
-  }
-  const check = Object.freeze({
-    ruleId: "DELIVERY_REVIEW",
-    status: raw.status,
-    evidenceRefs: Object.freeze(["macroView", "keyframe_contact_sheet"]),
-    reason: summary
-  });
-  const issues = raw.status === "pass" ? Object.freeze([]) : Object.freeze(suggestions.map((message) => Object.freeze({
-    ruleId: "DELIVERY_REVIEW",
-    code: "REPAIR_REQUIRED",
-    message,
-    evidenceRefs: Object.freeze(["macroView", "keyframe_contact_sheet"])
-  })));
-  return Object.freeze({ status: raw.status, summary, checks: Object.freeze([check]), issues });
+  return parseUnifiedSelfCheckResult(value, ["DELIVERY_REVIEW"]);
 }
 
 export class VolcengineArkVisualSelfCheckReviewer implements VisualSelfCheckReviewer {
-  readonly #baseUrl: string;
-  readonly #transport: typeof fetch;
+  readonly #delegate: VolcengineArkUnifiedSelfCheckReviewer;
 
   constructor(private readonly options: Readonly<{
     apiKey: string;
@@ -604,35 +589,11 @@ export class VolcengineArkVisualSelfCheckReviewer implements VisualSelfCheckRevi
     fetchImpl?: typeof fetch;
     audit?: (record: Readonly<Record<string, unknown>>) => void;
   }>) {
-    this.#baseUrl = (options.baseUrl ?? DEFAULT_ARK_BASE_URL).replace(/\/+$/u, "");
-    this.#transport = options.fetchImpl ?? fetch;
+    this.#delegate = new VolcengineArkUnifiedSelfCheckReviewer(options);
   }
 
   async review(request: Parameters<VisualSelfCheckReviewer["review"]>[0]): Promise<VisualSelfCheckResult> {
-    const started = Date.now();
-    let response: Response;
-    try {
-      response = await this.#transport(`${this.#baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${this.options.apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          model: ARK_V1_MODEL,
-          temperature: 0,
-          response_format: { type: "json_object" },
-          messages: [{ role: "system", content: `${request.rule}\n\n只输出 JSON：通过时 {\"status\":\"pass\",\"summary\":\"交付结论\",\"repair_suggestions\":[]}；返修时 status 为 fail，repair_suggestions 使用用户可理解的效果语言。` },
-            { role: "user", content: [{ type: "text", text: JSON.stringify(request.acceptanceView) },
-              { type: "image_url", image_url: { url: `data:image/png;base64,${request.evidencePng.toString("base64")}` } }] }]
-        }),
-        ...(request.signal === undefined ? {} : { signal: request.signal })
-      });
-    } catch (error) {
-      throw new ProviderError("provider_unavailable", "Visual self-check request failed.", { cause: error, retryable: true });
-    }
-    const body = await response.json().catch(() => undefined);
-    this.options.audit?.(Object.freeze({ event: "visual_self_check_review", requestId: request.requestId,
-      tenantId: request.tenantId, userId: request.userId, status: response.status, latencyMs: Date.now() - started }));
-    if (!response.ok) throw new ProviderError(response.status === 401 || response.status === 403
-      ? "authentication" : "provider_response", "Visual self-check request was rejected.", { status: response.status });
-    return parseReview(responseContent(body));
+    const result = await this.#delegate.review({ ...request, ruleIds: ["DELIVERY_REVIEW"] });
+    return parseReview(result);
   }
 }

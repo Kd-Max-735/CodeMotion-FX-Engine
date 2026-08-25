@@ -3,7 +3,7 @@ import { copyFile, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { ProviderError } from "@codemotion/ai-planner";
+import { SelfCheckReviewValidationError } from "../src/unified-self-check-review.js";
 import {
   parseWavePathSelfCheckResult,
   runWavePathSelfCheck,
@@ -48,16 +48,16 @@ describe("wave_path automatic self-check contract", () => {
     const parsed = parseWavePathSelfCheckResult(value);
     expect(parsed.status).toBe("pass");
     expect(parsed.checks.map((check) => check.ruleId)).toEqual(RULE_IDS);
-    expect(() => parseWavePathSelfCheckResult({ ...value, extra: true })).toThrow(ProviderError);
+    expect(() => parseWavePathSelfCheckResult({ ...value, extra: true })).toThrow(SelfCheckReviewValidationError);
     expect(() => parseWavePathSelfCheckResult({
       ...value,
       checks: value.checks.map((check, index) => index === 2 ? { ...check, status: "fail" } : check)
-    })).toThrow(/inconsistent/u);
+    })).toThrow(/issue/u);
     expect(() => parseWavePathSelfCheckResult({
       ...value,
       status: "fail",
       checks: value.checks.map((check, index) => index === 2 ? { ...check, status: "fail" } : check)
-    })).toThrow(/inconsistent/u);
+    })).toThrow(/issue/u);
   });
 
   it("recovers a contract-valid JSON object from an Ark fenced response", async () => {
@@ -67,7 +67,7 @@ describe("wave_path automatic self-check contract", () => {
       checks: RULE_IDS.map((ruleId, index) => ({
         ruleId,
         status: "pass",
-        evidenceRefs: [index === 0 ? "metadata.media.encoding_completed" : "keyframe_contact_sheet"],
+        evidenceRefs: [index === 0 ? "self_check_view" : "keyframe_contact_sheet"],
         reason: "证据板与宏观指标一致。"
       })),
       issues: []

@@ -102,7 +102,7 @@ export interface SelectedExecutionView {
 }
 
 export interface EffectToolSelfCheckView {
-  readonly status: "queued" | "running" | "pass" | "fail";
+  readonly status: "queued" | "running" | "pass" | "fail" | "inconclusive";
   readonly automatic: true;
   readonly toolName: string;
   readonly ruleVersion: string;
@@ -117,12 +117,12 @@ export interface EffectToolSelfCheckView {
     height: number;
   }>[];
   readonly result?: Readonly<{
-    status: "pass" | "fail";
+    status: "pass" | "fail" | "inconclusive";
     summary: string;
     checks: readonly Readonly<{
       ruleId?: string;
       name?: string;
-      status: "pass" | "fail";
+      status: "pass" | "fail" | "inconclusive";
       evidenceRefs?: readonly string[];
       reason: string;
     }>[];
@@ -382,7 +382,7 @@ function stringArray(value: unknown): readonly string[] {
 
 function effectToolSelfCheck(value: unknown, expectedToolName: string): EffectToolSelfCheckView {
   const raw = object(value);
-  if (!["queued", "running", "pass", "fail"].includes(String(raw.status))
+  if (!["queued", "running", "pass", "fail", "inconclusive"].includes(String(raw.status))
     || raw.automatic !== true || raw.toolName !== expectedToolName
     || typeof raw.ruleVersion !== "string" || typeof raw.evidenceContractVersion !== "string"
     || !["pending", "sufficient"].includes(String(raw.evidenceStatus))
@@ -406,7 +406,7 @@ function effectToolSelfCheck(value: unknown, expectedToolName: string): EffectTo
   });
   const resultRaw = raw.result === undefined ? undefined : object(raw.result);
   const result = resultRaw === undefined ? undefined : (() => {
-    if ((resultRaw.status !== "pass" && resultRaw.status !== "fail")
+    if ((resultRaw.status !== "pass" && resultRaw.status !== "fail" && resultRaw.status !== "inconclusive")
       || typeof resultRaw.summary !== "string" || !Array.isArray(resultRaw.checks)
       || !Array.isArray(resultRaw.issues)) {
       throw new BrowserApiError(500, "INVALID_RESPONSE", false);
@@ -416,7 +416,7 @@ function effectToolSelfCheck(value: unknown, expectedToolName: string): EffectTo
       const ruleId = typeof check.ruleId === "string" ? check.ruleId : undefined;
       const name = typeof check.name === "string" ? check.name : undefined;
       if ((ruleId === undefined && name === undefined)
-        || (check.status !== "pass" && check.status !== "fail") || typeof check.reason !== "string"
+        || (check.status !== "pass" && check.status !== "fail" && check.status !== "inconclusive") || typeof check.reason !== "string"
         || (check.evidenceRefs !== undefined && (!Array.isArray(check.evidenceRefs)
           || check.evidenceRefs.some((item) => typeof item !== "string")))) {
         throw new BrowserApiError(500, "INVALID_RESPONSE", false);
@@ -447,7 +447,7 @@ function effectToolSelfCheck(value: unknown, expectedToolName: string): EffectTo
       });
     });
     return Object.freeze({
-      status: resultRaw.status as "pass" | "fail",
+      status: resultRaw.status as "pass" | "fail" | "inconclusive",
       summary: resultRaw.summary,
       checks: Object.freeze(checks),
       issues: Object.freeze(issues)

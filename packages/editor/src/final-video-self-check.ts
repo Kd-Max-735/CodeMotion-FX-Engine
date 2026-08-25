@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import type { EffectParameterEnvelope } from "@codemotion/effect-functions";
 import { observedEffectInformation, selfCheckParameterInformation } from "./self-check-parameter-summary.js";
+import type { UnifiedSelfCheckReviewer } from "./unified-self-check-review.js";
 
 const execFileAsync = promisify(execFile);
 const RULE_VERSION = "1.0.0";
@@ -58,11 +59,11 @@ export interface FinalFrameObservation {
 }
 
 export interface FinalVideoSelfCheckResult {
-  readonly status: "pass" | "fail";
+  readonly status: "pass" | "fail" | "inconclusive";
   readonly summary: string;
   readonly checks: readonly Readonly<{
     ruleId: string;
-    status: "pass" | "fail";
+    status: "pass" | "fail" | "inconclusive";
     evidenceRefs: readonly string[];
     reason: string;
   }>[];
@@ -75,7 +76,7 @@ export interface FinalVideoSelfCheckResult {
 }
 
 export interface FinalVideoSelfCheckView {
-  readonly status: "queued" | "running" | "pass" | "fail";
+  readonly status: "queued" | "running" | "pass" | "fail" | "inconclusive";
   readonly automatic: true;
   readonly toolName: FinalVideoSelfCheckToolName;
   readonly ruleVersion: string;
@@ -100,6 +101,9 @@ export interface FinalVideoSelfCheckArtifacts {
 }
 
 export interface FinalVideoSelfCheckRequest {
+  readonly requestId: string;
+  readonly tenantId: string;
+  readonly userId: string;
   readonly userRequest: string;
   readonly envelope: EffectParameterEnvelope;
   readonly videoPath: string;
@@ -122,6 +126,7 @@ export interface FinalVideoSelfCheckRequest {
     signal?: AbortSignal
   ) => Promise<void>;
   readonly signal?: AbortSignal;
+  readonly reviewer?: UnifiedSelfCheckReviewer;
 }
 
 export interface SelfCheckSummary {
@@ -589,28 +594,6 @@ function safeFailure(error: unknown): string {
   return message.replace(/https?:\/\/\S+|[A-Za-z]:\\\S+|\/(?:home|tmp|var)\/\S+/gu, "[已隐藏]").slice(0, 400);
 }
 
-function resultFromSummary(summary: SelfCheckSummary): FinalVideoSelfCheckResult {
-  const checks = summary.checks.map((check) => Object.freeze({
-    ruleId: check.ruleId,
-    status: check.status,
-    evidenceRefs: Object.freeze(["keyframe_contact_sheet"]),
-    reason: check.reason
-  }));
-  const issues = summary.checks.filter((check) => check.status === "fail").map((check) => Object.freeze({
-    ruleId: check.ruleId,
-    code: check.issueCode ?? "VISUAL_QUALITY_MISMATCH",
-    message: check.reason,
-    evidenceRefs: Object.freeze(["keyframe_contact_sheet"])
-  }));
-  return Object.freeze({
-    status: issues.length === 0 ? "pass" : "fail",
-    summary: issues.length === 0 ? "最终成片的专属自检证据已生成，未发现影响交付的明确异常。"
-      : `最终成片发现 ${issues.length} 项需要返修的明确异常。`,
-    checks: Object.freeze(checks),
-    issues: Object.freeze(issues)
-  });
-}
-
 export async function runFinalVideoSelfCheck(
   spec: FinalVideoSelfCheckSpec,
   request: FinalVideoSelfCheckRequest
@@ -724,7 +707,24 @@ export async function runFinalVideoSelfCheck(
     }
     const jsonFile = join(directory, `${spec.toolName}.self-check-view.json`);
     await writeFile(jsonFile, `${JSON.stringify(macroView, null, 2)}\n`, "utf8");
-    const result = resultFromSummary(summary);
+    if (request.reviewer === undefined) throw new Error("自动自检审查器未配置。");
+    const ruleIds = Object.freeze(summary.checks.map((check) => check.ruleId));
+    const rule = await readFile(
+      new URL(`../../effect-functions/self-check-rules/tools/${spec.toolName}.md`, import.meta.url),
+      "utf8"
+    );
+    const result = await request.reviewer.review({
+      requestId: request.requestId,
+      tenantId: request.tenantId,
+      userId: request.userId,
+      toolName: spec.toolName,
+      displayName: spec.displayName,
+      ruleIds,
+      rule,
+      acceptanceView: macroView,
+      evidencePng: await readFile(boardPath),
+      ...(request.signal === undefined ? {} : { signal: request.signal })
+    });
     return Object.freeze({
       view: Object.freeze({
         status: result.status,

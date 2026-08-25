@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import { observedEffectInformation, selfCheckParameterInformation } from "../self-check-parameter-summary.js";
+import { safeSelfCheckFailureMessage, type UnifiedSelfCheckReviewer } from "../unified-self-check-review.js";
 
 const execFileAsync = promisify(execFile);
 const CONTACT_SHEET_ID = "keyframe_contact_sheet";
@@ -78,6 +79,9 @@ export interface ObservedSelfCheckProfile {
 }
 
 export interface ObservedVideoSelfCheckRequest {
+  readonly requestId: string;
+  readonly tenantId: string;
+  readonly userId: string;
   readonly userRequest: string;
   readonly videoPath: string;
   readonly fileName?: string;
@@ -97,21 +101,28 @@ export interface ObservedVideoSelfCheckRequest {
     signal?: AbortSignal
   ) => Promise<void>;
   readonly signal?: AbortSignal;
+  readonly reviewer?: UnifiedSelfCheckReviewer;
 }
 
 export interface ObservedEffectSelfCheckResult {
-  readonly status: "pass" | "fail";
+  readonly status: "pass" | "fail" | "inconclusive";
   readonly summary: string;
   readonly checks: readonly Readonly<{
-    readonly name: "final_video" | "visible_effect" | "temporal_behavior" | "technical_quality";
-    readonly status: "pass" | "fail";
+    readonly ruleId: string;
+    readonly status: "pass" | "fail" | "inconclusive";
+    readonly evidenceRefs: readonly string[];
     readonly reason: string;
   }>[];
-  readonly issues: readonly string[];
+  readonly issues: readonly Readonly<{
+    readonly ruleId: string;
+    readonly code: string;
+    readonly message: string;
+    readonly evidenceRefs: readonly string[];
+  }>[];
 }
 
 export interface ObservedEffectSelfCheckView {
-  readonly status: "queued" | "running" | "pass" | "fail";
+  readonly status: "queued" | "running" | "pass" | "fail" | "inconclusive";
   readonly automatic: true;
   readonly toolName: ObservedSelfCheckToolName;
   readonly ruleVersion: typeof RULE_VERSION;
@@ -501,45 +512,8 @@ function keyframeFacts(frames: readonly ObservedFrameMetrics[]): Readonly<Record
   });
 }
 
-function resultFor(
-  evaluation: ObservedEffectEvaluation,
-  frames: readonly ObservedFrameMetrics[],
-  request: ObservedVideoSelfCheckRequest,
-  expectedMotion: boolean
-): ObservedEffectSelfCheckResult {
-  const dimensionsOkay = frames.every((frame) => frame.sourceWidth === request.width && frame.sourceHeight === request.height);
-  const blackFrames = frames.filter((frame) => frame.meanLuminance < 3 && frame.nonDarkRatio < 0.002).length;
-  const variation = Math.max(0, ...frames.map((frame) => frame.differenceFromFirst));
-  const temporalPassed = !expectedMotion || variation >= 0.00005;
-  const technicalPassed = blackFrames < frames.length;
-  const checks = Object.freeze([
-    Object.freeze({ name: "final_video" as const, status: dimensionsOkay ? "pass" as const : "fail" as const,
-      reason: dimensionsOkay ? "最终 MP4 关键帧均可按目标尺寸解码。" : "最终 MP4 的抽样帧尺寸不一致。" }),
-    Object.freeze({ name: "visible_effect" as const, status: evaluation.passed ? "pass" as const : "fail" as const,
-      reason: evaluation.verdict }),
-    Object.freeze({ name: "temporal_behavior" as const, status: temporalPassed ? "pass" as const : "fail" as const,
-      reason: temporalPassed ? "成片关键阶段存在可观察的时序变化。" : "需要运动的效果在成片中未观察到足够变化。" }),
-    Object.freeze({ name: "technical_quality" as const, status: technicalPassed ? "pass" as const : "fail" as const,
-      reason: blackFrames === 0 ? "未发现无法解释的黑帧或解码异常。"
-        : technicalPassed ? `发现 ${blackFrames} 个近黑端点或阶段帧，其余关键阶段可见。` : "所有抽样帧均近黑。" })
-  ]);
-  const passed = checks.every((check) => check.status === "pass");
-  const issues = Object.freeze([
-    ...(evaluation.issues ?? []),
-    ...(dimensionsOkay ? [] : ["最终视频抽样帧尺寸不一致。"]),
-    ...(temporalPassed ? [] : ["成片未呈现所需的可见时序变化。"]),
-    ...(technicalPassed ? [] : ["成片所有抽样帧均为近黑画面。"])
-  ]);
-  return Object.freeze({
-    status: passed ? "pass" : "fail",
-    summary: passed ? `${evaluation.description} 自检通过。` : `${evaluation.description} 需要返修。`,
-    checks,
-    issues
-  });
-}
-
 function failedArtifacts(profile: ObservedSelfCheckProfile, error: unknown): ObservedSelfCheckArtifacts {
-  const message = error instanceof Error ? error.message : "专属自检执行失败。";
+  const message = safeSelfCheckFailureMessage(error);
   return Object.freeze({
     view: Object.freeze({
       status: "fail",
@@ -581,7 +555,6 @@ export async function runObservedVideoEvidencePipeline(
       const selected = distinctFrames(profile.selectFrames(frames));
       if (selected.length < 2) throw new Error(`${profile.toolName} 没有选出足够的最终成片关键帧。`);
       const evaluation = profile.evaluate(frames, selected, request.effectParams);
-      const result = resultFor(evaluation, frames, request, profile.expectedMotion);
       const boardPath = join(directory, "keyframe_contact_sheet.png");
       const board = await contactSheet(selected, boardPath, request.width, request.height);
       const macroView = Object.freeze({
@@ -604,6 +577,24 @@ export async function runObservedVideoEvidencePipeline(
       });
       const jsonPath = join(directory, "self-check.json");
       await writeFile(jsonPath, `${JSON.stringify(macroView, null, 2)}\n`, "utf8");
+      if (request.reviewer === undefined) throw new Error("自动自检审查器未配置。");
+      const ruleIds = Object.freeze(["FINAL_VIDEO", "VISIBLE_EFFECT", "TEMPORAL_BEHAVIOR", "TECHNICAL_QUALITY"]);
+      const rule = await readFile(
+        new URL(`../../../effect-functions/self-check-rules/tools/${profile.toolName}.md`, import.meta.url),
+        "utf8"
+      );
+      const result = await request.reviewer.review({
+        requestId: request.requestId,
+        tenantId: request.tenantId,
+        userId: request.userId,
+        toolName: profile.toolName,
+        displayName: profile.displayName,
+        ruleIds,
+        rule,
+        acceptanceView: macroView,
+        evidencePng: await readFile(boardPath),
+        ...(request.signal === undefined ? {} : { signal: request.signal })
+      });
       const evidenceFiles = new Map<string, string>([[CONTACT_SHEET_ID, boardPath]]);
       return Object.freeze({
         view: Object.freeze({

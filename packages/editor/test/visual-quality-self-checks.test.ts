@@ -97,7 +97,7 @@ describe("ten independent visual-quality self-checks", () => {
           reviewView = view;
           return {
             status: "pass",
-            summary: "这段文字来自审查响应，不应进入最终结果。",
+            summary: "关键帧显示效果符合用户描述。",
             checks: ruleIds.map((ruleId) => ({ ruleId, status: "pass" as const,
               evidenceRefs: ["keyframe_contact_sheet"], reason: "最终关键帧与实际观察相符。" })),
             issues: []
@@ -106,7 +106,7 @@ describe("ten independent visual-quality self-checks", () => {
       } as never);
 
       expect(artifacts.view.status).toBe("pass");
-      expect(artifacts.view.result?.summary).not.toContain("审查响应");
+      expect(artifacts.view.result?.summary).toBe("关键帧显示效果符合用户描述。");
       expect(reviewView).toBeDefined();
       expect(Object.keys(reviewView!).sort()).toEqual(["file_name", "metadata", "original_request", "summary"]);
       expect(reviewView!.original_request).toContain("[已隐藏]");

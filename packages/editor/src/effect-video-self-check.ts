@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { createCanvas, GlobalFonts, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import { observedEffectInformation, selfCheckParameterInformation, type SelfCheckParameterInformation } from "./self-check-parameter-summary.js";
+import { safeSelfCheckFailureMessage, type UnifiedSelfCheckResult, type UnifiedSelfCheckReviewer } from "./unified-self-check-review.js";
 
 const execFileAsync = promisify(execFile);
 const CONTACT_SHEET_ID = "keyframe_contact_sheet";
@@ -43,7 +44,7 @@ export interface EffectSelfCheckDescription {
   readonly missingInformation?: readonly string[];
 }
 
-export interface EffectSelfCheckJson {
+export interface EffectSelfCheckJson extends Readonly<Record<string, unknown>> {
   readonly file_name: string;
   readonly original_request: string;
   readonly summary: Readonly<{
@@ -74,6 +75,20 @@ export interface EffectSelfCheckArtifacts {
     width: number;
     height: number;
   }>;
+  readonly view: EffectVideoSelfCheckView;
+}
+
+export interface EffectVideoSelfCheckView {
+  readonly status: "queued" | "running" | "pass" | "fail" | "inconclusive";
+  readonly automatic: true;
+  readonly toolName: ListedSelfCheckToolName;
+  readonly ruleVersion: "1.0.0";
+  readonly evidenceContractVersion: "1.0.0";
+  readonly evidenceStatus: "pending" | "sufficient";
+  readonly macroView?: EffectSelfCheckJson;
+  readonly evidenceImages: readonly NonNullable<EffectSelfCheckArtifacts["evidenceImage"]>[];
+  readonly result?: UnifiedSelfCheckResult;
+  readonly failure?: Readonly<{ code: "SELF_CHECK_PIPELINE_FAILED"; message: string }>;
 }
 
 export interface EffectSelfCheckPlanRequest<Params extends Readonly<Record<string, unknown>>> {
@@ -85,6 +100,10 @@ export interface EffectSelfCheckPlanRequest<Params extends Readonly<Record<strin
 export interface EffectSelfCheckRunRequest<Params extends Readonly<Record<string, unknown>>>
   extends EffectSelfCheckPlanRequest<Params> {
   readonly userRequest: string;
+  readonly requestId?: string;
+  readonly tenantId?: string;
+  readonly userId?: string;
+  readonly reviewer?: UnifiedSelfCheckReviewer;
   readonly videoPath: string;
   readonly fileName?: string;
   readonly outputDirectory: string;
@@ -414,7 +433,6 @@ export async function runEffectVideoSelfCheck<Params extends Readonly<Record<str
   const technicalIntegrity = fullDecodePassed && observations.length === samples.length;
   const coverage = observations.length === samples.length ? "sufficient" as const : "insufficient" as const;
   const description = config.describe(request, Object.freeze(observations), technicalIntegrity);
-  const deliveryPassed = technicalIntegrity && coverage === "sufficient" && description.effectPassed;
   const evidenceFiles = new Map<"keyframe_contact_sheet", string>();
   let evidenceImage: EffectSelfCheckArtifacts["evidenceImage"];
   if (observations.length > 0) {
@@ -457,8 +475,6 @@ export async function runEffectVideoSelfCheck<Params extends Readonly<Record<str
         full_video_decodable: fullDecodePassed
       }),
       quality: Object.freeze({
-        delivery_status: deliveryPassed ? "pass" : "repair",
-        effect_requirements_passed: description.effectPassed,
         full_decode_passed: fullDecodePassed,
         sampled_frames_decoded: observations.length,
         sampled_frames_expected: samples.length,
@@ -475,9 +491,44 @@ export async function runEffectVideoSelfCheck<Params extends Readonly<Record<str
       })
     })
   });
+  const evidenceImages = Object.freeze(evidenceImage === undefined ? [] : [evidenceImage]);
+  let view: EffectVideoSelfCheckView;
+  try {
+    if (request.reviewer === undefined || request.requestId === undefined
+      || request.tenantId === undefined || request.userId === undefined || evidenceImage === undefined) {
+      throw new Error("自动自检审查器或关键帧证据未配置。");
+    }
+    const ruleIds = Object.freeze(["FINAL_VIDEO", "VISIBLE_EFFECT", "TEMPORAL_BEHAVIOR", "TECHNICAL_QUALITY"]);
+    const rule = await readFile(
+      new URL(`../../effect-functions/self-check-rules/tools/${config.toolName}.md`, import.meta.url),
+      "utf8"
+    );
+    const result = await request.reviewer.review({
+      requestId: request.requestId,
+      tenantId: request.tenantId,
+      userId: request.userId,
+      toolName: config.toolName,
+      displayName: config.displayName,
+      ruleIds,
+      rule,
+      acceptanceView: json,
+      evidencePng: await readFile(evidenceFiles.get(CONTACT_SHEET_ID)!),
+      ...(request.signal === undefined ? {} : { signal: request.signal })
+    });
+    view = Object.freeze({ status: result.status, automatic: true, toolName: config.toolName,
+      ruleVersion: "1.0.0", evidenceContractVersion: "1.0.0", evidenceStatus: "sufficient",
+      macroView: json, evidenceImages, result });
+  } catch (error) {
+    view = Object.freeze({ status: "fail", automatic: true, toolName: config.toolName,
+      ruleVersion: "1.0.0", evidenceContractVersion: "1.0.0",
+      evidenceStatus: evidenceImage === undefined ? "pending" : "sufficient", macroView: json, evidenceImages,
+      failure: Object.freeze({ code: "SELF_CHECK_PIPELINE_FAILED",
+        message: safeSelfCheckFailureMessage(error) }) });
+  }
   return Object.freeze({
     json,
     evidenceFiles,
-    ...(evidenceImage === undefined ? {} : { evidenceImage })
+    ...(evidenceImage === undefined ? {} : { evidenceImage }),
+    view
   });
 }
